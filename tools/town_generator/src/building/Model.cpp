@@ -1,6 +1,7 @@
 #include "town_generator/building/Model.h"
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/building/Topology.h"
+#include "town_generator/utils/Noise.h"
 #include <iostream>
 #include <SDL3/SDL_log.h>
 #include "town_generator/wards/Ward.h"
@@ -131,18 +132,19 @@ void Model::buildPatches() {
         p.y += offsetY;
     }
 
-    // Apply Lloyd relaxation to inner patches (3 iterations, faithful to original)
-    // Only relax the first ~60% of patches (inner city)
-    int innerCount = static_cast<int>(nPatches_ * 0.6);
-    std::vector<geom::Point> innerSeeds(seeds.begin(), seeds.begin() + std::min(innerCount, static_cast<int>(seeds.size())));
+    // Apply Lloyd relaxation to all city patches (3 iterations)
+    // Faithful to mfcg.js line 10346: relaxing all nPatches*8 seeds
+    // But exclude the 6 boundary points we added at the end
+    int relaxCount = totalPoints;  // All spiral-generated points
+    std::vector<geom::Point> citySeeds(seeds.begin(), seeds.begin() + std::min(relaxCount, static_cast<int>(seeds.size())));
 
     for (int iteration = 0; iteration < 3; ++iteration) {
-        innerSeeds = geom::Voronoi::relax(innerSeeds, width, height);
+        citySeeds = geom::Voronoi::relax(citySeeds, width, height);
     }
 
-    // Replace inner seeds with relaxed versions
-    for (int i = 0; i < static_cast<int>(innerSeeds.size()) && i < static_cast<int>(seeds.size()); ++i) {
-        seeds[i] = innerSeeds[i];
+    // Replace city seeds with relaxed versions
+    for (int i = 0; i < static_cast<int>(citySeeds.size()) && i < static_cast<int>(seeds.size()); ++i) {
+        seeds[i] = citySeeds[i];
     }
 
     // Build Voronoi diagram
@@ -290,15 +292,14 @@ void Model::buildPatches() {
                 u = std::max(u, 1.0);  // Force positive (land)
             }
 
-            // Fractal noise for coastline variation
+            // Fractal noise for coastline variation (faithful to mfcg.js)
+            // mfcg.js line 10378: d = pg.fractal(6)
             // mfcg.js line 10390: r = d.get((r.x + b) / (2 * b), (r.y + b) / (2 * b)) * n * sqrt(r.length / b)
-            // The fractal function in mfcg.js returns smaller values than simple sin/cos
-            // We use a reduced amplitude to avoid rejecting patches that should be water
             double nx = (rotated.x + b) / (2.0 * b);
             double ny = (rotated.y + b) / (2.0 * b);
-            // Simple coherent noise approximation with reduced amplitude
-            double noise = std::sin(nx * 12.0) * std::cos(ny * 12.0) * 0.2 +
-                          std::sin(nx * 24.0 + 1.0) * std::cos(ny * 24.0 + 1.0) * 0.1;
+            // Use proper fractal noise (6 octaves, faithful to mfcg.js)
+            static utils::FractalNoise coastNoise = utils::FractalNoise::create(6, 1.0, 0.5);
+            double noise = coastNoise.get(nx, ny);
             double r = noise * n * std::sqrt(rotated.length() / b);
 
             // Mark as water if inside the coastline (u + r < 0)

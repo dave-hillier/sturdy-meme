@@ -46,6 +46,14 @@ public:
     }
 
     /**
+     * Linear interpolation (lerp) - alias for interpolate
+     * Faithful to mfcg.js qa.lerp
+     */
+    static Point lerp(const Point& p1, const Point& p2, double t = 0.5) {
+        return Point(p1.x + (p2.x - p1.x) * t, p1.y + (p2.y - p1.y) * t);
+    }
+
+    /**
      * Scalar (dot) product of two 2D vectors
      */
     static double scalar(double x1, double y1, double x2, double y2) {
