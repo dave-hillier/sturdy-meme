@@ -1,4 +1,4 @@
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/svg/SVGWriter.h"
 #include "town_generator/utils/Random.h"
 
@@ -14,7 +14,7 @@ void printUsage(const char* programName) {
     SDL_Log("Options:");
     SDL_Log("  --seed <int>     Random seed (default: random)");
     SDL_Log("  --size <name>    City size: small, medium, large (default: medium)");
-    SDL_Log("  --patches <int>  Number of patches (overrides --size)");
+    SDL_Log("  --cells <int>  Number of cells (overrides --size)");
     SDL_Log("  --coast          Generate a coastal city with harbour");
     SDL_Log("  --no-coast       Generate an inland city (no water)");
     SDL_Log("  --help           Show this help message");
@@ -22,13 +22,13 @@ void printUsage(const char* programName) {
     SDL_Log("Examples:");
     SDL_Log("  %s city.svg", programName);
     SDL_Log("  %s --seed 12345 --size large city.svg", programName);
-    SDL_Log("  %s --patches 50 --seed 42 --coast city.svg", programName);
+    SDL_Log("  %s --cells 50 --seed 42 --coast city.svg", programName);
 }
 
 int main(int argc, char* argv[]) {
     // Default values
     int seed = -1;
-    int patches = 30;  // Medium city
+    int cells = 30;  // Medium city
     std::string outputFile;
     int coastOverride = -1;  // -1 = use random, 0 = no coast, 1 = force coast
 
@@ -52,23 +52,23 @@ int main(int argc, char* argv[]) {
             }
             std::string size = argv[++i];
             if (size == "small") {
-                patches = 15;
+                cells = 15;
             } else if (size == "medium") {
-                patches = 30;
+                cells = 30;
             } else if (size == "large") {
-                patches = 60;
+                cells = 60;
             } else {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: Unknown size '%s'. Use small, medium, or large.", size.c_str());
                 return 1;
             }
-        } else if (arg == "--patches") {
+        } else if (arg == "--cells") {
             if (i + 1 >= argc) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: --patches requires a value");
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: --cells requires a value");
                 return 1;
             }
-            patches = std::atoi(argv[++i]);
-            if (patches < 5 || patches > 200) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: patches must be between 5 and 200");
+            cells = std::atoi(argv[++i]);
+            if (cells < 5 || cells > 200) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Error: cells must be between 5 and 200");
                 return 1;
             }
         } else if (arg == "--coast") {
@@ -95,11 +95,11 @@ int main(int argc, char* argv[]) {
         seed = static_cast<int>(std::time(nullptr));
     }
 
-    SDL_Log("Generating city with %d patches, seed %d", patches, seed);
+    SDL_Log("Generating city with %d cells, seed %d", cells, seed);
 
     // Generate the city
     try {
-        town_generator::building::Model model(patches, seed);
+        town_generator::building::City model(cells, seed);
 
         // Apply coast override if specified
         if (coastOverride == 1) {

@@ -1,5 +1,5 @@
 #include "town_generator/wards/MilitaryWard.h"
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/utils/Random.h"
 #include <cmath>
 

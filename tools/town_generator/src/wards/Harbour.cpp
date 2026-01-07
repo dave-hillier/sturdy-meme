@@ -1,6 +1,6 @@
 #include "town_generator/wards/Harbour.h"
-#include "town_generator/building/Model.h"
-#include "town_generator/building/Patch.h"
+#include "town_generator/building/City.h"
+#include "town_generator/building/Cell.h"
 #include "town_generator/building/EdgeData.h"
 #include "town_generator/utils/Random.h"
 #include "town_generator/geom/GeomUtils.h"

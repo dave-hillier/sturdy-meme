@@ -1,6 +1,6 @@
-#include "town_generator/building/Patch.h"
+#include "town_generator/building/Cell.h"
 
-// Patch is mostly header-only
+// Cell is mostly header-only
 namespace town_generator {
 namespace building {
 

@@ -2,7 +2,7 @@
 
 #include "town_generator/geom/Point.h"
 #include "town_generator/geom/Polygon.h"
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include <string>
 #include <sstream>
 #include <fstream>
@@ -102,8 +102,8 @@ public:
         {}
     };
 
-    static bool write(const building::Model& model, const std::string& filename, const Style& style = Style());
-    static std::string generate(const building::Model& model, const Style& style = Style());
+    static bool write(const building::City& model, const std::string& filename, const Style& style = Style());
+    static std::string generate(const building::City& model, const Style& style = Style());
 
     // Equality
     bool operator==(const SVGWriter& other) const { return true; }
@@ -112,7 +112,7 @@ public:
 private:
     static std::string polygonToPath(const geom::Polygon& poly);
     static std::string polylineToPath(const std::vector<geom::Point>& points);
-    static std::string polylineToPath(const building::Model::Street& street);  // For PointPtr streets
+    static std::string polylineToPath(const building::City::Street& street);  // For PointPtr streets
 };
 
 } // namespace svg

@@ -1,5 +1,5 @@
 #include "town_generator/wards/Ward.h"
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/building/Cutter.h"
 #include "town_generator/building/Block.h"
@@ -15,7 +15,7 @@ namespace wards {
 // Helper function to check if a patch edge overlaps with a road segment
 // Uses geometric proximity rather than exact vertex matching
 static bool edgeOverlapsRoadSegment(
-    const geom::Point& e0, const geom::Point& e1,  // Patch edge
+    const geom::Point& e0, const geom::Point& e1,  // Cell edge
     const geom::Point& r0, const geom::Point& r1,  // Road segment
     double tolerance = 0.5  // Distance tolerance for overlap
 ) {
@@ -218,7 +218,7 @@ void Ward::filterOutskirts() {
     if (numVerts < 3) return;
 
     // Calculate density for each vertex based on:
-    // 1. If "inner" vertex (all adjacent patches are withinCity or waterbody), density = 1.0
+    // 1. If "inner" vertex (all adjacent cells are withinCity or waterbody), density = 1.0
     // 2. Otherwise, max density from adjacent edges:
     //    - ROAD edges: 0.3
     //    - WALL edges: 0.5
@@ -229,8 +229,8 @@ void Ward::filterOutskirts() {
     for (size_t i = 0; i < numVerts; ++i) {
         const geom::Point& v = patch->shape[i];
 
-        // Check if this is an "inner" vertex (all adjacent patches are withinCity or waterbody)
-        auto adjacentPatches = model->patchByVertex(v);
+        // Check if this is an "inner" vertex (all adjacent cells are withinCity or waterbody)
+        auto adjacentPatches = model->cellsByVertex(v);
         bool isInner = true;
         for (auto* p : adjacentPatches) {
             if (!p->withinCity && !p->waterbody) {

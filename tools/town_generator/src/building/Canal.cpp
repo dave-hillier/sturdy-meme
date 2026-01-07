@@ -1,6 +1,6 @@
 #include "town_generator/building/Canal.h"
-#include "town_generator/building/Model.h"
-#include "town_generator/building/Patch.h"
+#include "town_generator/building/City.h"
+#include "town_generator/building/Cell.h"
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/geom/GeomUtils.h"
 #include "town_generator/utils/Random.h"
@@ -15,9 +15,9 @@ namespace building {
 // CanalTopology implementation (faithful to mfcg.js gh class)
 // ============================================================================
 
-void CanalTopology::build(Model* model) {
-    // Build graph from non-water patches (faithful to mfcg.js buildTopology line 10378-10381)
-    for (auto* patch : model->patches) {
+void CanalTopology::build(City* model) {
+    // Build graph from non-water cells (faithful to mfcg.js buildTopology line 10378-10381)
+    for (auto* patch : model->cells) {
         if (patch->waterbody) continue;
 
         // Process each edge of the patch
@@ -106,7 +106,7 @@ std::vector<geom::PointPtr> CanalTopology::buildPath(const geom::PointPtr& from,
 // Canal implementation (faithful to mfcg.js yb class)
 // ============================================================================
 
-std::unique_ptr<Canal> Canal::createRiver(Model* model) {
+std::unique_ptr<Canal> Canal::createRiver(City* model) {
     if (!model) return nullptr;
 
     // Build topology for river pathfinding (faithful to mfcg.js yb.buildTopology)
@@ -205,16 +205,16 @@ std::unique_ptr<Canal> Canal::createRiver(Model* model) {
     return canal;
 }
 
-std::vector<geom::PointPtr> Canal::deltaRiver(Model* model, CanalTopology& topology) {
+std::vector<geom::PointPtr> Canal::deltaRiver(City* model, CanalTopology& topology) {
     // Faithful to mfcg.js yb.deltaRiver (lines 10292-10333)
 
     // Find shore vertices where multiple non-water cells meet
-    // These are vertices on land patches that are shared with water patches
-    // and also shared between multiple land patches (junction points)
+    // These are vertices on land cells that are shared with water cells
+    // and also shared between multiple land cells (junction points)
     std::vector<geom::PointPtr> shoreVertices;
 
-    for (auto* patch : model->patches) {
-        if (patch->waterbody) continue;  // Only look at land patches
+    for (auto* patch : model->cells) {
+        if (patch->waterbody) continue;  // Only look at land cells
 
         for (size_t i = 0; i < patch->shape.length(); ++i) {
             geom::PointPtr v = patch->shape.ptr(i);
@@ -229,10 +229,10 @@ std::vector<geom::PointPtr> Canal::deltaRiver(Model* model, CanalTopology& topol
             }
             if (alreadyFound) continue;
 
-            // Count land and water patches sharing this vertex
+            // Count land and water cells sharing this vertex
             int landCount = 0;
             bool bordersWater = false;
-            for (auto* other : model->patches) {
+            for (auto* other : model->cells) {
                 if (other->shape.containsPtr(v)) {
                     if (other->waterbody) {
                         bordersWater = true;
@@ -242,7 +242,7 @@ std::vector<geom::PointPtr> Canal::deltaRiver(Model* model, CanalTopology& topol
                 }
             }
 
-            // Need to border water AND be shared by multiple land patches
+            // Need to border water AND be shared by multiple land cells
             // (like mfcg.js: 1 < Z.count(cellsByVertex, !a.waterbody))
             if (bordersWater && landCount > 1) {
                 shoreVertices.push_back(v);
@@ -263,9 +263,9 @@ std::vector<geom::PointPtr> Canal::deltaRiver(Model* model, CanalTopology& topol
     });
 
     // Find endpoint vertices on earthEdge that are NOT on shore
-    // These are vertices shared by land patches but not bordering water
+    // These are vertices shared by land cells but not bordering water
     std::vector<geom::PointPtr> earthVertices;
-    for (auto* patch : model->patches) {
+    for (auto* patch : model->cells) {
         if (patch->waterbody) continue;
 
         for (size_t i = 0; i < patch->shape.length(); ++i) {
@@ -291,9 +291,9 @@ std::vector<geom::PointPtr> Canal::deltaRiver(Model* model, CanalTopology& topol
             }
             if (alreadyFound) continue;
 
-            // Must be shared by multiple land patches
+            // Must be shared by multiple land cells
             int landCount = 0;
-            for (auto* other : model->patches) {
+            for (auto* other : model->cells) {
                 if (!other->waterbody && other->shape.containsPtr(v)) {
                     landCount++;
                 }
@@ -366,7 +366,7 @@ std::vector<geom::PointPtr> Canal::deltaRiver(Model* model, CanalTopology& topol
     return bestPath;
 }
 
-std::vector<geom::PointPtr> Canal::regularRiver(Model* model, CanalTopology& topology) {
+std::vector<geom::PointPtr> Canal::regularRiver(City* model, CanalTopology& topology) {
     // Faithful to mfcg.js yb.regularRiver (lines 10248-10290)
     // For non-coastal cities, find path from horizon through center to horizon
 
@@ -377,7 +377,7 @@ std::vector<geom::PointPtr> Canal::regularRiver(Model* model, CanalTopology& top
         geom::PointPtr v = model->earthEdge.ptr(i);
 
         int cellCount = 0;
-        for (auto* patch : model->patches) {
+        for (auto* patch : model->cells) {
             if (patch->shape.containsPtr(v)) {
                 cellCount++;
             }
@@ -419,7 +419,7 @@ std::vector<geom::PointPtr> Canal::regularRiver(Model* model, CanalTopology& top
 
         if (!n) break;
 
-        // Find center vertex (closest to origin among inner patches)
+        // Find center vertex (closest to origin among inner cells)
         geom::PointPtr centerV = nullptr;
         double minCenterDist = std::numeric_limits<double>::infinity();
 
@@ -482,7 +482,7 @@ std::vector<geom::PointPtr> Canal::regularRiver(Model* model, CanalTopology& top
     return {};
 }
 
-bool Canal::validateCourse(Model* model, const std::vector<geom::PointPtr>& coursePtrs) {
+bool Canal::validateCourse(City* model, const std::vector<geom::PointPtr>& coursePtrs) {
     // Faithful to mfcg.js yb.validateCourse (lines 10335-10364)
 
     if (coursePtrs.empty()) return false;

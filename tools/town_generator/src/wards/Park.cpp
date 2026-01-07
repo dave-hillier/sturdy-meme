@@ -1,5 +1,5 @@
 #include "town_generator/wards/Park.h"
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/geom/GeomUtils.h"
 #include "town_generator/utils/Random.h"
 #include <cmath>

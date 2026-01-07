@@ -3,7 +3,7 @@
 #include "town_generator/geom/Point.h"
 #include "town_generator/geom/Polygon.h"
 #include "town_generator/geom/Graph.h"
-#include "town_generator/building/Patch.h"
+#include "town_generator/building/Cell.h"
 #include <vector>
 #include <unordered_map>
 #include <algorithm>
@@ -12,7 +12,7 @@ namespace town_generator {
 namespace building {
 
 // Forward declaration
-class Model;
+class City;
 class CurtainWall;
 
 /**
@@ -24,7 +24,7 @@ class CurtainWall;
  */
 class Topology {
 private:
-    Model* model_;
+    City* model_;
     geom::Graph graph_;
 
     std::vector<geom::PointPtr> blocked_;
@@ -38,7 +38,7 @@ public:
     std::vector<geom::Node*> inner;
     std::vector<geom::Node*> outer;
 
-    explicit Topology(Model* model);
+    explicit Topology(City* model);
 
     std::vector<geom::Point> buildPath(
         const geom::Point& from,

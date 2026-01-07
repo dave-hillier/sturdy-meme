@@ -12,8 +12,8 @@
 namespace town_generator {
 namespace building {
 
-class Model;
-class Patch;
+class City;
+class Cell;
 
 /**
  * CanalTopology - Separate topology for river pathfinding
@@ -25,8 +25,8 @@ public:
     std::unordered_map<geom::PointPtr, geom::Node*> pt2node;
     std::unordered_map<geom::Node*, geom::PointPtr> node2pt;
 
-    // Build topology from non-water patches
-    void build(Model* model);
+    // Build topology from non-water cells
+    void build(City* model);
 
     // Exclude polygon edges from the graph (like mfcg.js excludePolygon)
     void excludePolygon(const std::vector<geom::PointPtr>& polygon);
@@ -70,7 +70,7 @@ public:
     std::vector<geom::PointPtr> gates;
 
     // Reference to model
-    Model* model = nullptr;
+    City* model = nullptr;
 
     Canal() : bridges([](const geom::Point& a, const geom::Point& b) {
         if (a.x != b.x) return a.x < b.x;
@@ -78,7 +78,7 @@ public:
     }) {}
 
     // Create a river canal (faithful to mfcg.js yb.createRiver)
-    static std::unique_ptr<Canal> createRiver(Model* model);
+    static std::unique_ptr<Canal> createRiver(City* model);
 
     // Find bridge locations where streets cross the canal
     void findBridges();
@@ -106,13 +106,13 @@ public:
 
 private:
     // Delta river for coastal cities (mfcg.js yb.deltaRiver)
-    static std::vector<geom::PointPtr> deltaRiver(Model* model, CanalTopology& topology);
+    static std::vector<geom::PointPtr> deltaRiver(City* model, CanalTopology& topology);
 
     // Regular river for non-coastal cities (mfcg.js yb.regularRiver)
-    static std::vector<geom::PointPtr> regularRiver(Model* model, CanalTopology& topology);
+    static std::vector<geom::PointPtr> regularRiver(City* model, CanalTopology& topology);
 
     // Validate the course (mfcg.js yb.validateCourse)
-    static bool validateCourse(Model* model, const std::vector<geom::PointPtr>& course);
+    static bool validateCourse(City* model, const std::vector<geom::PointPtr>& course);
 };
 
 } // namespace building

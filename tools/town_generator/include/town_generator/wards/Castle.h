@@ -28,7 +28,7 @@ public:
 
     void createGeometry() override;
 
-    // The castle's curtain wall (created during Model::build)
+    // The castle's curtain wall (created during City::build)
     building::CurtainWall* wall = nullptr;
 
     // The main keep building polygon

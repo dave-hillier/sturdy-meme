@@ -3,7 +3,7 @@
 #include "town_generator/geom/Point.h"
 #include "town_generator/geom/Polygon.h"
 #include "town_generator/geom/Voronoi.h"
-#include "town_generator/building/Patch.h"
+#include "town_generator/building/Cell.h"
 #include "town_generator/building/Topology.h"
 #include "town_generator/building/Canal.h"
 #include "town_generator/building/WardGroup.h"
@@ -22,9 +22,9 @@ namespace building {
 class CurtainWall;
 
 /**
- * Model - Master city generator, faithful port from Haxe TownGeneratorOS
+ * City - Master city generator, faithful port from Haxe TownGeneratorOS
  */
-class Model {
+class City {
 public:
     // City size enum
     enum class Size {
@@ -34,14 +34,14 @@ public:
     };
 
     // Generated data
-    std::vector<Patch*> patches;
-    std::vector<Patch*> inner;  // Patches within walls
-    Patch borderPatch;  // Patch representing outer border
+    std::vector<Cell*> cells;
+    std::vector<Cell*> inner;  // Patches within walls
+    Cell borderPatch;  // Cell representing outer border
 
     CurtainWall* citadel = nullptr;
     CurtainWall* wall = nullptr;      // Inner wall (if walled city)
     CurtainWall* border = nullptr;    // Outer border wall (always exists, provides gates)
-    Patch* plaza = nullptr;
+    Cell* plaza = nullptr;
 
     std::vector<geom::PointPtr> gates;  // Shared pointers for reference semantics
 
@@ -65,7 +65,7 @@ public:
     geom::Polygon earthEdge;      // Boundary of land area
     geom::Polygon shore;          // Shore line where land meets water
     bool riverNeeded = false;     // Whether to generate a river/canal
-    int maxDocks = 0;             // Maximum number of dock/harbour patches (faithful to mfcg.js)
+    int maxDocks = 0;             // Maximum number of dock/harbour cells (faithful to mfcg.js)
     std::vector<std::unique_ptr<Canal>> canals;  // Rivers/canals
 
     // Edge classification (faithful to mfcg.js buildDomains)
@@ -74,53 +74,53 @@ public:
     std::vector<Edge> horizonE;   // Outer boundary edges (no neighbor)
     std::vector<Edge> shoreE;     // Land-water boundary edges
 
-    // Owned wards and patches
+    // Owned wards and cells
     std::vector<std::unique_ptr<wards::Ward>> wards_;
-    std::vector<std::unique_ptr<Patch>> ownedPatches_;
+    std::vector<std::unique_ptr<Cell>> ownedCells_;
 
     // Ward groups for unified geometry generation
     std::vector<std::unique_ptr<WardGroup>> wardGroups_;
 
-    Model(int nPatches, int seed = -1);
-    ~Model();
+    City(int nCells, int seed = -1);
+    ~City();
 
     // Prevent copying
-    Model(const Model&) = delete;
-    Model& operator=(const Model&) = delete;
+    City(const City&) = delete;
+    City& operator=(const City&) = delete;
 
     // Move allowed
-    Model(Model&&) noexcept = default;
-    Model& operator=(Model&&) noexcept = default;
+    City(City&&) noexcept = default;
+    City& operator=(City&&) noexcept = default;
 
     void build();
 
-    // Find patches containing a vertex (by value - coordinate match)
-    std::vector<Patch*> patchByVertex(const geom::Point& v);
+    // Find cells containing a vertex (by value - coordinate match)
+    std::vector<Cell*> cellsByVertex(const geom::Point& v);
 
-    // Find patches sharing a vertex (by pointer identity - true topology)
-    std::vector<Patch*> patchByVertexPtr(const geom::PointPtr& v);
+    // Find cells sharing a vertex (by pointer identity - true topology)
+    std::vector<Cell*> cellsByVertexPtr(const geom::PointPtr& v);
 
-    // Find circumference of a set of patches (preserves shared vertices)
-    static geom::Polygon findCircumference(const std::vector<Patch*>& patches);
+    // Find circumference of a set of cells (preserves shared vertices)
+    static geom::Polygon findCircumference(const std::vector<Cell*>& cells);
 
-    // Split patches into connected components (groups that share edges)
+    // Split cells into connected components (groups that share edges)
     // Like Ic.split in mfcg.js - uses flood fill through neighbor relationships
-    static std::vector<std::vector<Patch*>> splitIntoConnectedComponents(const std::vector<Patch*>& patches);
+    static std::vector<std::vector<Cell*>> splitIntoConnectedComponents(const std::vector<Cell*>& cells);
 
     // Get canal width at a vertex/edge (faithful to mfcg.js getCanalWidth)
     double getCanalWidth(const geom::Point& v) const;
 
     // Equality
-    bool operator==(const Model& other) const {
-        return patches.size() == other.patches.size();
+    bool operator==(const City& other) const {
+        return cells.size() == other.cells.size();
     }
 
-    bool operator!=(const Model& other) const {
+    bool operator!=(const City& other) const {
         return !(*this == other);
     }
 
 private:
-    int nPatches_;
+    int nCells_;
     double maxRadius_ = 0.0;  // Max spiral radius (b in mfcg.js)
     double offsetX_ = 0.0;    // Offset to translate to positive coordinates
     double offsetY_ = 0.0;
@@ -136,8 +136,8 @@ private:
     void buildFarms();       // Build farms with sine-wave radial pattern (faithful to mfcg.js)
     void buildShantyTowns(); // Build shanty towns outside city walls (faithful to mfcg.js)
     void buildGeometry();
-    void setEdgeData();      // Set edge types (COAST, ROAD, WALL, CANAL) on all patches
-    void createWardGroups(); // Create WardGroups from adjacent same-type patches
+    void setEdgeData();      // Set edge types (COAST, ROAD, WALL, CANAL) on all cells
+    void createWardGroups(); // Create WardGroups from adjacent same-type cells
 
     static std::vector<geom::Point> generateRandomPoints(int count, double width, double height);
 };

@@ -1,5 +1,5 @@
 #include "town_generator/building/District.h"
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/wards/CommonWard.h"
 #include <algorithm>
 #include <cmath>
@@ -7,7 +7,7 @@
 namespace town_generator {
 namespace building {
 
-District::District(Patch* startPatch, Model* model)
+District::District(Cell* startPatch, City* model)
     : model(model)
 {
     if (startPatch && startPatch->ward) {
@@ -18,10 +18,10 @@ District::District(Patch* startPatch, Model* model)
 }
 
 void District::build() {
-    if (patches.empty()) return;
+    if (cells.empty()) return;
 
-    // Create the combined border from all patches
-    border = Model::findCircumference(patches);
+    // Create the combined border from all cells
+    border = City::findCircumference(cells);
 
     // Create shared parameters
     createParams();
@@ -84,7 +84,7 @@ void District::createGeometry() {
     // For now, delegate to each patch's ward
     // In a more complete implementation, this would create unified geometry
     // across the district boundary
-    for (auto* patch : patches) {
+    for (auto* patch : cells) {
         if (patch->ward) {
             patch->ward->createGeometry();
         }
@@ -96,20 +96,20 @@ void District::createGeometry() {
 std::vector<std::unique_ptr<District>> DistrictBuilder::build() {
     std::vector<std::unique_ptr<District>> districts;
 
-    // Get all city patches
-    std::vector<Patch*> unassigned;
-    for (auto* patch : model_->patches) {
+    // Get all city cells
+    std::vector<Cell*> unassigned;
+    for (auto* patch : model_->cells) {
         if (patch->withinCity && !patch->waterbody && patch->ward) {
             unassigned.push_back(patch);
         }
     }
 
-    // Group patches into districts
+    // Group cells into districts
     while (!unassigned.empty()) {
-        Patch* seed = unassigned.front();
+        Cell* seed = unassigned.front();
 
         auto district = std::make_unique<District>(seed, model_);
-        district->patches = growDistrict(seed, unassigned);
+        district->cells = growDistrict(seed, unassigned);
         district->build();
 
         districts.push_back(std::move(district));
@@ -118,8 +118,8 @@ std::vector<std::unique_ptr<District>> DistrictBuilder::build() {
     return districts;
 }
 
-std::vector<Patch*> DistrictBuilder::growDistrict(Patch* seed, std::vector<Patch*>& unassigned) {
-    std::vector<Patch*> result;
+std::vector<Cell*> DistrictBuilder::growDistrict(Cell* seed, std::vector<Cell*>& unassigned) {
+    std::vector<Cell*> result;
     result.push_back(seed);
 
     // Remove seed from unassigned
@@ -135,7 +135,7 @@ std::vector<Patch*> DistrictBuilder::growDistrict(Patch* seed, std::vector<Patch
     bool keepGrowing = true;
     while (keepGrowing && !unassigned.empty()) {
         // Find neighbors of current district that match type
-        std::vector<Patch*> candidates;
+        std::vector<Cell*> candidates;
         for (auto* patch : result) {
             for (auto* neighbor : patch->neighbors) {
                 // Check if neighbor is in unassigned and same type
@@ -167,7 +167,7 @@ std::vector<Patch*> DistrictBuilder::growDistrict(Patch* seed, std::vector<Patch
         size_t idx = static_cast<size_t>(utils::Random::floatVal() * candidates.size());
         if (idx >= candidates.size()) idx = candidates.size() - 1;
 
-        Patch* chosen = candidates[idx];
+        Cell* chosen = candidates[idx];
         result.push_back(chosen);
 
         // Remove from unassigned

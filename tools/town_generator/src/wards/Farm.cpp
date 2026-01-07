@@ -1,5 +1,5 @@
 #include "town_generator/wards/Farm.h"
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/utils/Random.h"
 #include "town_generator/geom/GeomUtils.h"
@@ -60,7 +60,7 @@ geom::Polygon Farm::getAvailable() {
             }
         }
 
-        // Check neighboring patches - if neighbor is also Farm, use smaller inset (1.0)
+        // Check neighboring cells - if neighbor is also Farm, use smaller inset (1.0)
         // If neighbor is other ward type, use larger inset (2.0)
         for (const auto* neighbor : patch->neighbors) {
             if (!neighbor) continue;

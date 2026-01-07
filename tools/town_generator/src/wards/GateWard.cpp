@@ -1,5 +1,5 @@
 #include "town_generator/wards/GateWard.h"
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/utils/Random.h"
 
 namespace town_generator {

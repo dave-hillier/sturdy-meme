@@ -1,6 +1,6 @@
 #include "town_generator/building/WardGroup.h"
 #include "town_generator/building/Block.h"
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/building/Cutter.h"
 #include "town_generator/utils/Random.h"
 #include "town_generator/wards/Ward.h"
@@ -18,12 +18,12 @@ static void subdivideIntoBlocksHelper(
     std::vector<geom::Polygon>& result
 );
 
-WardGroup::WardGroup(Model* model) : model(model) {}
+WardGroup::WardGroup(City* model) : model(model) {}
 
-void WardGroup::addPatch(Patch* patch) {
+void WardGroup::addPatch(Cell* patch) {
     if (!patch) return;
 
-    patches.push_back(patch);
+    cells.push_back(patch);
     patch->group = this;
 
     if (!core) {
@@ -33,13 +33,13 @@ void WardGroup::addPatch(Patch* patch) {
 }
 
 void WardGroup::buildBorder() {
-    if (patches.empty()) return;
+    if (cells.empty()) return;
 
-    if (patches.size() == 1) {
-        border = patches[0]->shape;
+    if (cells.size() == 1) {
+        border = cells[0]->shape;
     } else {
-        // Use Model::findCircumference to get combined border
-        border = Model::findCircumference(patches);
+        // Use City::findCircumference to get combined border
+        border = City::findCircumference(cells);
     }
 
     // Compute inner vertices after building border (faithful to mfcg.js)
@@ -134,7 +134,7 @@ void WardGroup::createGeometry() {
         blocks.push_back(std::move(block));
     }
 
-    SDL_Log("WardGroup: Created %zu blocks from %zu patches", blocks.size(), patches.size());
+    SDL_Log("WardGroup: Created %zu blocks from %zu cells", blocks.size(), cells.size());
 }
 
 std::vector<geom::Point> WardGroup::spawnTrees() {
@@ -148,17 +148,17 @@ std::vector<geom::Point> WardGroup::spawnTrees() {
     return trees;
 }
 
-bool WardGroup::canAddPatch(Patch* patch) const {
+bool WardGroup::canAddPatch(Cell* patch) const {
     if (!patch || !patch->ward) return false;
-    if (patches.empty()) return true;
+    if (cells.empty()) return true;
 
     // Must be same ward type
     std::string typeName = getTypeName();
     if (patch->ward->getName() != typeName) return false;
 
     // Must be adjacent to at least one patch in the group
-    for (Patch* existing : patches) {
-        for (Patch* neighbor : existing->neighbors) {
+    for (Cell* existing : cells) {
+        for (Cell* neighbor : existing->neighbors) {
             if (neighbor == patch) return true;
         }
     }
@@ -167,16 +167,16 @@ bool WardGroup::canAddPatch(Patch* patch) const {
 }
 
 std::string WardGroup::getTypeName() const {
-    if (patches.empty() || !patches[0]->ward) return "";
-    return patches[0]->ward->getName();
+    if (cells.empty() || !cells[0]->ward) return "";
+    return cells[0]->ward->getName();
 }
 
 bool WardGroup::isInnerVertex(const geom::Point& v) const {
     // Faithful to mfcg.js District.isInnerVertex (lines 979-984)
-    // A vertex is "inner" if ALL adjacent patches are withinCity OR waterbody
+    // A vertex is "inner" if ALL adjacent cells are withinCity OR waterbody
     if (!model) return false;
 
-    auto adjacentPatches = model->patchByVertex(v);
+    auto adjacentPatches = model->cellsByVertex(v);
     for (auto* p : adjacentPatches) {
         if (!p->withinCity && !p->waterbody) {
             return false;
@@ -198,7 +198,7 @@ void WardGroup::computeInnerVertices() {
         // Check if any patch at this vertex is withinWalls
         bool withinWalls = false;
         if (model) {
-            auto adjacentPatches = model->patchByVertex(v);
+            auto adjacentPatches = model->cellsByVertex(v);
             for (auto* p : adjacentPatches) {
                 if (p->withinWalls) {
                     withinWalls = true;
@@ -283,9 +283,9 @@ static void subdivideIntoBlocksHelper(
 std::vector<std::unique_ptr<WardGroup>> WardGroupBuilder::build() {
     std::vector<std::unique_ptr<WardGroup>> groups;
 
-    // Get all city patches with wards that support grouping
-    std::vector<Patch*> unassigned;
-    for (auto* patch : model_->patches) {
+    // Get all city cells with wards that support grouping
+    std::vector<Cell*> unassigned;
+    for (auto* patch : model_->cells) {
         if (patch->withinCity && !patch->waterbody && patch->ward) {
             // Only group "Alleys" type wards (CommonWard, MerchantWard, CraftsmenWard, etc.)
             std::string wardName = patch->ward->getName();
@@ -298,16 +298,16 @@ std::vector<std::unique_ptr<WardGroup>> WardGroupBuilder::build() {
         }
     }
 
-    // Group patches into WardGroups
+    // Group cells into WardGroups
     while (!unassigned.empty()) {
-        Patch* seed = unassigned.front();
+        Cell* seed = unassigned.front();
         auto group = std::make_unique<WardGroup>(model_);
         group->addPatch(seed);
 
         // Remove seed from unassigned
         unassigned.erase(unassigned.begin());
 
-        // Grow the group by adding adjacent patches of the same type
+        // Grow the group by adding adjacent cells of the same type
         growGroup(group.get(), unassigned);
 
         // Build the group border
@@ -319,17 +319,17 @@ std::vector<std::unique_ptr<WardGroup>> WardGroupBuilder::build() {
     return groups;
 }
 
-void WardGroupBuilder::growGroup(WardGroup* group, std::vector<Patch*>& unassigned) {
+void WardGroupBuilder::growGroup(WardGroup* group, std::vector<Cell*>& unassigned) {
     if (!group || unassigned.empty()) return;
 
     std::string typeName = group->getTypeName();
     bool keepGrowing = true;
 
     while (keepGrowing && !unassigned.empty()) {
-        // Find candidates: neighbors of current group patches that are in unassigned
-        std::vector<Patch*> candidates;
-        for (Patch* patch : group->patches) {
-            for (Patch* neighbor : patch->neighbors) {
+        // Find candidates: neighbors of current group cells that are in unassigned
+        std::vector<Cell*> candidates;
+        for (Cell* patch : group->cells) {
+            for (Cell* neighbor : patch->neighbors) {
                 // Check if neighbor is in unassigned
                 auto it = std::find(unassigned.begin(), unassigned.end(), neighbor);
                 if (it != unassigned.end()) {
@@ -349,9 +349,9 @@ void WardGroupBuilder::growGroup(WardGroup* group, std::vector<Patch*>& unassign
         }
 
         // Probability to stop growing increases with size (faithful to mfcg.js)
-        double stopProb = static_cast<double>(group->patches.size() - 3) / group->patches.size();
+        double stopProb = static_cast<double>(group->cells.size() - 3) / group->cells.size();
         if (stopProb < 0) stopProb = 0;
-        if (group->patches.size() > 1 && unassigned.size() > 1 && utils::Random::floatVal() < stopProb) {
+        if (group->cells.size() > 1 && unassigned.size() > 1 && utils::Random::floatVal() < stopProb) {
             break;
         }
 
@@ -359,7 +359,7 @@ void WardGroupBuilder::growGroup(WardGroup* group, std::vector<Patch*>& unassign
         size_t idx = static_cast<size_t>(utils::Random::floatVal() * candidates.size());
         if (idx >= candidates.size()) idx = candidates.size() - 1;
 
-        Patch* chosen = candidates[idx];
+        Cell* chosen = candidates[idx];
         group->addPatch(chosen);
 
         // Remove from unassigned

@@ -1,5 +1,5 @@
 #include "town_generator/building/Topology.h"
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
 #include <algorithm>
 #include <limits>
@@ -8,7 +8,7 @@
 namespace town_generator {
 namespace building {
 
-Topology::Topology(Model* model) : model_(model) {
+Topology::Topology(City* model) : model_(model) {
     // Building a list of all blocked points (shore + walls excluding gates)
     // Using PointPtr for reference semantics - blocked vertices are identified
     // by pointer identity, not coordinate values
@@ -37,9 +37,9 @@ Topology::Topology(Model* model) : model_(model) {
     // Use the actual wall shape, not borderPatch (which is just a bounding rectangle)
     const auto& border = model_->border->shape;
 
-    // First pass: build the graph from all land patches
-    for (auto* patch : model_->patches) {
-        // Skip water patches entirely - they don't participate in road graph
+    // First pass: build the graph from all land cells
+    for (auto* patch : model_->cells) {
+        // Skip water cells entirely - they don't participate in road graph
         // (faithful to mfcg.js line 10534: d.withinCity || d.waterbody || a.push(d))
         if (patch->waterbody) {
             continue;
@@ -125,7 +125,7 @@ Topology::Topology(Model* model) : model_(model) {
     // This matches mfcg.js excludePoints() which calls unlinkAll() on each point
     // (faithful to mfcg.js lines 10538-10544, 12047-12053)
     std::vector<geom::PointPtr> shoreVertices;
-    for (auto* patch : model_->patches) {
+    for (auto* patch : model_->cells) {
         if (patch->waterbody) continue;
 
         // For each vertex, check if it's shared with a water neighbor

@@ -1,4 +1,4 @@
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/building/Topology.h"
 #include "town_generator/utils/Noise.h"
@@ -29,23 +29,23 @@
 namespace town_generator {
 namespace building {
 
-Model::Model(int nPatches, int seed) : nPatches_(nPatches) {
+City::City(int nCells, int seed) : nCells_(nCells) {
     utils::Random::reset(seed);
 
     // Random city features based on original algorithm
     plazaNeeded = utils::Random::boolVal(0.8);
     citadelNeeded = utils::Random::boolVal(0.5);
-    wallsNeeded = nPatches > 15;
+    wallsNeeded = nCells > 15;
     templeNeeded = utils::Random::boolVal(0.6);  // 60% chance of cathedral (faithful to mfcg.js)
     shantyNeeded = wallsNeeded && utils::Random::boolVal(0.5);  // 50% if walled (faithful to mfcg.js)
     coastNeeded = utils::Random::boolVal(0.5);  // 50% chance of coastal city (faithful to mfcg.js)
     riverNeeded = coastNeeded && utils::Random::boolVal(0.67);  // 67% when coast is present
 
-    // maxDocks: sqrt(nPatches/2) + 2 if river (faithful to mfcg.js line 10239)
-    maxDocks = static_cast<int>(std::sqrt(nPatches / 2.0)) + (riverNeeded ? 2 : 0);
+    // maxDocks: sqrt(nCells/2) + 2 if river (faithful to mfcg.js line 10239)
+    maxDocks = static_cast<int>(std::sqrt(nCells / 2.0)) + (riverNeeded ? 2 : 0);
 }
 
-Model::~Model() {
+City::~City() {
     delete citadel;
     if (wall != border) {
         delete wall;
@@ -53,7 +53,7 @@ Model::~Model() {
     delete border;
 }
 
-void Model::build() {
+void City::build() {
     buildPatches();
     optimizeJunctions();
     buildWalls();
@@ -76,7 +76,7 @@ void Model::build() {
     buildGeometry();
 }
 
-std::vector<geom::Point> Model::generateRandomPoints(int count, double width, double height) {
+std::vector<geom::Point> City::generateRandomPoints(int count, double width, double height) {
     std::vector<geom::Point> points;
     points.reserve(count);
 
@@ -90,15 +90,15 @@ std::vector<geom::Point> Model::generateRandomPoints(int count, double width, do
     return points;
 }
 
-void Model::buildPatches() {
+void City::buildPatches() {
     // Generate seed points using spiral algorithm (faithful to original)
-    // Generate nPatches * 8 points (faithful to Haxe) - inner patches plus outer
+    // Generate nCells * 8 points (faithful to Haxe) - inner cells plus outer
     // sa = random starting angle
     // for each point: a = sa + sqrt(i) * 5, r = (i == 0) ? 0 : 10 + i * (2 + random())
 
     double sa = utils::Random::floatVal() * M_PI * 2;  // Starting angle
     std::vector<geom::Point> seeds;
-    int totalPoints = nPatches_ * 8;  // 8x more points for outer regions (faithful to Haxe)
+    int totalPoints = nCells_ * 8;  // 8x more points for outer regions (faithful to Haxe)
     seeds.reserve(totalPoints);
 
     // Track max radius b during spiral generation (faithful to mfcg.js line 10341)
@@ -161,8 +161,8 @@ void Model::buildPatches() {
         p.y += offsetY;
     }
 
-    // Apply Lloyd relaxation to all city patches (3 iterations)
-    // Faithful to mfcg.js line 10346: relaxing all nPatches*8 seeds
+    // Apply Lloyd relaxation to all city cells (3 iterations)
+    // Faithful to mfcg.js line 10346: relaxing all nCells*8 seeds
     // But exclude the 6 boundary points we added at the end
     int relaxCount = totalPoints;  // All spiral-generated points
     std::vector<geom::Point> citySeeds(seeds.begin(), seeds.begin() + std::min(relaxCount, static_cast<int>(seeds.size())));
@@ -182,10 +182,10 @@ void Model::buildPatches() {
         voronoi.addPoint(seed);
     }
 
-    // Convert regions to patches
+    // Convert regions to cells
     auto regions = voronoi.partitioning();
 
-    // Create patches from regions, sorted by distance from center
+    // Create cells from regions, sorted by distance from center
     geom::Point center(width / 2, height / 2);
     std::vector<std::pair<double, geom::Region*>> sortedRegions;
 
@@ -198,18 +198,18 @@ void Model::buildPatches() {
         [](const auto& a, const auto& b) { return a.first < b.first; });
 
     // Build a map from Triangle* to shared PointPtr (circumcenter)
-    // This ensures adjacent patches share the exact same Point object
+    // This ensures adjacent cells share the exact same Point object
     // so mutations propagate automatically (matching Haxe reference semantics)
     std::map<geom::Triangle*, geom::PointPtr> triangleToVertex;
     for (const auto& tr : voronoi.triangles) {
         triangleToVertex[tr.get()] = geom::makePoint(tr->c);
     }
-    // Create patches using shared vertex pointers
-    std::map<geom::Region*, Patch*> regionToPatch;
+    // Create cells using shared vertex pointers
+    std::map<geom::Region*, Cell*> regionToPatch;
     int patchesCreated = 0;
 
-    // Create all patches from Voronoi regions
-    // First nPatches_ are considered inner/withinCity, rest are outer (faithful to Haxe)
+    // Create all cells from Voronoi regions
+    // First nCells_ are considered inner/withinCity, rest are outer (faithful to Haxe)
     for (size_t i = 0; i < sortedRegions.size(); ++i) {
         auto* region = sortedRegions[i].second;
 
@@ -238,20 +238,20 @@ void Model::buildPatches() {
         double seedDist = std::sqrt(seedX*seedX + seedY*seedY);
         if (seedDist > b * 1.5) continue;  // Skip boundary helper cells
 
-        auto patch = std::make_unique<Patch>(geom::Polygon(sharedVertices));
+        auto patch = std::make_unique<Cell>(geom::Polygon(sharedVertices));
         patchesCreated++;
 
         regionToPatch[region] = patch.get();
-        patches.push_back(patch.get());
-        ownedPatches_.push_back(std::move(patch));
+        cells.push_back(patch.get());
+        ownedCells_.push_back(std::move(patch));
     }
 
     // b was calculated during spiral generation (max radius from origin)
     // Store centroids for each patch (mfcg.js stores them in a map keyed by cell)
     // In mfcg.js, centroids are relative to origin (0,0)
     // Since we offset seeds by (offsetX, offsetY), we need to subtract that to get back to origin
-    std::map<Patch*, geom::Point> patchCentroids;
-    for (auto* patch : patches) {
+    std::map<Cell*, geom::Point> patchCentroids;
+    for (auto* patch : cells) {
         geom::Point c = patch->shape.centroid();
         // Convert back to origin-relative coordinates (undo the offset we applied to seeds)
         geom::Point relC(c.x - offsetX, c.y - offsetY);
@@ -293,9 +293,9 @@ void Model::buildPatches() {
         SDL_Log("Coast params: b=%.1f f=%.1f k=%.1f n=%.1f coastCenter=(%.1f,%.1f) angle=%.2f",
                 b, f, k, n, coastCenter.x, coastCenter.y, coastDir);
 
-        // Mark patches as water based on distance from coast center
+        // Mark cells as water based on distance from coast center
         int waterCount = 0;
-        for (auto* patch : patches) {
+        for (auto* patch : cells) {
             geom::Point c = patchCentroids[patch];
 
             // Rotate centroid by coast angle (mfcg.js line 10387)
@@ -313,11 +313,11 @@ void Model::buildPatches() {
                 u = std::min(u, std::abs(rotated.y - k) - n * 1.5);
             }
 
-            // Additionally, only allow circular water region for patches that are
+            // Additionally, only allow circular water region for cells that are
             // actually near the coast direction (rotated.x > 0), not in the opposite direction
             // This prevents water from appearing in the middle of the map on the city side
             if (rotated.x < coastCenter.x * 0.5) {
-                // Patch is far from the sea direction - don't use circular check
+                // Cell is far from the sea direction - don't use circular check
                 u = std::max(u, 1.0);  // Force positive (land)
             }
 
@@ -338,13 +338,13 @@ void Model::buildPatches() {
                 waterCount++;
             }
         }
-        SDL_Log("Coast: marked %d patches as water out of %zu total", waterCount, patches.size());
+        SDL_Log("Coast: marked %d cells as water out of %zu total", waterCount, cells.size());
     }
 
     // Assign withinCity based on waterbody status
     int cityPatchCount = 0;
-    for (auto* patch : patches) {
-        if (!patch->waterbody && cityPatchCount < nPatches_) {
+    for (auto* patch : cells) {
+        if (!patch->waterbody && cityPatchCount < nCells_) {
             patch->withinCity = true;
             patch->withinWalls = wallsNeeded;
             cityPatchCount++;
@@ -356,12 +356,12 @@ void Model::buildPatches() {
 
     // Establish neighbor relationships
     for (auto* region : regions) {
-        Patch* patch = regionToPatch[region];
+        Cell* patch = regionToPatch[region];
         if (!patch) continue;
 
         auto neighborRegions = region->neighbors(voronoi.regions);
         for (auto* neighborRegion : neighborRegions) {
-            Patch* neighborPatch = regionToPatch[neighborRegion];
+            Cell* neighborPatch = regionToPatch[neighborRegion];
             if (neighborPatch && neighborPatch != patch) {
                 // Check if not already in neighbors
                 if (std::find(patch->neighbors.begin(), patch->neighbors.end(), neighborPatch) == patch->neighbors.end()) {
@@ -376,28 +376,28 @@ void Model::buildPatches() {
     borderPatch.shape = geom::Polygon::rect(width, height);
     borderPatch.shape.offset(geom::Point(width / 2, height / 2));
 
-    // Compute water edge and shore from water patches
+    // Compute water edge and shore from water cells
     if (coastNeeded) {
-        std::vector<Patch*> waterPatches;
-        for (auto* patch : patches) {
+        std::vector<Cell*> waterPatches;
+        for (auto* patch : cells) {
             if (patch->waterbody) {
                 waterPatches.push_back(patch);
             }
         }
 
         if (!waterPatches.empty()) {
-            // Split water patches into connected components and take the largest
+            // Split water cells into connected components and take the largest
             // (faithful to mfcg.js lines 10505-10507: Z.max(Ic.split(a), a => a.length))
             auto waterComponents = splitIntoConnectedComponents(waterPatches);
             if (!waterComponents.empty()) {
                 auto largestWater = std::max_element(waterComponents.begin(), waterComponents.end(),
                     [](const auto& a, const auto& b) { return a.size() < b.size(); });
                 waterPatches = *largestWater;
-                SDL_Log("Coast: %zu water components, using largest with %zu patches",
+                SDL_Log("Coast: %zu water components, using largest with %zu cells",
                         waterComponents.size(), waterPatches.size());
             }
 
-            // Compute circumference of water patches (boundary polygon)
+            // Compute circumference of water cells (boundary polygon)
             waterEdge = findCircumference(waterPatches);
 
             // Smooth the water edge (faithful to mfcg.js line 10515)
@@ -405,21 +405,21 @@ void Model::buildPatches() {
             int smoothIterations = 1 + static_cast<int>(utils::Random::floatVal() * 3);
             waterEdge = geom::Polygon::smooth(waterEdge, nullptr, smoothIterations);
 
-            // Also compute earth edge (boundary of land patches)
-            std::vector<Patch*> landPatches;
-            for (auto* patch : patches) {
+            // Also compute earth edge (boundary of land cells)
+            std::vector<Cell*> landPatches;
+            for (auto* patch : cells) {
                 if (!patch->waterbody) {
                     landPatches.push_back(patch);
                 }
             }
 
-            // Split land patches into connected components and take the largest
+            // Split land cells into connected components and take the largest
             auto landComponents = splitIntoConnectedComponents(landPatches);
             if (!landComponents.empty()) {
                 auto largestLand = std::max_element(landComponents.begin(), landComponents.end(),
                     [](const auto& a, const auto& b) { return a.size() < b.size(); });
                 landPatches = *largestLand;
-                SDL_Log("Coast: %zu land components, using largest with %zu patches",
+                SDL_Log("Coast: %zu land components, using largest with %zu cells",
                         landComponents.size(), landPatches.size());
             }
 
@@ -434,13 +434,13 @@ void Model::buildPatches() {
         }
     }
 
-    // Mark special patches
+    // Mark special cells
     // First patch (closest to center) can be plaza
     // A patch near the edge can be citadel location
-    if (!patches.empty() && citadelNeeded) {
+    if (!cells.empty() && citadelNeeded) {
         // Find a patch that's within city but near the edge
-        for (int i = static_cast<int>(patches.size()) - 1; i >= 0; --i) {
-            if (patches[i]->withinCity) {
+        for (int i = static_cast<int>(cells.size()) - 1; i >= 0; --i) {
+            if (cells[i]->withinCity) {
                 // This will be marked for citadel during wall building
                 break;
             }
@@ -448,13 +448,13 @@ void Model::buildPatches() {
     }
 }
 
-void Model::optimizeJunctions() {
+void City::optimizeJunctions() {
     // Merge vertices that are too close together (< 8 units)
     // With shared_ptr<Point>, mutations automatically propagate to all
-    // patches sharing the same vertex (matching Haxe reference semantics)
+    // cells sharing the same vertex (matching Haxe reference semantics)
 
-    std::vector<Patch*> patchesToOptimize = inner;
-    std::set<Patch*> patchesToClean;
+    std::vector<Cell*> patchesToOptimize = inner;
+    std::set<Cell*> patchesToClean;
 
     for (auto* patch : patchesToOptimize) {
         size_t index = 0;
@@ -465,12 +465,12 @@ void Model::optimizeJunctions() {
 
             if (v0Ptr != v1Ptr && geom::Point::distance(*v0Ptr, *v1Ptr) < 8.0) {
                 // Move v0 to midpoint (mutates the shared point!)
-                // All patches sharing this vertex see the change automatically
+                // All cells sharing this vertex see the change automatically
                 v0Ptr->addEq(*v1Ptr);
                 v0Ptr->scaleEq(0.5);
 
-                // Replace v1 references with v0 in all patches
-                for (auto* otherPatch : patches) {
+                // Replace v1 references with v0 in all cells
+                for (auto* otherPatch : cells) {
                     if (otherPatch == patch) continue;
 
                     // Find v1 by pointer identity and replace with v0
@@ -492,7 +492,7 @@ void Model::optimizeJunctions() {
         }
     }
 
-    // Remove duplicate vertices (by pointer identity) from affected patches
+    // Remove duplicate vertices (by pointer identity) from affected cells
     for (auto* patch : patchesToClean) {
         std::vector<geom::PointPtr> cleaned;
         for (const auto& vPtr : patch->shape) {
@@ -505,20 +505,20 @@ void Model::optimizeJunctions() {
     }
 }
 
-void Model::buildWalls() {
-    // Separate inner and outer patches based on withinWalls flag
+void City::buildWalls() {
+    // Separate inner and outer cells based on withinWalls flag
     inner.clear();
-    std::vector<Patch*> outer;
+    std::vector<Cell*> outer;
 
     if (!wallsNeeded) {
-        // No walls needed - all patches are inner
-        inner = patches;
-        for (auto* p : patches) {
+        // No walls needed - all cells are inner
+        inner = cells;
+        for (auto* p : cells) {
             p->withinCity = true;
             p->withinWalls = true;  // For border calculation
         }
     } else {
-        for (auto* patch : patches) {
+        for (auto* patch : cells) {
             if (patch->withinWalls) {
                 inner.push_back(patch);
             } else {
@@ -527,8 +527,8 @@ void Model::buildWalls() {
         }
 
         if (inner.empty()) {
-            inner = patches;
-            for (auto* p : patches) {
+            inner = cells;
+            for (auto* p : cells) {
                 p->withinWalls = true;
             }
         }
@@ -536,8 +536,8 @@ void Model::buildWalls() {
     }
 
     // Find citadel patch (innermost patch suitable for fortification)
-    Patch* citadelPatch = nullptr;
-    std::vector<Patch*> citadelPatches;
+    Cell* citadelPatch = nullptr;
+    std::vector<Cell*> citadelPatches;
     std::vector<geom::PointPtr> reservedPoints;  // Points that shouldn't be modified (by pointer identity)
 
     if (citadelNeeded && wallsNeeded && !inner.empty()) {
@@ -567,7 +567,7 @@ void Model::buildWalls() {
 
             // Check if this edge borders water (any patch sharing this edge is waterbody)
             bool bordersWater = false;
-            for (auto* patch : patches) {
+            for (auto* patch : cells) {
                 if (patch->waterbody) {
                     // Check if water patch shares this edge (in either direction)
                     if ((patch->shape.containsPtr(v0) && patch->shape.containsPtr(v1))) {
@@ -619,7 +619,7 @@ void Model::buildWalls() {
     }
 }
 
-void Model::buildDomains() {
+void City::buildDomains() {
     // Faithful to mfcg.js buildDomains (lines 795-831)
     // Build horizon edges (outer boundary) and shore edges (land-water boundary)
 
@@ -628,7 +628,7 @@ void Model::buildDomains() {
 
     // Find horizon edges: edges that have no neighboring patch on that side
     // These form the outer boundary of the entire map
-    for (auto* patch : patches) {
+    for (auto* patch : cells) {
         size_t len = patch->shape.length();
         for (size_t i = 0; i < len; ++i) {
             const geom::Point& v0 = patch->shape[i];
@@ -655,10 +655,10 @@ void Model::buildDomains() {
         }
     }
 
-    // Find shore edges: edges between land and water patches
+    // Find shore edges: edges between land and water cells
     if (coastNeeded) {
-        for (auto* patch : patches) {
-            if (patch->waterbody) continue;  // Only process land patches
+        for (auto* patch : cells) {
+            if (patch->waterbody) continue;  // Only process land cells
 
             size_t len = patch->shape.length();
             for (size_t i = 0; i < len; ++i) {
@@ -684,7 +684,7 @@ void Model::buildDomains() {
     }
 }
 
-void Model::buildStreets() {
+void City::buildStreets() {
     if (inner.empty()) return;
 
     // Smoothing function: mutates shared Point objects in place (like Haxe)
@@ -794,7 +794,7 @@ void Model::buildStreets() {
     }
 }
 
-void Model::tidyUpRoads() {
+void City::tidyUpRoads() {
     // Segment structure for edge tracking (uses PointPtr for reference identity)
     struct Segment {
         geom::PointPtr start;
@@ -868,9 +868,9 @@ void Model::tidyUpRoads() {
     }
 }
 
-std::vector<Patch*> Model::patchByVertex(const geom::Point& v) {
-    std::vector<Patch*> result;
-    for (auto* p : patches) {
+std::vector<Cell*> City::cellsByVertex(const geom::Point& v) {
+    std::vector<Cell*> result;
+    for (auto* p : cells) {
         if (p->shape.contains(v)) {
             result.push_back(p);
         }
@@ -878,9 +878,9 @@ std::vector<Patch*> Model::patchByVertex(const geom::Point& v) {
     return result;
 }
 
-std::vector<Patch*> Model::patchByVertexPtr(const geom::PointPtr& v) {
-    std::vector<Patch*> result;
-    for (auto* p : patches) {
+std::vector<Cell*> City::cellsByVertexPtr(const geom::PointPtr& v) {
+    std::vector<Cell*> result;
+    for (auto* p : cells) {
         if (p->shape.containsPtr(v)) {
             result.push_back(p);
         }
@@ -888,7 +888,7 @@ std::vector<Patch*> Model::patchByVertexPtr(const geom::PointPtr& v) {
     return result;
 }
 
-geom::Polygon Model::findCircumference(const std::vector<Patch*>& patchList) {
+geom::Polygon City::findCircumference(const std::vector<Cell*>& patchList) {
     if (patchList.empty()) return geom::Polygon();
     if (patchList.size() == 1) return patchList[0]->shape.copy();
 
@@ -961,22 +961,22 @@ geom::Polygon Model::findCircumference(const std::vector<Patch*>& patchList) {
     return result;
 }
 
-std::vector<std::vector<Patch*>> Model::splitIntoConnectedComponents(const std::vector<Patch*>& patchList) {
-    std::vector<std::vector<Patch*>> components;
+std::vector<std::vector<Cell*>> City::splitIntoConnectedComponents(const std::vector<Cell*>& patchList) {
+    std::vector<std::vector<Cell*>> components;
     if (patchList.empty()) return components;
 
-    // Create a set of patches we need to process
-    std::set<Patch*> remaining(patchList.begin(), patchList.end());
+    // Create a set of cells we need to process
+    std::set<Cell*> remaining(patchList.begin(), patchList.end());
 
     while (!remaining.empty()) {
         // Start a new component with any remaining patch
-        std::vector<Patch*> component;
-        std::vector<Patch*> queue;
+        std::vector<Cell*> component;
+        std::vector<Cell*> queue;
         queue.push_back(*remaining.begin());
 
         // Flood fill through neighbors
         while (!queue.empty()) {
-            Patch* current = queue.back();
+            Cell* current = queue.back();
             queue.pop_back();
 
             // Skip if already processed
@@ -986,7 +986,7 @@ std::vector<std::vector<Patch*>> Model::splitIntoConnectedComponents(const std::
             component.push_back(current);
 
             // Add neighbors that are in our original patch list
-            for (Patch* neighbor : current->neighbors) {
+            for (Cell* neighbor : current->neighbors) {
                 if (remaining.find(neighbor) != remaining.end()) {
                     queue.push_back(neighbor);
                 }
@@ -1001,10 +1001,10 @@ std::vector<std::vector<Patch*>> Model::splitIntoConnectedComponents(const std::
     return components;
 }
 
-void Model::createWards() {
+void City::createWards() {
     // Ward type distribution (faithful to original weights)
     // Note: Slum is NOT included here - slums are only created by buildShantyTowns()
-    // for patches OUTSIDE the city walls (SPRAWL type in MFCG)
+    // for cells OUTSIDE the city walls (SPRAWL type in MFCG)
     std::vector<std::function<wards::Ward*()>> wardTypes = {
         []() { return new wards::CraftsmenWard(); },
         []() { return new wards::MerchantWard(); },
@@ -1020,9 +1020,9 @@ void Model::createWards() {
     bool castleAssigned = false;
     bool marketAssigned = false;
 
-    // Assign wards to patches
-    for (size_t idx = 0; idx < patches.size(); ++idx) {
-        auto* patch = patches[idx];
+    // Assign wards to cells
+    for (size_t idx = 0; idx < cells.size(); ++idx) {
+        auto* patch = cells[idx];
         wards::Ward* ward = nullptr;
 
         // Special wards
@@ -1054,7 +1054,7 @@ void Model::createWards() {
         // Regular wards
         if (!ward) {
             if (patch->waterbody) {
-                // Water patches don't get wards - skip
+                // Water cells don't get wards - skip
                 continue;
             } else if (patch->withinCity) {
                 // Check if this patch borders water - could be harbour
@@ -1067,7 +1067,7 @@ void Model::createWards() {
                 }
 
                 if (bordersWater && coastNeeded && maxDocks > 0) {
-                    // Harbour ward for waterfront patches (uses maxDocks limit)
+                    // Harbour ward for waterfront cells (uses maxDocks limit)
                     ward = new wards::Harbour();
                     patch->landing = true;
                     --maxDocks;
@@ -1089,7 +1089,7 @@ void Model::createWards() {
                     if (!ward) ward = new wards::CommonWard();
                 }
             } else {
-                // Outer patches - handled by buildFarms() with sine-wave radial pattern
+                // Outer cells - handled by buildFarms() with sine-wave radial pattern
                 // Leave as nullptr here - farms assigned later
             }
         }
@@ -1104,13 +1104,13 @@ void Model::createWards() {
 
     // Park placement (faithful to mfcg.js lines 970-993)
     // 1. Parks near citadel gate
-    // 2. Additional parks in inner patches based on city size
+    // 2. Additional parks in inner cells based on city size
     int parksCreated = 0;
     if (citadel && !citadel->gates.empty()) {
         auto citadelGate = citadel->gates[0];
-        auto patchesAtGate = patchByVertex(*citadelGate);
+        auto patchesAtGate = cellsByVertex(*citadelGate);
         if (patchesAtGate.size() == 3) {
-            double parkProb = 1.0 - 2.0 / static_cast<double>(nPatches_ - 1);
+            double parkProb = 1.0 - 2.0 / static_cast<double>(nCells_ - 1);
             if (utils::Random::floatVal() < parkProb) {
                 for (auto* p : patchesAtGate) {
                     if (!p->ward) {
@@ -1126,8 +1126,8 @@ void Model::createWards() {
         }
     }
 
-    // Additional parks based on city size: (nPatches - 10) / 20
-    double parkCount = static_cast<double>(nPatches_ - 10) / 20.0;
+    // Additional parks based on city size: (nCells - 10) / 20
+    double parkCount = static_cast<double>(nCells_ - 10) / 20.0;
     int targetParks = static_cast<int>(parkCount);
     double frac = parkCount - targetParks;
     if (utils::Random::floatVal() < frac) ++targetParks;
@@ -1135,13 +1135,13 @@ void Model::createWards() {
 
     for (int i = 0; i < targetParks; ++i) {
         // Find a random inner patch without a ward
-        std::vector<Patch*> candidates;
+        std::vector<Cell*> candidates;
         for (auto* p : inner) {
             if (!p->ward) candidates.push_back(p);
         }
         if (candidates.empty()) break;
 
-        Patch* p = candidates[utils::Random::intVal(0, static_cast<int>(candidates.size()))];
+        Cell* p = candidates[utils::Random::intVal(0, static_cast<int>(candidates.size()))];
         auto* ward = new wards::Park();
         ward->patch = p;
         ward->model = this;
@@ -1152,7 +1152,7 @@ void Model::createWards() {
     // Cathedral placement (faithful to mfcg.js line 997)
     // Find the inner patch with no ward that is closest to center
     if (templeNeeded) {
-        Patch* templePatch = nullptr;
+        Cell* templePatch = nullptr;
         double minDist = std::numeric_limits<double>::max();
 
         for (auto* patch : inner) {
@@ -1175,7 +1175,7 @@ void Model::createWards() {
     }
 }
 
-void Model::buildFarms() {
+void City::buildFarms() {
     // Faithful to mfcg.js buildFarms (lines 1056-1070)
     // Uses sine-wave radial pattern for organic farm placement
 
@@ -1202,7 +1202,7 @@ void Model::buildFarms() {
     }
 
     // Helper to check if patch borders shore edges
-    auto bordersShore = [this](Patch* patch) -> bool {
+    auto bordersShore = [this](Cell* patch) -> bool {
         for (size_t i = 0; i < patch->shape.length(); ++i) {
             const geom::Point& v0 = patch->shape[i];
             const geom::Point& v1 = patch->shape[(i + 1) % patch->shape.length()];
@@ -1216,13 +1216,13 @@ void Model::buildFarms() {
         return false;
     };
 
-    // Apply sine-wave pattern to outer patches without wards
-    for (auto* patch : patches) {
+    // Apply sine-wave pattern to outer cells without wards
+    for (auto* patch : cells) {
         if (patch->ward) continue;  // Already has a ward
-        if (patch->withinCity) continue;  // Only outer patches
+        if (patch->withinCity) continue;  // Only outer cells
 
         if (patch->waterbody) {
-            // Water patches get base Ward (no buildings)
+            // Water cells get base Ward (no buildings)
             continue;
         }
 
@@ -1257,12 +1257,12 @@ void Model::buildFarms() {
     }
 }
 
-void Model::buildShantyTowns() {
+void City::buildShantyTowns() {
     // Faithful to mfcg.js buildShantyTowns (lines 1071-1130)
     // Creates shanty towns outside city walls near roads
 
     // Helper to check if patch borders horizon (outer boundary)
-    auto bordersHorizon = [this](Patch* patch) -> bool {
+    auto bordersHorizon = [this](Cell* patch) -> bool {
         for (size_t i = 0; i < patch->shape.length(); ++i) {
             const geom::Point& v0 = patch->shape[i];
             const geom::Point& v1 = patch->shape[(i + 1) % patch->shape.length()];
@@ -1278,7 +1278,7 @@ void Model::buildShantyTowns() {
 
     // Helper to calculate distance-based score for shanty placement
     geom::Point center(offsetX_, offsetY_);
-    auto calcScore = [&](Patch* patch) -> double {
+    auto calcScore = [&](Cell* patch) -> double {
         geom::Point patchCenter = patch->shape.centroid();
         double distToCenter = geom::Point::distance(patchCenter, center) * 3.0;
 
@@ -1300,11 +1300,11 @@ void Model::buildShantyTowns() {
         return minRoadDist * minRoadDist;
     };
 
-    // Find candidate patches for shanty towns
-    std::vector<Patch*> candidates;
+    // Find candidate cells for shanty towns
+    std::vector<Cell*> candidates;
     std::vector<double> scores;
 
-    for (auto* patch : patches) {
+    for (auto* patch : cells) {
         if (patch->withinCity) continue;
         if (patch->waterbody) continue;
         if (patch->ward) continue;
@@ -1324,9 +1324,9 @@ void Model::buildShantyTowns() {
         }
     }
 
-    // Randomly select patches to become shanty towns based on score
+    // Randomly select cells to become shanty towns based on score
     double r = utils::Random::floatVal();
-    int targetShanties = static_cast<int>(nPatches_ * (1.0 + r * r * r) * 0.5);
+    int targetShanties = static_cast<int>(nCells_ * (1.0 + r * r * r) * 0.5);
 
     while (targetShanties > 0 && !candidates.empty()) {
         // Calculate total score
@@ -1347,7 +1347,7 @@ void Model::buildShantyTowns() {
         }
 
         // Create slum ward for selected patch
-        Patch* patch = candidates[selected];
+        Cell* patch = candidates[selected];
         auto* ward = new wards::Slum();
         ward->patch = patch;
         ward->model = this;
@@ -1363,8 +1363,8 @@ void Model::buildShantyTowns() {
 
 }
 
-void Model::buildGeometry() {
-    // First, set edge data on all patches
+void City::buildGeometry() {
+    // First, set edge data on all cells
     setEdgeData();
 
     // Create WardGroups for unified geometry generation
@@ -1376,11 +1376,11 @@ void Model::buildGeometry() {
     }
 }
 
-void Model::setEdgeData() {
-    // Set edge types on all patches (faithful to mfcg.js edge data assignment)
+void City::setEdgeData() {
+    // Set edge types on all cells (faithful to mfcg.js edge data assignment)
     // Edge types: COAST, ROAD, WALL, CANAL, HORIZON, NONE
 
-    for (auto* patch : patches) {
+    for (auto* patch : cells) {
         size_t len = patch->shape.length();
 
         for (size_t i = 0; i < len; ++i) {
@@ -1455,18 +1455,18 @@ void Model::setEdgeData() {
         }
     }
 
-    SDL_Log("Model: Set edge data on %zu patches", patches.size());
+    SDL_Log("City: Set edge data on %zu cells", cells.size());
 }
 
-void Model::createWardGroups() {
-    // Create WardGroups from adjacent patches with the same ward type
+void City::createWardGroups() {
+    // Create WardGroups from adjacent cells with the same ward type
     WardGroupBuilder builder(this);
     wardGroups_ = builder.build();
 
-    SDL_Log("Model: Created %zu ward groups", wardGroups_.size());
+    SDL_Log("City: Created %zu ward groups", wardGroups_.size());
 }
 
-double Model::getCanalWidth(const geom::Point& v) const {
+double City::getCanalWidth(const geom::Point& v) const {
     // Get the canal width at a vertex (faithful to mfcg.js getCanalWidth)
     for (const auto& canal : canals) {
         double width = canal->getWidthAtVertex(v);

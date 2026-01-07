@@ -2,14 +2,14 @@
 
 #include "town_generator/geom/Point.h"
 #include "town_generator/geom/Polygon.h"
-#include "town_generator/building/Patch.h"
+#include "town_generator/building/Cell.h"
 #include <vector>
 #include <stdexcept>
 
 namespace town_generator {
 namespace building {
 
-class Model;
+class City;
 
 /**
  * CurtainWall - City walls with gates and towers
@@ -32,13 +32,13 @@ public:
 
 private:
     bool real_;
-    std::vector<Patch*> patches_;
+    std::vector<Cell*> patches_;
 
 public:
     CurtainWall(
         bool real,
-        Model* model,
-        const std::vector<Patch*>& patches,
+        City* model,
+        const std::vector<Cell*>& cells,
         const std::vector<geom::PointPtr>& reserved
     );
 
@@ -46,8 +46,8 @@ public:
 
     double getRadius() const;
 
-    bool bordersBy(Patch* p, const geom::Point& v0, const geom::Point& v1) const;
-    bool borders(Patch* p) const;
+    bool bordersBy(Cell* p, const geom::Point& v0, const geom::Point& v1) const;
+    bool borders(Cell* p) const;
 
     // Get tower radius exclusion at a vertex (faithful to mfcg.js getTowerRadius)
     // Returns: LTOWER_RADIUS if vertex is a tower, 1 + 2*TOWER_RADIUS if gate, 0 otherwise
@@ -63,7 +63,7 @@ public:
     }
 
 private:
-    void buildGates(bool real, Model* model, const std::vector<geom::PointPtr>& reserved);
+    void buildGates(bool real, City* model, const std::vector<geom::PointPtr>& reserved);
 };
 
 } // namespace building

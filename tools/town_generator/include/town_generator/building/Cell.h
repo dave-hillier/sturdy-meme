@@ -19,25 +19,25 @@ namespace building {
 class WardGroup;
 
 /**
- * Patch - City district, faithful port from Haxe TownGeneratorOS
+ * Cell - City district, faithful port from Haxe TownGeneratorOS
  *
  * Each patch represents a Voronoi cell and contains:
  * - shape: the polygon boundary
  * - ward: the ward type (Castle, Market, etc.)
- * - neighbors: adjacent patches that share an edge
+ * - neighbors: adjacent cells that share an edge
  * - edgeData: per-edge type classification (COAST, ROAD, WALL, CANAL)
  */
-class Patch {
+class Cell {
 public:
     geom::Polygon shape;
     wards::Ward* ward = nullptr;
-    std::vector<Patch*> neighbors;  // Adjacent patches (share an edge)
+    std::vector<Cell*> neighbors;  // Adjacent cells (share an edge)
 
     // Per-edge data: maps edge index -> EdgeType
     // Edge i is from shape[i] to shape[(i+1) % length]
     std::map<size_t, EdgeType> edgeData;
 
-    // Group of adjacent patches with same ward type for unified geometry generation
+    // Group of adjacent cells with same ward type for unified geometry generation
     WardGroup* group = nullptr;
 
     bool withinWalls = false;
@@ -48,21 +48,21 @@ public:
     // Seed for reproducible random in this patch (faithful to mfcg.js patch.seed)
     int seed = 0;
 
-    Patch() = default;
+    Cell() = default;
 
-    explicit Patch(const std::vector<geom::Point>& vertices)
+    explicit Cell(const std::vector<geom::Point>& vertices)
         : shape(vertices), withinWalls(false), withinCity(false) {}
 
-    explicit Patch(const geom::Polygon& poly)
+    explicit Cell(const geom::Polygon& poly)
         : shape(poly), withinWalls(false), withinCity(false) {}
 
     // Create from Voronoi region
-    static Patch fromRegion(geom::Region* r) {
+    static Cell fromRegion(geom::Region* r) {
         std::vector<geom::Point> vertices;
         for (auto* tr : r->vertices) {
             vertices.push_back(tr->c);
         }
-        return Patch(vertices);
+        return Cell(vertices);
     }
 
     // Get edge type for edge at index i (from shape[i] to shape[(i+1) % length])
@@ -105,13 +105,13 @@ public:
     }
 
     // Equality
-    bool operator==(const Patch& other) const {
+    bool operator==(const Cell& other) const {
         return shape == other.shape &&
                withinWalls == other.withinWalls &&
                withinCity == other.withinCity;
     }
 
-    bool operator!=(const Patch& other) const {
+    bool operator!=(const Cell& other) const {
         return !(*this == other);
     }
 };

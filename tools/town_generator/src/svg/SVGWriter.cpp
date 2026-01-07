@@ -37,7 +37,7 @@ std::string SVGWriter::polylineToPath(const std::vector<geom::Point>& points) {
     return ss.str();
 }
 
-std::string SVGWriter::polylineToPath(const building::Model::Street& street) {
+std::string SVGWriter::polylineToPath(const building::City::Street& street) {
     if (street.empty()) return "";
 
     std::ostringstream ss;
@@ -61,7 +61,7 @@ static bool isGate(const geom::Point& pt, const std::vector<geom::PointPtr>& gat
     return false;
 }
 
-std::string SVGWriter::generate(const building::Model& model, const Style& style) {
+std::string SVGWriter::generate(const building::City& model, const Style& style) {
     std::ostringstream svg;
     svg << std::fixed << std::setprecision(2);
 
@@ -368,7 +368,7 @@ std::string SVGWriter::generate(const building::Model& model, const Style& style
     return svg.str();
 }
 
-bool SVGWriter::write(const building::Model& model, const std::string& filename, const Style& style) {
+bool SVGWriter::write(const building::City& model, const std::string& filename, const Style& style) {
     std::ofstream file(filename);
     if (!file.is_open()) {
         return false;

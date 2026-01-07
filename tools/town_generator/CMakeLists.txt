@@ -22,7 +22,7 @@ set(UTILS_SOURCES
 )
 
 set(BUILDING_SOURCES
-    src/building/Patch.cpp
+    src/building/Cell.cpp
     src/building/Cutter.cpp
     src/building/Topology.cpp
     src/building/CurtainWall.cpp
@@ -31,7 +31,8 @@ set(BUILDING_SOURCES
     src/building/Block.cpp
     src/building/Bisector.cpp
     src/building/Building.cpp
-    src/building/Model.cpp
+    src/building/District.cpp
+    src/building/City.cpp
 )
 
 set(WARD_SOURCES

@@ -13,7 +13,7 @@ namespace building {
  * Reference: mfcg.js lines 11136-11150
  */
 enum class EdgeType {
-    NONE = 0,       // No special data (interior edge between patches)
+    NONE = 0,       // No special data (interior edge between cells)
     COAST = 1,      // Edge borders water (sea, lake)
     ROAD = 2,       // Edge borders a road/artery
     WALL = 3,       // Edge borders a city wall

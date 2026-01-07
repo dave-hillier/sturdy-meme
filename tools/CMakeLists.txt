@@ -274,7 +274,7 @@ add_executable(town_generator
     town_generator/src/geom/Voronoi.cpp
     town_generator/src/utils/Random.cpp
     town_generator/src/utils/MathUtils.cpp
-    town_generator/src/building/Patch.cpp
+    town_generator/src/building/Cell.cpp
     town_generator/src/building/Cutter.cpp
     town_generator/src/building/Topology.cpp
     town_generator/src/building/CurtainWall.cpp
@@ -284,7 +284,7 @@ add_executable(town_generator
     town_generator/src/building/Block.cpp
     town_generator/src/building/Bisector.cpp
     town_generator/src/building/Building.cpp
-    town_generator/src/building/Model.cpp
+    town_generator/src/building/City.cpp
     town_generator/src/wards/Ward.cpp
     town_generator/src/wards/Castle.cpp
     town_generator/src/wards/Cathedral.cpp

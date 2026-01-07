@@ -1,5 +1,5 @@
 #include "town_generator/building/CurtainWall.h"
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/utils/Random.h"
 #include <algorithm>
 #include <cmath>
@@ -10,18 +10,18 @@ namespace building {
 
 CurtainWall::CurtainWall(
     bool real,
-    Model* model,
-    const std::vector<Patch*>& patches,
+    City* model,
+    const std::vector<Cell*>& cells,
     const std::vector<geom::PointPtr>& reserved
-) : real_(real), patches_(patches) {
+) : real_(real), patches_(cells) {
 
-    if (patches.size() == 1) {
-        shape = patches[0]->shape.copy();  // Shares vertices with patch
+    if (cells.size() == 1) {
+        shape = cells[0]->shape.copy();  // Shares vertices with patch
     } else {
-        shape = Model::findCircumference(patches);  // Already shares vertices
+        shape = City::findCircumference(cells);  // Already shares vertices
 
         if (real) {
-            double smoothFactor = std::min(1.0, 40.0 / patches.size());
+            double smoothFactor = std::min(1.0, 40.0 / cells.size());
 
             std::vector<geom::Point> smoothed;
             for (const auto& vPtr : shape) {
@@ -46,7 +46,7 @@ CurtainWall::CurtainWall(
     buildGates(real, model, reserved);
 }
 
-void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::PointPtr>& reserved) {
+void CurtainWall::buildGates(bool real, City* model, const std::vector<geom::PointPtr>& reserved) {
     gates.clear();
 
     // Find potential entrance points - store as PointPtr to preserve identity
@@ -106,8 +106,8 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
 
         if (real) {
             // Find outer wards for potential road creation
-            std::vector<Patch*> outerWards;
-            for (auto* p : model->patches) {
+            std::vector<Cell*> outerWards;
+            for (auto* p : model->cells) {
                 if (p->shape.containsPtr(gatePtr)) {
                     bool isInner = std::find(patches_.begin(), patches_.end(), p) != patches_.end();
                     if (!isInner) {
@@ -147,18 +147,18 @@ void CurtainWall::buildGates(bool real, Model* model, const std::vector<geom::Po
 
                     // Split the outer ward (using splitShared to preserve PointPtrs)
                     auto halves = outer->shape.splitShared(*gatePtr, *farthestPtr);
-                    std::vector<Patch*> newPatches;
+                    std::vector<Cell*> newPatches;
                     for (const auto& half : halves) {
-                        auto* newPatch = new Patch(half);
+                        auto* newPatch = new Cell(half);
                         newPatches.push_back(newPatch);
                     }
 
                     // Replace in model
-                    auto it = std::find(model->patches.begin(), model->patches.end(), outer);
-                    if (it != model->patches.end()) {
+                    auto it = std::find(model->cells.begin(), model->cells.end(), outer);
+                    if (it != model->cells.end()) {
                         *it = newPatches[0];
                         for (size_t i = 1; i < newPatches.size(); ++i) {
-                            model->patches.insert(it + i, newPatches[i]);
+                            model->cells.insert(it + i, newPatches[i]);
                         }
                     }
                 }
@@ -235,7 +235,7 @@ double CurtainWall::getRadius() const {
     return radius;
 }
 
-bool CurtainWall::bordersBy(Patch* p, const geom::Point& v0, const geom::Point& v1) const {
+bool CurtainWall::bordersBy(Cell* p, const geom::Point& v0, const geom::Point& v1) const {
     bool withinWalls = std::find(patches_.begin(), patches_.end(), p) != patches_.end();
 
     int index;
@@ -252,7 +252,7 @@ bool CurtainWall::bordersBy(Patch* p, const geom::Point& v0, const geom::Point& 
     return false;
 }
 
-bool CurtainWall::borders(Patch* p) const {
+bool CurtainWall::borders(Cell* p) const {
     bool withinWalls = std::find(patches_.begin(), patches_.end(), p) != patches_.end();
     size_t length = shape.length();
 

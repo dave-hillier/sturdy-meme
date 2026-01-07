@@ -1,5 +1,5 @@
 #include "town_generator/wards/Castle.h"
-#include "town_generator/building/Model.h"
+#include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/utils/Random.h"
 #include "town_generator/geom/GeomUtils.h"
