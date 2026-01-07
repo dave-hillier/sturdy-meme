@@ -8,13 +8,7 @@
 #include "town_generator/wards/Castle.h"
 #include "town_generator/wards/Cathedral.h"
 #include "town_generator/wards/Market.h"
-#include "town_generator/wards/CraftsmenWard.h"
-#include "town_generator/wards/MerchantWard.h"
-#include "town_generator/wards/PatriciateWard.h"
-#include "town_generator/wards/CommonWard.h"
-#include "town_generator/wards/AdministrationWard.h"
-#include "town_generator/wards/MilitaryWard.h"
-#include "town_generator/wards/GateWard.h"
+#include "town_generator/wards/Alleys.h"
 #include "town_generator/wards/Slum.h"
 #include "town_generator/wards/Farm.h"
 #include "town_generator/wards/Park.h"
@@ -1002,19 +996,9 @@ std::vector<std::vector<Cell*>> City::splitIntoConnectedComponents(const std::ve
 }
 
 void City::createWards() {
-    // Ward type distribution (faithful to original weights)
-    // Note: Slum is NOT included here - slums are only created by buildShantyTowns()
-    // for cells OUTSIDE the city walls (SPRAWL type in MFCG)
-    std::vector<std::function<wards::Ward*()>> wardTypes = {
-        []() { return new wards::CraftsmenWard(); },
-        []() { return new wards::MerchantWard(); },
-        []() { return new wards::CommonWard(); },
-        []() { return new wards::PatriciateWard(); },
-        []() { return new wards::AdministrationWard(); },
-        []() { return new wards::MilitaryWard(); },
-    };
-
-    std::vector<double> weights = {3, 2, 4, 1, 1, 1};
+    // Faithful to MFCG: All urban wards inside the city are Alleys type.
+    // Special wards: Castle, Market, Cathedral, Park, Harbour
+    // Outside walls: Farm, Wilderness, Slum (via buildShantyTowns)
 
     // Track special ward assignments
     bool castleAssigned = false;
@@ -1039,16 +1023,6 @@ void City::createWards() {
                 marketAssigned = true;
             }
             // Cathedral placement is handled separately after other special wards (see below)
-            // Gate wards near gates
-            else if (!gates.empty()) {
-                for (const auto& gatePtr : gates) {
-                    if (patch->shape.containsPtr(gatePtr) ||
-                        geom::Point::distance(patch->shape.centroid(), *gatePtr) < 10.0) {
-                        ward = new wards::GateWard();
-                        break;
-                    }
-                }
-            }
         }
 
         // Regular wards
@@ -1072,21 +1046,8 @@ void City::createWards() {
                     patch->landing = true;
                     --maxDocks;
                 } else {
-                    // Weighted random selection
-                    double total = 0;
-                    for (double w : weights) total += w;
-
-                    double r = utils::Random::floatVal() * total;
-                    double acc = 0;
-                    for (size_t i = 0; i < wardTypes.size(); ++i) {
-                        acc += weights[i];
-                        if (r <= acc) {
-                            ward = wardTypes[i]();
-                            break;
-                        }
-                    }
-
-                    if (!ward) ward = new wards::CommonWard();
+                    // Faithful to MFCG: all urban wards are Alleys
+                    ward = new wards::Alleys();
                 }
             } else {
                 // Outer cells - handled by buildFarms() with sine-wave radial pattern

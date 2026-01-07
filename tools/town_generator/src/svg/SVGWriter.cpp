@@ -1,6 +1,8 @@
 #include "town_generator/svg/SVGWriter.h"
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/building/Canal.h"
+#include "town_generator/building/WardGroup.h"
+#include "town_generator/building/Block.h"
 #include "town_generator/wards/Ward.h"
 #include <cmath>
 #include <map>
@@ -190,11 +192,31 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
     // Buildings (with ward-type tinting like mfcg.js)
     // Skip special buildings here - they're rendered separately below
     svg << "  <g id=\"buildings\">\n";
+
+    // Render buildings from WardGroups (Alleys/Slum wards)
+    // This is faithful to MFCG where geometry is created per-group, not per-ward
+    std::string alleysColor = getWardTint("Alleys");
+    for (const auto& group : model.wardGroups_) {
+        for (const auto& block : group->blocks) {
+            for (const auto& building : block->buildings) {
+                svg << "    <path d=\"" << polygonToPath(building) << "\" ";
+                svg << "fill=\"" << alleysColor << "\" ";
+                svg << "stroke=\"" << style.buildingStroke << "\" ";
+                svg << "stroke-width=\"" << style.buildingStrokeWidth << "\"/>\n";
+            }
+        }
+    }
+
+    // Render buildings from non-grouped wards (Farm, Harbour, Market, Park, etc.)
     for (const auto& ward : model.wards_) {
         // Skip special wards (Cathedral, Castle) - rendered as solid dark
         if (ward->isSpecialWard()) continue;
 
-        std::string wardColor = getWardTint(ward->getName());
+        // Skip Alleys/Slum wards - already rendered from WardGroups above
+        std::string wardName = ward->getName();
+        if (wardName == "Alleys" || wardName == "Slum") continue;
+
+        std::string wardColor = getWardTint(wardName);
         for (const auto& building : ward->geometry) {
             // Skip the church building - rendered separately as special
             if (ward->hasChurch() && &building == &ward->getChurch()) continue;
@@ -211,7 +233,7 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
     // Reference: mfcg.js hd.drawSolids() fills with K.colorWall
     svg << "  <g id=\"special-buildings\">\n";
     for (const auto& ward : model.wards_) {
-        // Churches from regular wards (CommonWard, CraftsmenWard, etc.)
+        // Churches from Alleys wards
         if (ward->hasChurch()) {
             svg << "    <path d=\"" << polygonToPath(ward->getChurch()) << "\" ";
             svg << "fill=\"" << style.wallStroke << "\" ";

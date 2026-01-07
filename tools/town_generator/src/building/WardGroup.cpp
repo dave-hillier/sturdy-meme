@@ -1,6 +1,7 @@
 #include "town_generator/building/WardGroup.h"
 #include "town_generator/building/Block.h"
 #include "town_generator/building/City.h"
+#include "town_generator/building/CurtainWall.h"
 #include "town_generator/building/Cutter.h"
 #include "town_generator/utils/Random.h"
 #include "town_generator/wards/Ward.h"
@@ -11,12 +12,15 @@
 namespace town_generator {
 namespace building {
 
-// Forward declaration of helper function
+// Forward declaration of helper functions
 static void subdivideIntoBlocksHelper(
     const geom::Polygon& area,
     const wards::AlleyParams& params,
     std::vector<geom::Polygon>& result
 );
+
+static bool isEdgeOnRoad(const geom::Point& v0, const geom::Point& v1,
+                         const std::vector<City::Street>& roads);
 
 WardGroup::WardGroup(City* model) : model(model) {}
 
@@ -110,8 +114,8 @@ void WardGroup::createGeometry() {
     createParams();
 
     // Get available area after street/wall insets
-    // For now, use simplified inset based on alleys.inset
-    std::vector<double> insets(border.length(), alleys.inset);
+    // Calculate per-edge insets based on what's adjacent (roads, walls, etc.)
+    std::vector<double> insets = getAvailable();
     geom::Polygon available = border.shrink(insets);
 
     if (available.length() < 3) {
@@ -126,15 +130,18 @@ void WardGroup::createGeometry() {
 
     // Create Block objects from shapes
     blocks.clear();
+    size_t totalBuildings = 0;
     for (const auto& shape : blockShapes) {
         auto block = std::make_unique<Block>(shape, this);
         block->createLots();
         block->createRects();
         block->createBuildings();
+        totalBuildings += block->buildings.size();
         blocks.push_back(std::move(block));
     }
 
-    SDL_Log("WardGroup: Created %zu blocks from %zu cells", blocks.size(), cells.size());
+    SDL_Log("WardGroup: Created %zu blocks with %zu buildings from %zu cells",
+            blocks.size(), totalBuildings, cells.size());
 }
 
 std::vector<geom::Point> WardGroup::spawnTrees() {
@@ -217,6 +224,121 @@ void WardGroup::computeInnerVertices() {
     urban = (inner.size() == border.length());
 }
 
+std::vector<double> WardGroup::getAvailable() const {
+    // Calculate per-edge inset distances based on what's adjacent
+    // Faithful to MFCG Ward.getAvailable / District.getAvailable
+    if (border.length() < 3 || !model) {
+        return std::vector<double>(border.length(), wards::Ward::REGULAR_STREET / 2);
+    }
+
+    std::vector<double> insets;
+    insets.reserve(border.length());
+
+    for (size_t i = 0; i < border.length(); ++i) {
+        const geom::Point& v0 = border[i];
+        const geom::Point& v1 = border[(i + 1) % border.length()];
+
+        double inset = wards::Ward::REGULAR_STREET / 2;  // Default street inset
+
+        // Check if edge borders wall - use MAIN_STREET
+        bool onWall = false;
+        if (model->wall) {
+            int wallIdx = model->wall->shape.findEdge(v0, v1);
+            if (wallIdx == -1) wallIdx = model->wall->shape.findEdge(v1, v0);
+            onWall = (wallIdx != -1);
+        }
+        if (onWall) {
+            inset = wards::Ward::MAIN_STREET / 2;
+        }
+        // Check citadel
+        else if (model->citadel) {
+            int citIdx = model->citadel->shape.findEdge(v0, v1);
+            if (citIdx == -1) citIdx = model->citadel->shape.findEdge(v1, v0);
+            if (citIdx != -1) {
+                inset = wards::Ward::MAIN_STREET / 2;
+            }
+        }
+        // Check if edge is on main artery
+        else if (isEdgeOnRoad(v0, v1, model->arteries)) {
+            inset = wards::Ward::MAIN_STREET / 2;
+        }
+        // Check streets and roads
+        else if (isEdgeOnRoad(v0, v1, model->streets) || isEdgeOnRoad(v0, v1, model->roads)) {
+            inset = wards::Ward::REGULAR_STREET / 2;
+        }
+        // Check if edge is internal (between cells in the same group)
+        else {
+            bool isInternal = false;
+            for (Cell* cell : cells) {
+                for (size_t ci = 0; ci < cell->shape.length(); ++ci) {
+                    const geom::Point& cv0 = cell->shape[ci];
+                    const geom::Point& cv1 = cell->shape[(ci + 1) % cell->shape.length()];
+                    // Check if this edge is shared between cells in the group
+                    if ((cv0 == v0 && cv1 == v1) || (cv0 == v1 && cv1 == v0)) {
+                        // Check if neighbor is also in the group
+                        for (Cell* neighbor : cell->neighbors) {
+                            if (std::find(cells.begin(), cells.end(), neighbor) != cells.end()) {
+                                // This edge is internal to the group - no inset needed
+                                isInternal = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (isInternal) break;
+                }
+                if (isInternal) break;
+            }
+            if (isInternal) {
+                inset = 0.0;  // Internal edge - no street
+            }
+        }
+
+        insets.push_back(inset);
+    }
+
+    return insets;
+}
+
+// Helper to check if an edge lies on any road in a set
+static bool isEdgeOnRoad(const geom::Point& v0, const geom::Point& v1,
+                         const std::vector<City::Street>& roads) {
+    for (const auto& road : roads) {
+        if (road.size() < 2) continue;
+
+        for (size_t i = 0; i < road.size() - 1; ++i) {
+            const geom::Point& r0 = *road[i];
+            const geom::Point& r1 = *road[i + 1];
+
+            // Check if edge endpoints match road segment endpoints
+            if ((v0 == r0 && v1 == r1) || (v0 == r1 && v1 == r0)) {
+                return true;
+            }
+
+            // Also check if edge lies along the road segment
+            geom::Point roadDir = r1.subtract(r0);
+            double roadLen = roadDir.length();
+            if (roadLen < 0.001) continue;
+            roadDir = roadDir.scale(1.0 / roadLen);
+
+            geom::Point edgeDir = v1.subtract(v0);
+            double edgeLen = edgeDir.length();
+            if (edgeLen < 0.001) continue;
+            edgeDir = edgeDir.scale(1.0 / edgeLen);
+
+            // Check if parallel
+            double dot = roadDir.x * edgeDir.x + roadDir.y * edgeDir.y;
+            if (std::abs(dot) < 0.99) continue;
+
+            // Check if v0 is on the road line
+            double dist = std::abs((v0.x - r0.x) * roadDir.y - (v0.y - r0.y) * roadDir.x);
+            if (dist < 0.5) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Helper function to subdivide area into blocks
 static void subdivideIntoBlocksHelper(
     const geom::Polygon& area,
@@ -284,19 +406,24 @@ std::vector<std::unique_ptr<WardGroup>> WardGroupBuilder::build() {
     std::vector<std::unique_ptr<WardGroup>> groups;
 
     // Get all city cells with wards that support grouping
+    // Faithful to MFCG: only Alleys and Slum wards are grouped
     std::vector<Cell*> unassigned;
+    size_t alleysCount = 0;
+    size_t slumCount = 0;
     for (auto* patch : model_->cells) {
         if (patch->withinCity && !patch->waterbody && patch->ward) {
-            // Only group "Alleys" type wards (CommonWard, MerchantWard, CraftsmenWard, etc.)
             std::string wardName = patch->ward->getName();
-            if (wardName == "CommonWard" || wardName == "MerchantWard" ||
-                wardName == "CraftsmenWard" || wardName == "PatriciateWard" ||
-                wardName == "Slum" || wardName == "AdministrationWard" ||
-                wardName == "MilitaryWard") {
+            if (wardName == "Alleys") {
                 unassigned.push_back(patch);
+                ++alleysCount;
+            } else if (wardName == "Slum") {
+                unassigned.push_back(patch);
+                ++slumCount;
             }
         }
     }
+    SDL_Log("WardGroupBuilder: Found %zu Alleys wards, %zu Slum wards to group",
+            alleysCount, slumCount);
 
     // Group cells into WardGroups
     while (!unassigned.empty()) {

@@ -174,21 +174,16 @@ protected:
     bool isRectangle(const geom::Polygon& poly) const;
 };
 
-// Forward declarations of all ward types
+// Forward declarations of all ward types (faithful to MFCG)
+class Alleys;
 class Castle;
 class Cathedral;
-class Market;
-class CraftsmenWard;
-class MerchantWard;
-class PatriciateWard;
-class CommonWard;
-class AdministrationWard;
-class MilitaryWard;
-class GateWard;
-class Slum;
 class Farm;
-class Park;
 class Harbour;
+class Market;
+class Park;
+class Slum;
+class Wilderness;
 
 } // namespace wards
 } // namespace town_generator

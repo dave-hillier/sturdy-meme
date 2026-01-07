@@ -90,6 +90,10 @@ public:
 
     // Compute inner vertices from border (called after buildBorder)
     void computeInnerVertices();
+
+    // Get per-edge inset distances for available building area
+    // Returns inset for each edge based on adjacent roads/walls/etc.
+    std::vector<double> getAvailable() const;
 };
 
 /**

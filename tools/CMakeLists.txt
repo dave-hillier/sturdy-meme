@@ -274,6 +274,7 @@ add_executable(town_generator
     town_generator/src/geom/Voronoi.cpp
     town_generator/src/utils/Random.cpp
     town_generator/src/utils/MathUtils.cpp
+    town_generator/src/utils/Forester.cpp
     town_generator/src/building/Cell.cpp
     town_generator/src/building/Cutter.cpp
     town_generator/src/building/Topology.cpp
@@ -284,22 +285,18 @@ add_executable(town_generator
     town_generator/src/building/Block.cpp
     town_generator/src/building/Bisector.cpp
     town_generator/src/building/Building.cpp
+    town_generator/src/building/Landmark.cpp
     town_generator/src/building/City.cpp
     town_generator/src/wards/Ward.cpp
+    town_generator/src/wards/Alleys.cpp
     town_generator/src/wards/Castle.cpp
     town_generator/src/wards/Cathedral.cpp
     town_generator/src/wards/Market.cpp
-    town_generator/src/wards/CraftsmenWard.cpp
-    town_generator/src/wards/MerchantWard.cpp
-    town_generator/src/wards/PatriciateWard.cpp
-    town_generator/src/wards/CommonWard.cpp
-    town_generator/src/wards/AdministrationWard.cpp
-    town_generator/src/wards/MilitaryWard.cpp
-    town_generator/src/wards/GateWard.cpp
     town_generator/src/wards/Slum.cpp
     town_generator/src/wards/Farm.cpp
     town_generator/src/wards/Park.cpp
     town_generator/src/wards/Harbour.cpp
+    town_generator/src/wards/Wilderness.cpp
     town_generator/src/svg/SVGWriter.cpp
 )
 

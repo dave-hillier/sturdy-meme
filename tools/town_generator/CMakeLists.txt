@@ -39,16 +39,10 @@ set(BUILDING_SOURCES
 
 set(WARD_SOURCES
     src/wards/Ward.cpp
+    src/wards/Alleys.cpp
     src/wards/Castle.cpp
     src/wards/Cathedral.cpp
     src/wards/Market.cpp
-    src/wards/CraftsmenWard.cpp
-    src/wards/MerchantWard.cpp
-    src/wards/PatriciateWard.cpp
-    src/wards/CommonWard.cpp
-    src/wards/AdministrationWard.cpp
-    src/wards/MilitaryWard.cpp
-    src/wards/GateWard.cpp
     src/wards/Slum.cpp
     src/wards/Farm.cpp
     src/wards/Park.cpp

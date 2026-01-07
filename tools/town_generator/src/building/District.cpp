@@ -1,6 +1,6 @@
 #include "town_generator/building/District.h"
 #include "town_generator/building/City.h"
-#include "town_generator/wards/CommonWard.h"
+#include "town_generator/wards/Ward.h"
 #include <algorithm>
 #include <cmath>
 
