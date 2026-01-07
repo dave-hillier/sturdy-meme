@@ -2,7 +2,7 @@
 #include "town_generator/building/Block.h"
 #include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
-#include "town_generator/building/Cutter.h"
+#include "town_generator/building/Bisector.h"
 #include "town_generator/utils/Random.h"
 #include "town_generator/wards/Ward.h"
 #include <algorithm>
@@ -11,13 +11,6 @@
 
 namespace town_generator {
 namespace building {
-
-// Forward declaration of helper functions
-static void subdivideIntoBlocksHelper(
-    const geom::Polygon& area,
-    const wards::AlleyParams& params,
-    std::vector<geom::Polygon>& result
-);
 
 static bool isEdgeOnRoad(const geom::Point& v0, const geom::Point& v1,
                          const std::vector<City::Street>& roads);
@@ -123,10 +116,30 @@ void WardGroup::createGeometry() {
         return;
     }
 
-    // Create blocks by recursive subdivision
-    // Faithful to mfcg.js createAlleys
-    std::vector<geom::Polygon> blockShapes;
-    subdivideIntoBlocksHelper(available, alleys, blockShapes);
+    // Create blocks using Bisector (faithful to mfcg.js createAlleys)
+    // MFCG: new Bisector(shape, alleys.minSq * alleys.blockSize, 16 * alleys.gridChaos)
+    double minArea = alleys.minSq * alleys.blockSize;
+    double variance = 16.0 * alleys.gridChaos;
+    Bisector bisector(available, minArea, variance);
+
+    // Set gap callback (returns Ward::ALLEY = 1.2)
+    bisector.getGap = [](const std::vector<geom::Point>&) {
+        return wards::Ward::ALLEY;
+    };
+
+    // For non-urban areas, use isBlockSized as atomic check
+    if (!urban) {
+        double blockSizeThreshold = alleys.minSq * alleys.blockSize;
+        bisector.isAtomic = [blockSizeThreshold](const geom::Polygon& shape) {
+            return std::abs(shape.square()) < blockSizeThreshold;
+        };
+    }
+
+    // Partition the area into blocks
+    std::vector<geom::Polygon> blockShapes = bisector.partition();
+
+    // Store alley cuts for SVG rendering
+    alleyCuts = bisector.cuts;
 
     // Create Block objects from shapes
     blocks.clear();
@@ -140,8 +153,8 @@ void WardGroup::createGeometry() {
         blocks.push_back(std::move(block));
     }
 
-    SDL_Log("WardGroup: Created %zu blocks with %zu buildings from %zu cells",
-            blocks.size(), totalBuildings, cells.size());
+    SDL_Log("WardGroup: Created %zu blocks with %zu buildings, %zu alley cuts from %zu cells",
+            blocks.size(), totalBuildings, alleyCuts.size(), cells.size());
 }
 
 std::vector<geom::Point> WardGroup::spawnTrees() {
@@ -326,67 +339,6 @@ static bool isEdgeOnRoad(const geom::Point& v0, const geom::Point& v1,
         }
     }
     return false;
-}
-
-// Helper function to subdivide area into blocks
-static void subdivideIntoBlocksHelper(
-    const geom::Polygon& area,
-    const wards::AlleyParams& params,
-    std::vector<geom::Polygon>& result
-) {
-    double areaSize = std::abs(area.square());
-    double threshold = params.minSq * params.blockSize;
-
-    // Apply size chaos to threshold
-    double chaosMultiplier = std::pow(2.0, params.sizeChaos * (2.0 * utils::Random::floatVal() - 1.0));
-    threshold *= chaosMultiplier;
-
-    // If area is small enough, it's a block
-    if (areaSize < threshold || area.length() < 3) {
-        if (areaSize > params.minSq / 4.0) {
-            result.push_back(area);
-        }
-        return;
-    }
-
-    // Find longest edge for bisection
-    size_t longestEdge = 0;
-    double longestLen = 0;
-    for (size_t i = 0; i < area.length(); ++i) {
-        geom::Point v = area.vectori(static_cast<int>(i));
-        double len = v.length();
-        if (len > longestLen) {
-            longestLen = len;
-            longestEdge = i;
-        }
-    }
-
-    // Calculate cut ratio with grid chaos
-    double spread = 0.8 * params.gridChaos;
-    double ratio = (1.0 - spread) / 2.0 + utils::Random::floatVal() * spread;
-
-    // Angle spread for larger blocks (faithful to mfcg.js)
-    double angleSpread = M_PI / 6.0 * params.gridChaos * (areaSize < params.minSq * 4 ? 0.0 : 1.0);
-    double angle = (utils::Random::floatVal() - 0.5) * angleSpread;
-
-    // Gap for alleys
-    double gap = wards::Ward::ALLEY;
-
-    // Bisect the area
-    auto halves = Cutter::bisect(area, area[longestEdge], ratio, angle, gap);
-
-    if (halves.size() < 2) {
-        // Bisection failed, treat as a block
-        if (areaSize > params.minSq / 4.0) {
-            result.push_back(area);
-        }
-        return;
-    }
-
-    // Recursively subdivide each half
-    for (const auto& half : halves) {
-        subdivideIntoBlocksHelper(half, params, result);
-    }
 }
 
 // WardGroupBuilder implementation
