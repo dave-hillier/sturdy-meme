@@ -226,21 +226,33 @@ void WardGroup::computeInnerVertices() {
 
 std::vector<double> WardGroup::getAvailable() const {
     // Calculate per-edge inset distances based on what's adjacent
-    // Faithful to MFCG Ward.getAvailable / District.getAvailable
+    // Faithful to MFCG WardGroup.getAvailable (lines 778-821 in 07-wards.js)
     if (border.length() < 3 || !model) {
-        return std::vector<double>(border.length(), wards::Ward::REGULAR_STREET / 2);
+        return std::vector<double>(border.length(), wards::Ward::ALLEY / 2);
     }
 
     std::vector<double> insets;
     insets.reserve(border.length());
 
+    // MFCG inset values (from 07-wards.js lines 799-818):
+    // - ARTERY with landing: 2.0
+    // - ARTERY without landing: 1.2
+    // - STREET: 1.0
+    // - WALL: THICKNESS/2 + 1.2 ≈ 2.15
+    // - Plaza edge: 1.0
+    // - Default: 0.6
+    constexpr double INSET_ARTERY = 1.2;  // 2.0 for landing, 1.2 otherwise
+    constexpr double INSET_STREET = 1.0;
+    constexpr double INSET_WALL = 2.15;   // THICKNESS/2 + 1.2
+    constexpr double INSET_DEFAULT = 0.6; // ALLEY / 2
+
     for (size_t i = 0; i < border.length(); ++i) {
         const geom::Point& v0 = border[i];
         const geom::Point& v1 = border[(i + 1) % border.length()];
 
-        double inset = wards::Ward::REGULAR_STREET / 2;  // Default street inset
+        double inset = INSET_DEFAULT;
 
-        // Check if edge borders wall - use MAIN_STREET
+        // Check if edge borders wall
         bool onWall = false;
         if (model->wall) {
             int wallIdx = model->wall->shape.findEdge(v0, v1);
@@ -248,50 +260,27 @@ std::vector<double> WardGroup::getAvailable() const {
             onWall = (wallIdx != -1);
         }
         if (onWall) {
-            inset = wards::Ward::MAIN_STREET / 2;
+            inset = INSET_WALL;
         }
         // Check citadel
         else if (model->citadel) {
             int citIdx = model->citadel->shape.findEdge(v0, v1);
             if (citIdx == -1) citIdx = model->citadel->shape.findEdge(v1, v0);
             if (citIdx != -1) {
-                inset = wards::Ward::MAIN_STREET / 2;
+                inset = INSET_WALL;
             }
         }
         // Check if edge is on main artery
         else if (isEdgeOnRoad(v0, v1, model->arteries)) {
-            inset = wards::Ward::MAIN_STREET / 2;
+            inset = INSET_ARTERY;
         }
         // Check streets and roads
         else if (isEdgeOnRoad(v0, v1, model->streets) || isEdgeOnRoad(v0, v1, model->roads)) {
-            inset = wards::Ward::REGULAR_STREET / 2;
+            inset = INSET_STREET;
         }
-        // Check if edge is internal (between cells in the same group)
-        else {
-            bool isInternal = false;
-            for (Cell* cell : cells) {
-                for (size_t ci = 0; ci < cell->shape.length(); ++ci) {
-                    const geom::Point& cv0 = cell->shape[ci];
-                    const geom::Point& cv1 = cell->shape[(ci + 1) % cell->shape.length()];
-                    // Check if this edge is shared between cells in the group
-                    if ((cv0 == v0 && cv1 == v1) || (cv0 == v1 && cv1 == v0)) {
-                        // Check if neighbor is also in the group
-                        for (Cell* neighbor : cell->neighbors) {
-                            if (std::find(cells.begin(), cells.end(), neighbor) != cells.end()) {
-                                // This edge is internal to the group - no inset needed
-                                isInternal = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (isInternal) break;
-                }
-                if (isInternal) break;
-            }
-            if (isInternal) {
-                inset = 0.0;  // Internal edge - no street
-            }
-        }
+        // Default: INSET_DEFAULT (0.6)
+        // Note: We don't check for internal edges here because the border is already
+        // the circumference of all cells in the group, so it doesn't contain internal edges.
 
         insets.push_back(inset);
     }

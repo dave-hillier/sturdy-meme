@@ -120,6 +120,10 @@ void Block::createLots() {
     }
 
     lots = TwistedBlock::createLots(this, group->alleys);
+
+    // Faithful to MFCG: filter out inner lots that don't touch the perimeter
+    // This is called inside TwistedBlock.createLots in MFCG (line 162)
+    filterInner();
 }
 
 void Block::createRects() {
@@ -247,34 +251,16 @@ void Block::createBuildings() {
     double threshold = minBlockSq * shapeFactor;
 
     for (const auto& rect : rects) {
-        // Simplify polygons with more than 4 vertices
-        std::vector<geom::Point> pts;
-        for (size_t i = 0; i < rect.length(); ++i) {
-            pts.push_back(rect[i]);
+        geom::Polygon simplified = rect;
+
+        // If more than 4 vertices, simplify to 4 using PolyCore.simplifyClosed algorithm
+        // Faithful to MFCG: removes vertex with smallest "wedge" area
+        if (simplified.length() > 4) {
+            simplified.simplify(4);
         }
 
-        // If more than 4 vertices, simplify to 4
-        if (pts.size() > 4) {
-            while (pts.size() > 4) {
-                // Find shortest edge
-                size_t shortestIdx = 0;
-                double shortestLen = std::numeric_limits<double>::max();
-                for (size_t i = 0; i < pts.size(); ++i) {
-                    size_t next = (i + 1) % pts.size();
-                    double len = geom::Point::distance(pts[i], pts[next]);
-                    if (len < shortestLen) {
-                        shortestLen = len;
-                        shortestIdx = i;
-                    }
-                }
-                pts.erase(pts.begin() + shortestIdx);
-            }
-        }
-
-        geom::Polygon simplified(pts);
-
-        // Try to create complex L-shaped building using Jd.create
-        // Faithful to mfcg.js: Jd.create(d, c, true, null, 0.6)
+        // Try to create complex L-shaped building using Building.create
+        // Faithful to mfcg.js: Building.create(d, c, true, null, 0.6)
         // where c = minSq/4 * shapeFactor
         if (simplified.length() == 4) {
             geom::Polygon lshaped = Building::create(simplified, threshold, true, false, 0.6);
@@ -284,10 +270,12 @@ void Block::createBuildings() {
                 // L-shape creation failed, use original rectangle
                 buildings.push_back(simplified);
             }
-        } else {
-            // Not a quad, use as-is
+        } else if (simplified.length() >= 3) {
+            // Not a quad but valid polygon, use as-is
+            // Faithful to MFCG: `4 == f[0].length ? h(f[0]) : this.buildings.push(f[0])`
             buildings.push_back(simplified);
         }
+        // Skip degenerate polygons (< 3 vertices)
     }
 }
 
