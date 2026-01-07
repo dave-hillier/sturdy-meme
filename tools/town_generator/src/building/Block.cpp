@@ -119,11 +119,9 @@ void Block::createLots() {
         return;
     }
 
+    // TwistedBlock::createLots handles filterInner internally
+    // (faithful to MFCG order: partition -> filterInner -> valid-lot-filter)
     lots = TwistedBlock::createLots(this, group->alleys);
-
-    // Faithful to MFCG: filter out inner lots that don't touch the perimeter
-    // This is called inside TwistedBlock.createLots in MFCG (line 162)
-    filterInner();
 }
 
 void Block::createRects() {
@@ -417,7 +415,7 @@ std::vector<geom::Point> Block::spawnTrees() {
 }
 
 // TwistedBlock implementation
-// Faithful port of mfcg.js TwistedBlock.createLots (lines 12272-12301)
+// Faithful port of mfcg.js TwistedBlock.createLots (lines 158-187 of 06-blocks.js)
 
 std::vector<geom::Polygon> TwistedBlock::createLots(
     Block* block,
@@ -438,12 +436,12 @@ std::vector<geom::Polygon> TwistedBlock::createLots(
     // Partition the block shape
     std::vector<geom::Polygon> partitioned = bisector.partition();
 
-    // MFCG: d = a.filterInner(d) - filter out inner lots before valid-lot check
-    // Note: filterInner is called by Block::createLots after this returns,
-    // but MFCG calls it here. We pass the block so it can filter.
-    // Actually, filterInner modifies block->lots, so we need to handle this
-    // by having Block::createLots call filterInner on the returned lots.
-    // The order in MFCG is: partition -> filterInner -> valid-lot filter
+    // MFCG order: partition -> filterInner -> valid-lot-filter
+    // d = a.filterInner(d) is called BEFORE the valid-lot check
+    // Temporarily store in block->lots so filterInner can work on them
+    block->lots = partitioned;
+    block->filterInner();
+    partitioned = block->lots;  // Get filtered results
 
     // Filter out lots that are too small or have bad shapes
     // MFCG: b = b.minSq / 4 (minArea threshold)

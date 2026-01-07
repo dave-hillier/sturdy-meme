@@ -1,4 +1,5 @@
 #include "town_generator/building/Building.h"
+#include "town_generator/building/Cutter.h"
 #include "town_generator/geom/GeomUtils.h"
 #include "town_generator/utils/Random.h"
 #include <algorithm>
@@ -7,80 +8,6 @@
 
 namespace town_generator {
 namespace building {
-
-std::vector<geom::Polygon> Building::grid(
-    const geom::Polygon& quad,
-    int cols,
-    int rows,
-    double jitter
-) {
-    // Faithful to mfcg.js Zk.grid (lines 19683-19720)
-    if (quad.length() != 4) {
-        return {};
-    }
-
-    // Create column divisions [0, 1/cols, 2/cols, ..., 1]
-    std::vector<double> colRatios;
-    for (int i = 0; i <= cols; ++i) {
-        colRatios.push_back(static_cast<double>(i) / cols);
-    }
-
-    // Create row divisions [0, 1/rows, 2/rows, ..., 1]
-    std::vector<double> rowRatios;
-    for (int i = 0; i <= rows; ++i) {
-        rowRatios.push_back(static_cast<double>(i) / rows);
-    }
-
-    // Add jitter to interior divisions
-    if (jitter > 0) {
-        for (int i = 1; i < cols; ++i) {
-            double normal3 = (utils::Random::floatVal() + utils::Random::floatVal() +
-                             utils::Random::floatVal()) / 3.0;
-            colRatios[i] += (normal3 - 0.5) / (cols - 1) * jitter;
-        }
-        for (int i = 1; i < rows; ++i) {
-            double normal3 = (utils::Random::floatVal() + utils::Random::floatVal() +
-                             utils::Random::floatVal()) / 3.0;
-            rowRatios[i] += (normal3 - 0.5) / (rows - 1) * jitter;
-        }
-    }
-
-    // Get corner points (assumes CCW order: bottom-left, bottom-right, top-right, top-left)
-    geom::Point p0 = quad[0];  // bottom-left
-    geom::Point p1 = quad[1];  // bottom-right
-    geom::Point p2 = quad[2];  // top-right
-    geom::Point p3 = quad[3];  // top-left
-
-    // Build grid of points
-    std::vector<std::vector<geom::Point>> gridPoints;
-    for (int r = 0; r <= rows; ++r) {
-        // Interpolate left and right edges
-        geom::Point left = geom::GeomUtils::lerp(p0, p3, rowRatios[r]);
-        geom::Point right = geom::GeomUtils::lerp(p1, p2, rowRatios[r]);
-
-        std::vector<geom::Point> rowPoints;
-        for (int c = 0; c <= cols; ++c) {
-            rowPoints.push_back(geom::GeomUtils::lerp(left, right, colRatios[c]));
-        }
-        gridPoints.push_back(rowPoints);
-    }
-
-    // Build cells from grid points
-    std::vector<geom::Polygon> cells;
-    for (int r = 0; r < rows; ++r) {
-        for (int c = 0; c < cols; ++c) {
-            std::vector<geom::Point> cell = {
-                gridPoints[r][c],
-                gridPoints[r][c + 1],
-                gridPoints[r + 1][c + 1],
-                gridPoints[r + 1][c]
-            };
-            cells.push_back(geom::Polygon(cell));
-        }
-    }
-
-    return cells;
-}
 
 std::vector<bool> Building::getPlan(int width, int height, double stopProb) {
     // Faithful to mfcg.js Jd.getPlan (lines 9809-9828)
@@ -363,8 +290,8 @@ geom::Polygon Building::create(
         return geom::Polygon();  // No L-shape possible
     }
 
-    // Generate grid cells
-    auto gridCells = grid(quad, cols, rows, gap);
+    // Generate grid cells (using Cutter::grid, faithful to MFCG)
+    auto gridCells = Cutter::grid(quad, cols, rows, gap);
 
     // Collect filled cells
     std::vector<geom::Polygon> filledPolygons;

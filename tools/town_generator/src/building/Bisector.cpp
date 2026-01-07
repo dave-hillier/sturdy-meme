@@ -11,6 +11,8 @@ namespace building {
 Bisector::Bisector(const geom::Polygon& poly, double minArea, double variance)
     : poly(poly), minArea(minArea), variance(variance) {
     minOffset = std::sqrt(minArea);
+    // MFCG default: processCut = detectStraight (bound to this)
+    // Set in constructor so it can access minTurnOffset
 }
 
 std::vector<geom::Polygon> Bisector::partition() {
@@ -55,7 +57,7 @@ bool Bisector::isSmallEnough(const geom::Polygon& shape) {
 }
 
 std::vector<geom::Polygon> Bisector::makeCut(const geom::Polygon& shape, int attempt) {
-    // MFCG makeCut (lines 19513-19640)
+    // Faithful port of MFCG makeCut (lines 19513-19618)
     if (attempt > 10) {
         return {shape};
     }
@@ -65,7 +67,8 @@ std::vector<geom::Polygon> Bisector::makeCut(const geom::Polygon& shape, int att
         return {shape};
     }
 
-    // Get OBB (try rotated AABB for subsequent attempts)
+    // Get OBB (or rotated AABB for subsequent attempts)
+    // MFCG lines 19517-19522
     std::vector<geom::Point> obb;
     if (attempt > 0) {
         // Rotate polygon for different cut angles
@@ -116,137 +119,335 @@ std::vector<geom::Polygon> Bisector::makeCut(const geom::Polygon& shape, int att
         return {shape};
     }
 
-    // Find long and short axes
+    // Find long and short axes (MFCG lines 19523-19530)
     geom::Point corner = obb[0];
     geom::Point axis1 = obb[1].subtract(corner);
     geom::Point axis2 = obb[3].subtract(corner);
 
-    geom::Point longAxis, shortAxis;
+    geom::Point h, k;  // h = long axis, k = short axis
     if (axis1.length() > axis2.length()) {
-        longAxis = axis1;
-        shortAxis = axis2;
+        h = axis1;
+        k = axis2;
     } else {
-        longAxis = axis2;
-        shortAxis = axis1;
+        h = axis2;
+        k = axis1;
     }
 
-    // Project centroid onto long axis
+    // Project centroid onto long axis (MFCG lines 19531-19533)
     geom::Point centroid = shape.centroid();
     geom::Point toCentroid = centroid.subtract(corner);
-    double longLen = longAxis.length();
+    double hLen = h.length();
     double proj = 0.0;
-    if (longLen > 0.001) {
-        proj = (toCentroid.x * longAxis.x + toCentroid.y * longAxis.y) / (longLen * longLen);
+    if (hLen > 0.001) {
+        proj = (toCentroid.x * h.x + toCentroid.y * h.y) / (hLen * hLen);
     }
 
-    // Cut ratio: (projection + random) / 2
+    // Cut ratio: (projection + normal3) / 2 (MFCG line 19533)
     double normal3 = (utils::Random::floatVal() + utils::Random::floatVal() +
                       utils::Random::floatVal()) / 3.0;
     double cutRatio = (proj + normal3) / 2.0;
-    cutRatio = std::max(0.2, std::min(0.8, cutRatio));
 
-    // Cut point along long axis
-    geom::Point cutPoint(corner.x + longAxis.x * cutRatio, corner.y + longAxis.y * cutRatio);
+    // Cut point along long axis (MFCG line 19534: p)
+    geom::Point p(corner.x + h.x * cutRatio, corner.y + h.y * cutRatio);
 
-    // Find intersections with polygon edges along short axis direction
-    geom::Point cutDir = shortAxis;
-    if (cutDir.length() < 0.001) {
-        return {shape};
-    }
-    cutDir = cutDir.norm(1.0);
+    // Find first intersection with best alignment to long axis (MFCG lines 19536-19549)
+    int d = -1;  // Edge index for first intersection
+    geom::Point f;  // First intersection point
+    geom::Point g;  // Normalized edge direction at first intersection
+    double bestDot = 0.0;
 
-    // Find the two edges that the cut line intersects
-    int edge1 = -1, edge2 = -1;
-    geom::Point intersect1, intersect2;
-    double bestDot1 = -std::numeric_limits<double>::max();
-    double bestDot2 = -std::numeric_limits<double>::max();
-
-    geom::Point longDir = longAxis.norm(1.0);
+    geom::Point hNorm = h.norm(1.0);
 
     for (size_t i = 0; i < n; ++i) {
         const geom::Point& v0 = shape[i];
         const geom::Point& v1 = shape[(i + 1) % n];
 
-        geom::Point edgeDir = v1.subtract(v0);
-        double edgeLen = edgeDir.length();
-        if (edgeLen < 1e-9) continue;
+        geom::Point x = v1.subtract(v0);
+        double xLen = x.length();
+        if (xLen < 1e-10) continue;
 
         auto t = geom::GeomUtils::intersectLines(
-            cutPoint.x, cutPoint.y, cutDir.x, cutDir.y,
-            v0.x, v0.y, edgeDir.x, edgeDir.y
+            p.x, p.y, k.x, k.y,
+            v0.x, v0.y, x.x, x.y
         );
 
-        if (t.has_value() && t->y > 0.01 && t->y < 0.99) {
-            geom::Point p(v0.x + edgeDir.x * t->y, v0.y + edgeDir.y * t->y);
+        if (t.has_value() && t->y > 0.0 && t->y < 1.0) {
+            geom::Point xNorm = x.scale(1.0 / xLen);
+            double dotLong = std::abs(h.x * xNorm.x + h.y * xNorm.y);
 
-            // Check alignment with long axis
-            geom::Point normEdge = edgeDir.scale(1.0 / edgeLen);
-            double dotLong = std::abs(normEdge.x * longDir.x + normEdge.y * longDir.y);
-
-            if (dotLong > bestDot1) {
-                // Shift previous best to second
-                edge2 = edge1;
-                intersect2 = intersect1;
-                bestDot2 = bestDot1;
-                // New best
-                edge1 = static_cast<int>(i);
-                intersect1 = p;
-                bestDot1 = dotLong;
-            } else if (dotLong > bestDot2 && static_cast<int>(i) != edge1) {
-                edge2 = static_cast<int>(i);
-                intersect2 = p;
-                bestDot2 = dotLong;
+            if (dotLong > bestDot) {
+                bestDot = dotLong;
+                d = static_cast<int>(i);
+                double ratio = t->y;
+                f = geom::Point(v0.x + x.x * ratio, v0.y + x.y * ratio);
+                g = xNorm;
             }
         }
     }
 
-    if (edge1 == -1 || edge2 == -1) {
-        // Try different angle
+    if (d == -1) {
         return makeCut(shape, attempt + 1);
     }
 
-    // Create cut line
-    std::vector<geom::Point> cutLine = {intersect1, intersect2};
+    // Turn g perpendicular (MFCG line 19551)
+    g = geom::Point(-g.y, g.x);
 
-    // Process cut (e.g., smooth corners)
-    if (processCut) {
-        cutLine = processCut(cutLine);
-    }
+    // Find second intersection along perpendicular direction (MFCG lines 19552-19556)
+    double hDist = std::numeric_limits<double>::infinity();
+    geom::Point pEdge;  // Edge direction at second intersection
+    int kEdge = -1;     // Edge index for second intersection
 
-    // Store the cut
-    cuts.push_back(cutLine);
+    for (size_t i = 0; i < n; ++i) {
+        if (static_cast<int>(i) == d) continue;
 
-    // Split the polygon
-    auto halves = split(shape, edge1, edge2, cutLine);
+        const geom::Point& v0 = shape[i];
+        const geom::Point& v1 = shape[(i + 1) % n];
 
-    // Check area ratio
-    if (halves.size() == 2) {
-        double area1 = std::abs(halves[0].square());
-        double area2 = std::abs(halves[1].square());
-        double ratio = std::max(area1 / area2, area2 / area1);
+        geom::Point x = v1.subtract(v0);
+        if (x.length() < 1e-10) continue;
 
-        if (ratio > 2 * variance) {
-            // Bad split, try again
-            cuts.pop_back();
-            return makeCut(shape, attempt + 1);
+        auto t = geom::GeomUtils::intersectLines(
+            f.x, f.y, g.x, g.y,
+            v0.x, v0.y, x.x, x.y
+        );
+
+        if (t.has_value() && t->x > 0 && t->x < hDist && t->y > 0 && t->y < 1) {
+            hDist = t->x;
+            pEdge = x;
+            kEdge = static_cast<int>(i);
         }
     }
 
-    // Apply gap
-    if (getGap && halves.size() >= 2) {
-        double gap = getGap(cutLine);
-        if (gap > 0) {
-            std::vector<geom::Polygon> gappedHalves;
-            for (const auto& half : halves) {
-                // Shrink the half away from the cut line
-                geom::Polygon gapped = half.peel(cutLine[0], gap / 2);
-                gappedHalves.push_back(gapped);
+    if (kEdge == -1) {
+        return makeCut(shape, attempt + 1);
+    }
+
+    // Check perpendicularity (MFCG lines 19558-19559)
+    // D = (cross^2) / (|g|^2 * |p|^2)
+    double cross = g.x * pEdge.y - g.y * pEdge.x;
+    double gLenSq = g.x * g.x + g.y * g.y;
+    double pLenSq = pEdge.x * pEdge.x + pEdge.y * pEdge.y;
+    double D = (cross * cross) / (gLenSq * pLenSq);
+
+    // Perpendicular case (MFCG lines 19560-19568)
+    if (D > 0.99) {
+        geom::Point m(f.x + g.x * hDist, f.y + g.y * hDist);
+        std::vector<geom::Point> cutLine = {f, m};
+
+        auto halves = split(shape, d, kEdge, cutLine);
+
+        if (halves.size() == 2) {
+            double area1 = std::abs(halves[0].square());
+            double area2 = std::abs(halves[1].square());
+            double ratio = std::max(area1 / area2, area2 / area1);
+
+            if (ratio < 2.0 * variance) {
+                cuts.push_back(cutLine);
+                return applyGap(halves, cutLine);
             }
-            return gappedHalves;
+        }
+        // Fall through to try angled case or retry
+    }
+
+    // Angled case with minOffset (MFCG lines 19570-19609)
+    double m = minOffset / hDist;
+    if (m > 0.5) {
+        m = 0.5;
+    } else {
+        double rand3 = (utils::Random::floatVal() + utils::Random::floatVal() +
+                        utils::Random::floatVal()) / 3.0;
+        m = m + (1.0 - 2.0 * m) * rand3;
+    }
+
+    double nDist = hDist * m;
+    geom::Point pMid(f.x + g.x * nDist, f.y + g.y * nDist);
+
+    // Search for third point q using perpendicular to each candidate edge
+    // (MFCG lines 19578-19589)
+    int kThird = -1;
+    geom::Point q;
+    double bestW = -std::numeric_limits<double>::infinity();
+
+    for (size_t i = 0; i < n; ++i) {
+        if (static_cast<int>(i) == d) continue;
+
+        const geom::Point& v0 = shape[i];
+        const geom::Point& v1 = shape[(i + 1) % n];
+
+        geom::Point x = v1.subtract(v0);
+        double xLen = x.length();
+        if (xLen < 1e-10) continue;
+
+        // Use perpendicular to edge direction
+        geom::Point perp(x.y, -x.x);
+
+        auto t = geom::GeomUtils::intersectLines(
+            pMid.x, pMid.y, perp.x, perp.y,
+            v0.x, v0.y, x.x, x.y
+        );
+
+        if (t.has_value() && t->x > 0 && t->y > 0 && t->y < 1) {
+            // Calculate cross product alignment (MFCG line 19580)
+            double w = (g.x * x.y - g.y * x.x) / xLen;
+
+            if (w > bestW) {
+                // Verify the ray doesn't intersect other edges (MFCG lines 19581-19588)
+                bool valid = true;
+                for (size_t j = 0; j < n; ++j) {
+                    if (j == i || static_cast<int>(j) == d) continue;
+
+                    const geom::Point& ev0 = shape[j];
+                    const geom::Point& ev1 = shape[(j + 1) % n];
+                    geom::Point ey = ev1.subtract(ev0);
+                    if (ey.length() < 1e-10) continue;
+
+                    auto check = geom::GeomUtils::intersectLines(
+                        pMid.x, pMid.y, perp.x, perp.y,
+                        ev0.x, ev0.y, ey.x, ey.y
+                    );
+
+                    if (check.has_value() &&
+                        check->x >= 0 && check->x <= t->x &&
+                        check->y >= 0 && check->y <= 1) {
+                        valid = false;
+                        break;
+                    }
+                }
+
+                if (valid) {
+                    bestW = w;
+                    kThird = static_cast<int>(i);
+                    double ratio = t->y;
+                    q = geom::Point(v0.x + x.x * ratio, v0.y + x.y * ratio);
+                }
+            }
         }
     }
 
-    return halves;
+    if (kThird != -1) {
+        // Create 3-point cut line and process it
+        std::vector<geom::Point> cutLine = {f, pMid, q};
+
+        // Apply processCut (detectStraight by default)
+        std::vector<geom::Point> processedCut;
+        if (processCut) {
+            processedCut = processCut(cutLine);
+        } else {
+            processedCut = detectStraight(cutLine);
+        }
+
+        // Validate middle points are inside polygon (MFCG lines 19594-19597)
+        bool valid = true;
+        for (size_t i = 1; i + 1 < processedCut.size(); ++i) {
+            if (!shape.contains(processedCut[i])) {
+                processedCut = cutLine;  // Revert to original
+                break;
+            }
+        }
+
+        auto halves = split(shape, d, kThird, processedCut);
+
+        if (halves.size() == 2) {
+            double area1 = std::abs(halves[0].square());
+            double area2 = std::abs(halves[1].square());
+            double ratio = std::max(area1 / area2, area2 / area1);
+
+            if (ratio <= 2.0 * variance) {
+                cuts.push_back(processedCut);
+                return applyGap(halves, processedCut);
+            }
+        }
+    }
+
+    // Failed to make a cut, retry with different angle
+    return makeCut(shape, attempt + 1);
+}
+
+std::vector<geom::Polygon> Bisector::applyGap(
+    const std::vector<geom::Polygon>& halves,
+    const std::vector<geom::Point>& cutLine
+) {
+    if (!getGap || halves.size() < 2 || cutLine.size() < 2) {
+        return halves;
+    }
+
+    double gap = getGap(cutLine);
+    if (gap <= 0) {
+        return halves;
+    }
+
+    // Calculate cut line direction for proper shrinking
+    geom::Point cutStart = cutLine.front();
+    geom::Point cutEnd = cutLine.back();
+    geom::Point cutDir = cutEnd.subtract(cutStart);
+    double cutLen = cutDir.length();
+    if (cutLen < 0.001) {
+        return halves;
+    }
+
+    // Normal to cut line (perpendicular)
+    geom::Point cutNormal(-cutDir.y / cutLen, cutDir.x / cutLen);
+
+    std::vector<geom::Polygon> result;
+    double halfGap = gap / 2.0;
+
+    for (const auto& half : halves) {
+        // Determine which direction to shrink based on half's position
+        geom::Point halfCenter = half.centroid();
+        geom::Point toCenter = halfCenter.subtract(cutStart);
+        double dotNormal = toCenter.x * cutNormal.x + toCenter.y * cutNormal.y;
+
+        // Shrink along the cut line edges
+        // Find edges of the half that are on the cut line and shrink them
+        std::vector<double> shrinkAmounts(half.length(), 0.0);
+
+        for (size_t i = 0; i < half.length(); ++i) {
+            const geom::Point& v0 = half[i];
+            const geom::Point& v1 = half[(i + 1) % half.length()];
+
+            // Check if this edge is part of the cut line
+            bool onCutLine = false;
+            for (size_t j = 0; j + 1 < cutLine.size(); ++j) {
+                // Check if edge vertices are on the cut line segment
+                double d0 = geom::GeomUtils::distance2line(
+                    cutLine[j].x, cutLine[j].y,
+                    cutLine[j+1].x - cutLine[j].x, cutLine[j+1].y - cutLine[j].y,
+                    v0.x, v0.y
+                );
+                double d1 = geom::GeomUtils::distance2line(
+                    cutLine[j].x, cutLine[j].y,
+                    cutLine[j+1].x - cutLine[j].x, cutLine[j+1].y - cutLine[j].y,
+                    v1.x, v1.y
+                );
+
+                if (d0 < 0.5 && d1 < 0.5) {
+                    onCutLine = true;
+                    break;
+                }
+            }
+
+            if (onCutLine) {
+                shrinkAmounts[i] = halfGap;
+            }
+        }
+
+        // Apply shrink if any edges need shrinking
+        bool needsShrink = false;
+        for (double amt : shrinkAmounts) {
+            if (amt > 0) {
+                needsShrink = true;
+                break;
+            }
+        }
+
+        if (needsShrink) {
+            result.push_back(half.shrink(shrinkAmounts));
+        } else {
+            result.push_back(half);
+        }
+    }
+
+    return result;
 }
 
 std::vector<geom::Polygon> Bisector::split(
@@ -260,13 +461,29 @@ std::vector<geom::Polygon> Bisector::split(
     }
 
     // Use polygon.cut with the cut line endpoints
-    auto halves = shape.cut(cutLine[0], cutLine.back(), 0);
+    // This delegates to Polygon::cut which handles the splitting
+    auto halves = shape.cut(cutLine.front(), cutLine.back(), 0);
 
     return halves;
 }
 
 std::vector<geom::Point> Bisector::detectStraight(const std::vector<geom::Point>& pts) {
-    // Default: just return the line as-is
+    // Faithful to MFCG detectStraight (lines 19648-19655)
+    // If minTurnOffset > 0 and we have 3 points, check if middle point is close to the line
+    if (minTurnOffset > 0 && pts.size() >= 3) {
+        const geom::Point& p0 = pts[0];
+        const geom::Point& p2 = pts[2];
+
+        // Calculate triangle area using the 3 points
+        double area = std::abs(geom::GeomUtils::triangleArea(pts[0], pts[1], pts[2]));
+        double dist = geom::Point::distance(p0, p2);
+
+        // If area/distance < minTurnOffset, simplify to 2 points
+        if (dist > 0.001 && area / dist < minTurnOffset) {
+            return {p0, p2};
+        }
+    }
+
     return pts;
 }
 

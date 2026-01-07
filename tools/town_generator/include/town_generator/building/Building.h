@@ -80,23 +80,7 @@ public:
      */
     static std::vector<geom::Point> circumference(const std::vector<geom::Polygon>& cells);
 
-    /**
-     * Subdivide a quadrilateral into a grid of smaller quadrilaterals
-     *
-     * @param quad The input quadrilateral
-     * @param rows Number of rows
-     * @param cols Number of columns
-     * @param jitter Amount of randomness in grid positions (0-1)
-     * @return Vector of grid cells (quadrilaterals)
-     *
-     * Faithful to mfcg.js Zk.grid
-     */
-    static std::vector<geom::Polygon> grid(
-        const geom::Polygon& quad,
-        int cols,
-        int rows,
-        double jitter = 0.0
-    );
+    // Note: grid() function is in Cutter class (Cutter::grid) per MFCG organization
 };
 
 } // namespace building

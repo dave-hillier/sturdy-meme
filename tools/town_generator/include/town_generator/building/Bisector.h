@@ -71,7 +71,13 @@ private:
         const std::vector<geom::Point>& cutLine
     );
 
-    // Default processCut: detect straight lines (no modification)
+    // Apply gap to halves along cut line
+    std::vector<geom::Polygon> applyGap(
+        const std::vector<geom::Polygon>& halves,
+        const std::vector<geom::Point>& cutLine
+    );
+
+    // Default processCut: detect straight lines (simplify if minTurnOffset allows)
     std::vector<geom::Point> detectStraight(const std::vector<geom::Point>& pts);
 };
 
