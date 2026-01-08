@@ -95,6 +95,8 @@ void WardGroup::createParams() {
 }
 
 void WardGroup::createGeometry() {
+    SDL_Log("WardGroup::createGeometry() starting for %zu cells", cells.size());
+
     if (border.length() < 3) {
         buildBorder();
     }
@@ -104,7 +106,11 @@ void WardGroup::createGeometry() {
         return;
     }
 
+    SDL_Log("WardGroup: border built with %zu vertices", border.length());
+
     createParams();
+
+    SDL_Log("WardGroup: params created, computing available area");
 
     // Get available area after street/wall insets
     // Calculate per-edge insets based on what's adjacent (roads, walls, etc.)
@@ -115,6 +121,8 @@ void WardGroup::createGeometry() {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "WardGroup: Available area too small after inset");
         return;
     }
+
+    SDL_Log("WardGroup: available area has %zu vertices, starting bisector", available.length());
 
     // Create blocks using Bisector (faithful to mfcg.js createAlleys)
     // MFCG: new Bisector(shape, alleys.minSq * alleys.blockSize, 16 * alleys.gridChaos)
@@ -136,7 +144,9 @@ void WardGroup::createGeometry() {
     }
 
     // Partition the area into blocks
+    SDL_Log("WardGroup: starting bisector partition");
     std::vector<geom::Polygon> blockShapes = bisector.partition();
+    SDL_Log("WardGroup: bisector partition complete, %zu blocks", blockShapes.size());
 
     // Store alley cuts for SVG rendering
     alleyCuts = bisector.cuts;

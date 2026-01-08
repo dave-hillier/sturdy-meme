@@ -1332,9 +1332,12 @@ void City::buildGeometry() {
     createWardGroups();
 
     // Generate geometry for each ward
+    SDL_Log("City: Starting geometry creation for %zu wards", wards_.size());
     for (size_t i = 0; i < wards_.size(); ++i) {
+        SDL_Log("City: Creating geometry for ward %zu (%s)", i, wards_[i]->getName().c_str());
         wards_[i]->createGeometry();
     }
+    SDL_Log("City: Geometry creation complete");
 }
 
 void City::setEdgeData() {
