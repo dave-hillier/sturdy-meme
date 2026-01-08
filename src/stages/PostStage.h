@@ -40,6 +40,9 @@ struct PostStage {
     // GUI overlay callback (called during post-process render pass)
     GuiRenderCallback guiCallback;
 
+    // Master enable for entire stage
+    bool stageEnabled = true;
+
     void setHiZRecordFn(RecordFunction fn) {
         hiZRecordFn = std::move(fn);
     }
@@ -59,7 +62,12 @@ struct PostStage {
     void setHiZEnabled(bool enabled) { hiZEnabled = enabled; }
     void setBloomEnabled(bool enabled) { bloomEnabled = enabled; }
 
+    // Enable/disable the entire stage
+    void setStageEnabled(bool enabled) { stageEnabled = enabled; }
+    bool isStageEnabled() const { return stageEnabled; }
+
     void execute(RenderContext& ctx) {
+        if (!stageEnabled) return;
         // 1. HiZ pyramid generation
         if (hiZEnabled && hiZRecordFn) {
             hiZRecordFn(ctx);

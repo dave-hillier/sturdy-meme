@@ -72,6 +72,8 @@
 #include <cstddef>
 #include <array>
 #include <limits>
+#include <algorithm>
+#include <numeric>
 
 std::unique_ptr<Renderer> Renderer::create(const InitInfo& info) {
     std::unique_ptr<Renderer> instance(new Renderer());
@@ -1477,7 +1479,17 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
     size_t playerIndex = systems_->scene().getSceneBuilder().getPlayerObjectIndex();
     bool hasCharacter = systems_->scene().getSceneBuilder().hasCharacter();
 
-    for (size_t i = 0; i < sceneObjects.size(); ++i) {
+    // Build sorted indices by materialId to minimize descriptor set switches
+    std::vector<size_t> sortedIndices(sceneObjects.size());
+    std::iota(sortedIndices.begin(), sortedIndices.end(), 0);
+    std::sort(sortedIndices.begin(), sortedIndices.end(), [&](size_t a, size_t b) {
+        return sceneObjects[a].materialId < sceneObjects[b].materialId;
+    });
+
+    MaterialId lastMaterialId = INVALID_MATERIAL_ID;
+    VkDescriptorSet currentDescSet = VK_NULL_HANDLE;
+
+    for (size_t i : sortedIndices) {
         // Skip player character (rendered separately with GPU skinning)
         if (hasCharacter && i == playerIndex) {
             continue;
@@ -1485,16 +1497,18 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
 
         const auto& obj = sceneObjects[i];
 
-        // Use MaterialRegistry to get descriptor set by materialId
-        // This replaces the brittle texture pointer comparison
-        VkDescriptorSet descSet = materialRegistry.getDescriptorSet(obj.materialId, frameIndex);
-        if (descSet == VK_NULL_HANDLE) {
-            // Fallback: skip objects with invalid materialId
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                "Skipping object with invalid materialId %u", obj.materialId);
-            continue;
+        // Only update descriptor set when material changes
+        if (obj.materialId != lastMaterialId) {
+            currentDescSet = materialRegistry.getDescriptorSet(obj.materialId, frameIndex);
+            if (currentDescSet == VK_NULL_HANDLE) {
+                // Skip objects with invalid materialId
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Skipping object with invalid materialId %u", obj.materialId);
+                continue;
+            }
+            lastMaterialId = obj.materialId;
         }
-        renderObject(obj, descSet);
+        renderObject(obj, currentDescSet);
     }
 
     // Render procedural rocks (RockSystem uses its own descriptor sets)

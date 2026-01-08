@@ -33,6 +33,7 @@ struct HDRStage {
     };
 
     std::vector<DrawCall> drawCalls;
+    bool stageEnabled = true;  // Master enable for entire stage
 
     // Clear color for HDR target
     std::array<float, 4> clearColor = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -51,7 +52,33 @@ struct HDRStage {
         }
     }
 
+    // Enable/disable all draw calls at once (useful for debugging)
+    void setAllDrawCallsEnabled(bool enabled) {
+        for (auto& call : drawCalls) {
+            call.enabled = enabled;
+        }
+    }
+
+    // Enable/disable the entire stage
+    void setStageEnabled(bool enabled) {
+        stageEnabled = enabled;
+    }
+
+    bool isStageEnabled() const {
+        return stageEnabled;
+    }
+
+    // Get count of enabled draw calls
+    size_t getEnabledDrawCallCount() const {
+        size_t count = 0;
+        for (const auto& call : drawCalls) {
+            if (call.enabled) ++count;
+        }
+        return count;
+    }
+
     void execute(RenderContext& ctx) {
+        if (!stageEnabled) return;
         const auto& res = ctx.resources;
         vk::CommandBuffer vkCmd(ctx.cmd);
 

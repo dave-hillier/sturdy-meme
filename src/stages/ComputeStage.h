@@ -14,6 +14,12 @@
  * Each pass is a lambda that captures its system reference and records
  * compute commands using the RenderContext.
  *
+ * GPU Parallelization:
+ *   Independent compute passes (those writing to different resources) can execute
+ *   in parallel on the GPU. Each pass manages its own barriers for correctness.
+ *   The GPU driver automatically overlaps execution of independent dispatches
+ *   where barriers permit.
+ *
  * Usage:
  *   ComputeStage stage;
  *   stage.addPass("terrain", [&](RenderContext& ctx) {
@@ -31,6 +37,7 @@ struct ComputeStage {
     };
 
     std::vector<Pass> passes;
+    bool stageEnabled = true;  // Master enable for entire stage
 
     void addPass(const std::string& name, PassFunction fn) {
         passes.push_back({name, std::move(fn), true});
@@ -45,7 +52,34 @@ struct ComputeStage {
         }
     }
 
+    // Enable/disable all passes at once (useful for debugging)
+    void setAllPassesEnabled(bool enabled) {
+        for (auto& pass : passes) {
+            pass.enabled = enabled;
+        }
+    }
+
+    // Enable/disable the entire stage
+    void setStageEnabled(bool enabled) {
+        stageEnabled = enabled;
+    }
+
+    bool isStageEnabled() const {
+        return stageEnabled;
+    }
+
+    // Get count of enabled passes
+    size_t getEnabledPassCount() const {
+        size_t count = 0;
+        for (const auto& pass : passes) {
+            if (pass.enabled) ++count;
+        }
+        return count;
+    }
+
     void execute(RenderContext& ctx) {
+        if (!stageEnabled) return;
+
         for (auto& pass : passes) {
             if (pass.enabled) {
                 pass.fn(ctx);
