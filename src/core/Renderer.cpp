@@ -304,20 +304,36 @@ void Renderer::setupFrameGraph() {
         .priority = 40
     });
 
-    // HDR pass - main scene rendering
+    // HDR pass - main scene rendering with parallel secondary command buffers
+    // Slot 0: Sky + Terrain + Catmull-Clark (geometry base)
+    // Slot 1: Scene Objects + Skinned Character (scene meshes)
+    // Slot 2: Grass + Water + Leaves + Weather (vegetation/effects)
     auto hdr = frameGraph_.addPass({
         .name = "HDR",
         .execute = [this](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
             if (hdrPassEnabled) {
                 systems_->profiler().beginCpuZone("RenderPassRecord");
-                recordHDRPass(ctx.commandBuffer, ctx.frameIndex, renderCtx->frame.time);
+                if (ctx.secondaryBuffers && !ctx.secondaryBuffers->empty()) {
+                    // Execute with pre-recorded secondary buffers (Phase 4 parallel path)
+                    recordHDRPassWithSecondaries(ctx.commandBuffer, ctx.frameIndex,
+                                                 renderCtx->frame.time, *ctx.secondaryBuffers);
+                } else {
+                    // Fallback to sequential recording
+                    recordHDRPass(ctx.commandBuffer, ctx.frameIndex, renderCtx->frame.time);
+                }
                 systems_->profiler().endCpuZone("RenderPassRecord");
             }
         },
-        .canUseSecondary = true,  // Future: parallel secondary buffer recording
-        .mainThreadOnly = true,
-        .priority = 30
+        .canUseSecondary = true,
+        .mainThreadOnly = true,  // Main thread begins render pass, but secondaries record in parallel
+        .priority = 30,
+        .secondarySlots = 3,  // 3 parallel recording slots
+        .secondaryRecord = [this](FrameGraph::RenderContext& ctx, uint32_t slot) {
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            recordHDRPassSecondarySlot(ctx.commandBuffer, ctx.frameIndex,
+                                       renderCtx->frame.time, slot);
+        }
     });
 
     // SSR pass - screen-space reflections
@@ -1233,7 +1249,11 @@ bool Renderer::render(const Camera& camera) {
             .frameIndex = frame.frameIndex,
             .imageIndex = imageIndex,
             .deltaTime = frame.deltaTime,
-            .userData = &ctx  // Pass full RenderContext to passes
+            .userData = &ctx,  // Pass full RenderContext to passes
+            // Phase 4: Secondary command buffer support
+            .threadedCommandPool = &threadedCommandPool_,
+            .renderPass = vk::RenderPass(systems_->postProcess().getHDRRenderPass()),
+            .framebuffer = vk::Framebuffer(systems_->postProcess().getHDRFramebuffer())
         };
 
         // Execute all passes in dependency order
@@ -1954,6 +1974,129 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     }
 
     vkCmd.endRenderPass();
+}
+
+void Renderer::recordHDRPassWithSecondaries(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime,
+                                            const std::vector<vk::CommandBuffer>& secondaries) {
+    vk::CommandBuffer vkCmd(cmd);
+
+    std::array<vk::ClearValue, 2> clearValues{};
+    clearValues[0].color = vk::ClearColorValue{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
+    clearValues[1].depthStencil = vk::ClearDepthStencilValue{1.0f, 0};
+
+    VkExtent2D rawExtent = systems_->postProcess().getExtent();
+    vk::Extent2D hdrExtent = vk::Extent2D{}.setWidth(rawExtent.width).setHeight(rawExtent.height);
+
+    auto hdrPassInfo = vk::RenderPassBeginInfo{}
+        .setRenderPass(systems_->postProcess().getHDRRenderPass())
+        .setFramebuffer(systems_->postProcess().getHDRFramebuffer())
+        .setRenderArea(vk::Rect2D{{0, 0}, hdrExtent})
+        .setClearValues(clearValues);
+
+    // Begin render pass with secondary command buffer execution
+    vkCmd.beginRenderPass(hdrPassInfo, vk::SubpassContents::eSecondaryCommandBuffers);
+
+    // Execute all pre-recorded secondary command buffers
+    // Secondary buffers include all draw calls including debug lines
+    if (!secondaries.empty()) {
+        vkCmd.executeCommands(secondaries);
+    }
+
+    vkCmd.endRenderPass();
+}
+
+void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, uint32_t slot) {
+    vk::CommandBuffer vkCmd(cmd);
+
+    // Each slot records a group of draw calls to a secondary command buffer
+    // The secondary buffer has already been begun with render pass inheritance
+
+    switch (slot) {
+    case 0:
+        // Slot 0: Sky + Terrain + Catmull-Clark (geometry base)
+        systems_->profiler().beginGpuZone(cmd, "HDR:Sky");
+        systems_->sky().recordDraw(cmd, frameIndex);
+        systems_->profiler().endGpuZone(cmd, "HDR:Sky");
+
+        if (terrainEnabled) {
+            systems_->profiler().beginGpuZone(cmd, "HDR:Terrain");
+            systems_->terrain().recordDraw(cmd, frameIndex);
+            systems_->profiler().endGpuZone(cmd, "HDR:Terrain");
+        }
+
+        systems_->profiler().beginGpuZone(cmd, "HDR:CatmullClark");
+        systems_->catmullClark().recordDraw(cmd, frameIndex);
+        systems_->profiler().endGpuZone(cmd, "HDR:CatmullClark");
+        break;
+
+    case 1:
+        // Slot 1: Scene Objects + Skinned Character (scene meshes)
+        systems_->profiler().beginGpuZone(cmd, "HDR:SceneObjects");
+        vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **graphicsPipeline_);
+        recordSceneObjects(cmd, frameIndex);
+        systems_->profiler().endGpuZone(cmd, "HDR:SceneObjects");
+
+        systems_->profiler().beginGpuZone(cmd, "HDR:SkinnedChar");
+        {
+            SceneBuilder& sceneBuilder = systems_->scene().getSceneBuilder();
+            if (sceneBuilder.hasCharacter()) {
+                const auto& sceneObjects = sceneBuilder.getRenderables();
+                size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
+                if (playerIndex < sceneObjects.size()) {
+                    const Renderable& playerObj = sceneObjects[playerIndex];
+                    systems_->skinnedMesh().record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
+                }
+            }
+        }
+        systems_->profiler().endGpuZone(cmd, "HDR:SkinnedChar");
+        break;
+
+    case 2:
+        // Slot 2: Grass + Water + Leaves + Weather + Debug lines (vegetation/effects/debug)
+        systems_->profiler().beginGpuZone(cmd, "HDR:Grass");
+        systems_->grass().recordDraw(cmd, frameIndex, grassTime);
+        systems_->profiler().endGpuZone(cmd, "HDR:Grass");
+
+        if (systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
+            systems_->profiler().beginGpuZone(cmd, "HDR:Water");
+            systems_->water().recordDraw(cmd, frameIndex);
+            systems_->profiler().endGpuZone(cmd, "HDR:Water");
+        }
+
+        systems_->profiler().beginGpuZone(cmd, "HDR:Leaves");
+        systems_->leaf().recordDraw(cmd, frameIndex, grassTime);
+        systems_->profiler().endGpuZone(cmd, "HDR:Leaves");
+
+        systems_->profiler().beginGpuZone(cmd, "HDR:Weather");
+        systems_->weather().recordDraw(cmd, frameIndex, grassTime);
+        systems_->profiler().endGpuZone(cmd, "HDR:Weather");
+
+        // Debug lines (recorded in secondary buffer for thread safety)
+        if (systems_->debugLine().hasLines()) {
+            VkExtent2D debugExtent = systems_->postProcess().getExtent();
+            auto viewport = vk::Viewport{}
+                .setX(0.0f)
+                .setY(0.0f)
+                .setWidth(static_cast<float>(debugExtent.width))
+                .setHeight(static_cast<float>(debugExtent.height))
+                .setMinDepth(0.0f)
+                .setMaxDepth(1.0f);
+            vkCmd.setViewport(0, viewport);
+
+            auto scissor = vk::Rect2D{}
+                .setOffset({0, 0})
+                .setExtent(vk::Extent2D{}.setWidth(debugExtent.width).setHeight(debugExtent.height));
+            vkCmd.setScissor(0, scissor);
+
+            systems_->debugLine().recordCommands(cmd, lastViewProj);
+        }
+        break;
+
+    default:
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+            "recordHDRPassSecondarySlot: Unknown slot %u", slot);
+        break;
+    }
 }
 
 // ===== GPU Skinning Implementation =====

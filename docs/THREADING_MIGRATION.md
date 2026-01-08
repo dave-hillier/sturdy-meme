@@ -258,31 +258,51 @@ void Renderer::render() {
 
 ### 4. Migrating Individual Systems
 
-Each rendering system should be updated to support secondary command buffer recording:
+Individual render systems don't need modification - they already accept `VkCommandBuffer` and
+can record to either primary or secondary buffers. The parallelization is handled at the
+FrameGraph pass level using slot-based recording:
 
 ```cpp
-// Before
-class GrassSystem {
-public:
-    void render(VkCommandBuffer cmd, const RenderContext& ctx);
-};
-
-// After
-class GrassSystem {
-public:
-    // Primary buffer recording (legacy)
-    void render(VkCommandBuffer cmd, const RenderContext& ctx);
-
-    // Secondary buffer recording (threaded)
-    void recordSecondary(vk::CommandBuffer cmd,
-                         vk::RenderPass renderPass,
-                         vk::Framebuffer framebuffer,
-                         const RenderContext& ctx);
-
-    // Check if system supports parallel recording
-    bool supportsSecondaryRecording() const { return true; }
-};
+// Define slots in the pass configuration
+auto hdr = frameGraph_.addPass({
+    .name = "HDR",
+    .execute = [this](FrameGraph::RenderContext& ctx) {
+        // Called after secondary buffers are recorded
+        if (ctx.secondaryBuffers && !ctx.secondaryBuffers->empty()) {
+            vkCmd.beginRenderPass(hdrPassInfo, vk::SubpassContents::eSecondaryCommandBuffers);
+            vkCmd.executeCommands(*ctx.secondaryBuffers);
+            vkCmd.endRenderPass();
+        } else {
+            // Fallback inline recording
+            recordHDRPass(ctx.commandBuffer, ...);
+        }
+    },
+    .canUseSecondary = true,
+    .secondarySlots = 3,
+    .secondaryRecord = [this](FrameGraph::RenderContext& ctx, uint32_t slot) {
+        // Called in parallel for each slot
+        switch (slot) {
+        case 0:
+            systems_->sky().recordDraw(ctx.commandBuffer, ctx.frameIndex);
+            systems_->terrain().recordDraw(ctx.commandBuffer, ctx.frameIndex);
+            break;
+        case 1:
+            vkCmd.bindPipeline(...);
+            recordSceneObjects(ctx.commandBuffer, ctx.frameIndex);
+            break;
+        case 2:
+            systems_->grass().recordDraw(ctx.commandBuffer, ctx.frameIndex, grassTime);
+            systems_->water().recordDraw(ctx.commandBuffer, ctx.frameIndex);
+            break;
+        }
+    }
+});
 ```
+
+Systems are thread-safe for recording because:
+- They use per-frame descriptor sets (no per-call allocation)
+- They bind their own pipelines and descriptors
+- They only read from immutable resources
 
 ## Thread Safety Considerations
 
@@ -411,10 +431,35 @@ SDL_Log("%s", frameGraph_.debugString().c_str());
    - Shadow and Froxel can run in parallel after Compute completes
    - SSR, WaterTileCull, HiZ, and BilateralGrid can all run in parallel after HDR
 
-4. **Phase 4**: Secondary command buffers
-   - Group draw calls by pipeline
-   - Record in parallel using ThreadedCommandPool
-   - Most benefit for: terrain, vegetation, particles
+4. **Phase 4**: Secondary command buffers (done)
+   - HDR pass uses parallel secondary command buffer recording
+   - Draw calls grouped into 3 parallel slots:
+     - Slot 0: Sky + Terrain + Catmull-Clark (geometry base)
+     - Slot 1: Scene Objects + Skinned Character (scene meshes)
+     - Slot 2: Grass + Water + Leaves + Weather + Debug lines (vegetation/effects)
+   - FrameGraph extended with `secondarySlots` and `secondaryRecord` in PassConfig
+   - RenderContext extended with `threadedCommandPool`, `renderPass`, `framebuffer`, `secondaryBuffers`
+   - Implementation:
+     ```cpp
+     // FrameGraph records secondary buffers in parallel via TaskScheduler
+     // Each slot gets its own secondary buffer from ThreadedCommandPool
+     // Primary buffer executes all secondaries with executeCommands()
+     auto hdr = frameGraph_.addPass({
+         .name = "HDR",
+         .execute = [this](FrameGraph::RenderContext& ctx) {
+             if (ctx.secondaryBuffers && !ctx.secondaryBuffers->empty()) {
+                 recordHDRPassWithSecondaries(ctx.commandBuffer, ...);
+             } else {
+                 recordHDRPass(ctx.commandBuffer, ...);  // Fallback
+             }
+         },
+         .canUseSecondary = true,
+         .secondarySlots = 3,
+         .secondaryRecord = [this](FrameGraph::RenderContext& ctx, uint32_t slot) {
+             recordHDRPassSecondarySlot(ctx.commandBuffer, ..., slot);
+         }
+     });
+     ```
 
 5. **Phase 5**: Advanced parallelism
    - Physics on worker threads

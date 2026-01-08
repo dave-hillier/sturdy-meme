@@ -247,6 +247,9 @@ private:
     // Render pass recording helpers (pure - only record commands, no state mutation)
     void recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, const glm::vec3& cameraPosition);
     void recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime);
+    void recordHDRPassWithSecondaries(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime,
+                                      const std::vector<vk::CommandBuffer>& secondaries);
+    void recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, uint32_t slot);
     void recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex);
 
     // Setup render pipeline stages with lambdas (called once during init)
