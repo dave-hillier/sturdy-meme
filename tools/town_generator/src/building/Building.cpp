@@ -190,8 +190,12 @@ std::vector<geom::Point> Building::circumference(const std::vector<geom::Polygon
     geom::Point next = ends[startIdx];
     result.push_back(current);
 
-    // Follow the chain
-    while (result.size() < starts.size() + 1) {
+    // Follow the chain with safety limit
+    constexpr size_t MAX_ITERATIONS = 1000;
+    size_t iterations = 0;
+    while (result.size() < starts.size() + 1 && iterations < MAX_ITERATIONS) {
+        ++iterations;
+
         // Find point close to result[0] (loop closed)
         if (std::abs(next.x - result[0].x) < 1e-6 &&
             std::abs(next.y - result[0].y) < 1e-6) {
@@ -268,6 +272,12 @@ geom::Polygon Building::create(
     if (cols <= 1 || rows <= 1) {
         return geom::Polygon();  // Too small
     }
+
+    // Limit grid size to prevent excessive computation
+    // mfcg.js typically produces small grids (2-5 cells per side)
+    constexpr int MAX_GRID_SIZE = 8;
+    if (cols > MAX_GRID_SIZE) cols = MAX_GRID_SIZE;
+    if (rows > MAX_GRID_SIZE) rows = MAX_GRID_SIZE;
 
     // Generate cell plan
     std::vector<bool> plan;
