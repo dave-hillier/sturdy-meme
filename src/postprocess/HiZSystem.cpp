@@ -2,6 +2,8 @@
 #include "ShaderLoader.h"
 #include "VmaResources.h"
 #include "core/ImageBuilder.h"
+#include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -121,21 +123,9 @@ bool HiZSystem::createHiZPyramid() {
     mipLevelCount = hiZPyramid.mipLevelCount;
 
     // Create sampler for Hi-Z reads with mipmap support
-    auto samplerInfo = vk::SamplerCreateInfo{}
-        .setMagFilter(vk::Filter::eNearest)
-        .setMinFilter(vk::Filter::eNearest)
-        .setMipmapMode(vk::SamplerMipmapMode::eNearest)
-        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
-        .setMinLod(0.0f)
-        .setMaxLod(static_cast<float>(mipLevelCount))
-        .setBorderColor(vk::BorderColor::eFloatOpaqueWhite);
-
-    try {
-        hiZSampler_.emplace(*raiiDevice_, samplerInfo);
-    } catch (const vk::SystemError& e) {
-        SDL_Log("HiZSystem: Failed to create Hi-Z sampler: %s", e.what());
+    hiZSampler_ = SamplerFactory::createSamplerNearestMipmap(*raiiDevice_, mipLevelCount);
+    if (!hiZSampler_) {
+        SDL_Log("HiZSystem: Failed to create Hi-Z sampler");
         return false;
     }
 
@@ -168,22 +158,12 @@ bool HiZSystem::createPyramidPipeline() {
     }
     pyramidDescSetLayout_.emplace(*raiiDevice_, rawLayout);
 
-    // Push constant range
-    auto pushConstantRange = vk::PushConstantRange{}
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
-        .setOffset(0)
-        .setSize(sizeof(HiZPyramidPushConstants));
-
-    // Pipeline layout
-    vk::DescriptorSetLayout layouts[] = { **pyramidDescSetLayout_ };
-    auto layoutInfo = vk::PipelineLayoutCreateInfo{}
-        .setSetLayouts(layouts)
-        .setPushConstantRanges(pushConstantRange);
-
-    try {
-        pyramidPipelineLayout_.emplace(*raiiDevice_, layoutInfo);
-    } catch (const vk::SystemError& e) {
-        SDL_Log("HiZSystem: Failed to create pyramid pipeline layout: %s", e.what());
+    // Pipeline layout using builder
+    if (!PipelineLayoutBuilder(*raiiDevice_)
+            .addDescriptorSetLayout(**pyramidDescSetLayout_)
+            .addPushConstantRange<HiZPyramidPushConstants>(vk::ShaderStageFlagBits::eCompute)
+            .buildInto(pyramidPipelineLayout_)) {
+        SDL_Log("HiZSystem: Failed to create pyramid pipeline layout");
         return false;
     }
 
@@ -237,14 +217,11 @@ bool HiZSystem::createCullingPipeline() {
     }
     cullingDescSetLayout_.emplace(*raiiDevice_, rawLayout);
 
-    // Pipeline layout (no push constants needed)
-    vk::DescriptorSetLayout layouts[] = { **cullingDescSetLayout_ };
-    auto layoutInfo = vk::PipelineLayoutCreateInfo{}.setSetLayouts(layouts);
-
-    try {
-        cullingPipelineLayout_.emplace(*raiiDevice_, layoutInfo);
-    } catch (const vk::SystemError& e) {
-        SDL_Log("HiZSystem: Failed to create culling pipeline layout: %s", e.what());
+    // Pipeline layout using builder (no push constants needed)
+    if (!PipelineLayoutBuilder(*raiiDevice_)
+            .addDescriptorSetLayout(**cullingDescSetLayout_)
+            .buildInto(cullingPipelineLayout_)) {
+        SDL_Log("HiZSystem: Failed to create culling pipeline layout");
         return false;
     }
 
@@ -461,27 +438,8 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
     vk::CommandBuffer vkCmd(cmd);
 
     // Transition Hi-Z pyramid to general for writing
-    {
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlags{})
-            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
-            .setOldLayout(vk::ImageLayout::eUndefined)
-            .setNewLayout(vk::ImageLayout::eGeneral)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(hiZPyramid.image.get())
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(mipLevelCount)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1));
-
-        vkCmd.pipelineBarrier(
-            vk::PipelineStageFlagBits::eTopOfPipe,
-            vk::PipelineStageFlagBits::eComputeShader,
-            {}, {}, {}, barrier);
-    }
+    BarrierHelpers::imageToGeneral(vkCmd, hiZPyramid.image.get(),
+        vk::ImageAspectFlagBits::eColor, mipLevelCount);
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **pyramidPipeline_);
 
     // Generate each mip level
@@ -519,25 +477,7 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
 
         // Barrier between mip levels
         if (mip < mipLevelCount - 1) {
-            auto barrier = vk::ImageMemoryBarrier{}
-                .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-                .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-                .setOldLayout(vk::ImageLayout::eGeneral)
-                .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-                .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .setImage(hiZPyramid.image.get())
-                .setSubresourceRange(vk::ImageSubresourceRange{}
-                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                    .setBaseMipLevel(mip)
-                    .setLevelCount(1)
-                    .setBaseArrayLayer(0)
-                    .setLayerCount(1));
-
-            vkCmd.pipelineBarrier(
-                vk::PipelineStageFlagBits::eComputeShader,
-                vk::PipelineStageFlagBits::eComputeShader,
-                {}, {}, {}, barrier);
+            BarrierHelpers::mipWriteToRead(vkCmd, hiZPyramid.image.get(), mip);
         }
 
         srcWidth = dstWidth;
@@ -545,27 +485,7 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
     }
 
     // Transition entire pyramid to shader read for culling
-    {
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eGeneral)
-            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(hiZPyramid.image.get())
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(mipLevelCount)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1));
-
-        vkCmd.pipelineBarrier(
-            vk::PipelineStageFlagBits::eComputeShader,
-            vk::PipelineStageFlagBits::eComputeShader,
-            {}, {}, {}, barrier);
-    }
+    BarrierHelpers::mipChainToShaderRead(vkCmd, hiZPyramid.image.get(), mipLevelCount);
 }
 
 void HiZSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex) {
@@ -579,16 +499,7 @@ void HiZSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmd.fillBuffer(drawCountBuffers.buffers[frameIndex], 0, sizeof(uint32_t), 0);
 
     // Barrier after fillBuffer
-    {
-        auto memBarrier = vk::MemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
-
-        vkCmd.pipelineBarrier(
-            vk::PipelineStageFlagBits::eTransfer,
-            vk::PipelineStageFlagBits::eComputeShader,
-            {}, memBarrier, {}, {});
-    }
+    BarrierHelpers::fillBufferToCompute(vkCmd);
 
     // Bind culling pipeline and descriptor set
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **cullingPipeline_);
@@ -600,16 +511,7 @@ void HiZSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmd.dispatch(groupCount, 1, 1);
 
     // Barrier: culling -> indirect draw
-    {
-        auto memBarrier = vk::MemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eIndirectCommandRead);
-
-        vkCmd.pipelineBarrier(
-            vk::PipelineStageFlagBits::eComputeShader,
-            vk::PipelineStageFlagBits::eDrawIndirect,
-            {}, memBarrier, {}, {});
-    }
+    BarrierHelpers::computeToIndirectDraw(vkCmd);
 }
 
 

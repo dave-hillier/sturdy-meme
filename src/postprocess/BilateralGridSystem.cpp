@@ -1,5 +1,8 @@
 #include "BilateralGridSystem.h"
 #include "ShaderLoader.h"
+#include "core/vulkan/VmaResources.h"
+#include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -164,25 +167,11 @@ void BilateralGridSystem::destroyGridResources() {
 }
 
 bool BilateralGridSystem::createSampler() {
-    auto samplerInfo = vk::SamplerCreateInfo{}
-        .setMagFilter(vk::Filter::eLinear)
-        .setMinFilter(vk::Filter::eLinear)
-        .setMipmapMode(vk::SamplerMipmapMode::eNearest)
-        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
-        .setMipLodBias(0.0f)
-        .setAnisotropyEnable(VK_FALSE)
-        .setCompareEnable(VK_FALSE)
-        .setMinLod(0.0f)
-        .setMaxLod(0.0f)
-        .setBorderColor(vk::BorderColor::eFloatOpaqueBlack);
-
-    try {
-        gridSampler_.emplace(*raiiDevice_, samplerInfo);
-    } catch (const vk::SystemError& e) {
+    // Use factory for linear clamp sampler
+    gridSampler_ = SamplerFactory::createSamplerLinearClampLimitedMip(*raiiDevice_, 0.0f);
+    if (!gridSampler_) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "BilateralGridSystem: Failed to create sampler: %s", e.what());
+                    "BilateralGridSystem: Failed to create sampler");
         return false;
     }
     return true;
@@ -298,15 +287,12 @@ bool BilateralGridSystem::createUniformBuffers() {
 }
 
 bool BilateralGridSystem::createBuildPipeline() {
-    // Pipeline layout
-    vk::DescriptorSetLayout layouts[] = { **buildDescriptorSetLayout_ };
-    auto layoutInfo = vk::PipelineLayoutCreateInfo{}.setSetLayouts(layouts);
-
-    try {
-        buildPipelineLayout_.emplace(*raiiDevice_, layoutInfo);
-    } catch (const vk::SystemError& e) {
+    // Pipeline layout using builder
+    if (!PipelineLayoutBuilder(*raiiDevice_)
+            .addDescriptorSetLayout(**buildDescriptorSetLayout_)
+            .buildInto(buildPipelineLayout_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "BilateralGridSystem: Failed to create build pipeline layout: %s", e.what());
+                    "BilateralGridSystem: Failed to create build pipeline layout");
         return false;
     }
 
@@ -342,15 +328,12 @@ bool BilateralGridSystem::createBuildPipeline() {
 }
 
 bool BilateralGridSystem::createBlurPipeline() {
-    // Pipeline layout
-    vk::DescriptorSetLayout layouts[] = { **blurDescriptorSetLayout_ };
-    auto layoutInfo = vk::PipelineLayoutCreateInfo{}.setSetLayouts(layouts);
-
-    try {
-        blurPipelineLayout_.emplace(*raiiDevice_, layoutInfo);
-    } catch (const vk::SystemError& e) {
+    // Pipeline layout using builder
+    if (!PipelineLayoutBuilder(*raiiDevice_)
+            .addDescriptorSetLayout(**blurDescriptorSetLayout_)
+            .buildInto(blurPipelineLayout_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "BilateralGridSystem: Failed to create blur pipeline layout: %s", e.what());
+                    "BilateralGridSystem: Failed to create blur pipeline layout");
         return false;
     }
 
@@ -548,26 +531,6 @@ void BilateralGridSystem::recordClearGrid(VkCommandBuffer cmd) {
                         reinterpret_cast<const VkImageMemoryBarrier*>(barriers.data()));
 }
 
-void BilateralGridSystem::recordGridBarrier(VkCommandBuffer cmd, VkImage image,
-                                            VkAccessFlags srcAccess, VkAccessFlags dstAccess,
-                                            VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage) {
-    auto barrier = vk::ImageMemoryBarrier{}
-        .setOldLayout(vk::ImageLayout::eGeneral)
-        .setNewLayout(vk::ImageLayout::eGeneral)
-        .setSrcAccessMask(static_cast<vk::AccessFlags>(srcAccess))
-        .setDstAccessMask(static_cast<vk::AccessFlags>(dstAccess))
-        .setImage(image)
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
-
-    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1,
-                        reinterpret_cast<const VkImageMemoryBarrier*>(&barrier));
-}
-
 void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t frameIndex,
                                               VkImageView hdrInputView) {
     if (!enabled) return;
@@ -642,9 +605,7 @@ void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t fram
     vkCmd.dispatch(groupsX, groupsY, 1);
 
     // Barrier after build
-    recordGridBarrier(cmd, gridImages[0],
-                     VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    BarrierHelpers::computeWriteToComputeRead(vkCmd, gridImages[0]);
 
     // Blur passes
     BilateralBlurUniforms blurUniforms{};
@@ -669,9 +630,7 @@ void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t fram
     vkCmd.dispatch(blurGroupsX, blurGroupsY, blurGroupsZ);
 
     // Barrier
-    recordGridBarrier(cmd, gridImages[1],
-                     VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+    BarrierHelpers::computeWriteToComputeRead(vkCmd, gridImages[1]);
 
     // Y blur: grid[1] -> grid[0]
     blurUniforms.axis = 1;
@@ -683,28 +642,7 @@ void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t fram
                              0, vk::DescriptorSet(blurDescriptorSetsY[frameIndex]), {});
     vkCmd.dispatch(blurGroupsX, blurGroupsY, blurGroupsZ);
 
-    // Final barrier for sampling
-    recordGridBarrier(cmd, gridImages[0],
-                     VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-
-    // Transition grid[0] to SHADER_READ_ONLY for fragment shader sampling
-    auto finalBarrier = vk::ImageMemoryBarrier{}
-        .setOldLayout(vk::ImageLayout::eGeneral)
-        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-        .setImage(gridImages[0])
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
-
-    vkCmdPipelineBarrier(cmd,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                        0, 0, nullptr, 0, nullptr, 1,
-                        reinterpret_cast<const VkImageMemoryBarrier*>(&finalBarrier));
+    // Final barrier: compute write -> fragment shader read with layout transition
+    BarrierHelpers::imageToShaderRead(vkCmd, gridImages[0],
+        vk::PipelineStageFlagBits::eFragmentShader);
 }

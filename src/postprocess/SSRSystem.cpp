@@ -2,6 +2,9 @@
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
 #include "CommandBufferUtils.h"
+#include "core/vulkan/VmaResources.h"
+#include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -216,20 +219,10 @@ bool SSRSystem::createSSRBuffers() {
         }
     }
 
-    // Create sampler
-    auto samplerInfo = vk::SamplerCreateInfo{}
-        .setMagFilter(vk::Filter::eLinear)
-        .setMinFilter(vk::Filter::eLinear)
-        .setMipmapMode(vk::SamplerMipmapMode::eLinear)
-        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
-        .setMaxLod(1.0f);
-
-    try {
-        sampler_.emplace(*raiiDevice_, samplerInfo);
-    } catch (const std::exception& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR sampler: %s", e.what());
+    // Create sampler using factory
+    sampler_ = SamplerFactory::createSamplerLinearClampLimitedMip(*raiiDevice_, 1.0f);
+    if (!sampler_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR sampler");
         return false;
     }
 
@@ -313,20 +306,12 @@ bool SSRSystem::createComputePipeline() {
     }
     descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
-    // Push constant range for SSR parameters
-    auto pushConstantRange = vk::PushConstantRange{}
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
-        .setOffset(0)
-        .setSize(sizeof(SSRPushConstants));
-
-    try {
-        vk::DescriptorSetLayout layouts[] = { **descriptorSetLayout_ };
-        auto layoutInfo = vk::PipelineLayoutCreateInfo{}
-            .setSetLayouts(layouts)
-            .setPushConstantRanges(pushConstantRange);
-        computePipelineLayout_.emplace(*raiiDevice_, layoutInfo);
-    } catch (const std::exception& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR pipeline layout: %s", e.what());
+    // Pipeline layout using builder
+    if (!PipelineLayoutBuilder(*raiiDevice_)
+            .addDescriptorSetLayout(**descriptorSetLayout_)
+            .addPushConstantRange<SSRPushConstants>(vk::ShaderStageFlagBits::eCompute)
+            .buildInto(computePipelineLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR pipeline layout");
         return false;
     }
 
@@ -380,20 +365,12 @@ bool SSRSystem::createBlurPipeline() {
     }
     blurDescriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
-    // Push constant range for blur parameters
-    auto pushConstantRange = vk::PushConstantRange{}
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
-        .setOffset(0)
-        .setSize(sizeof(BlurPushConstants));
-
-    try {
-        vk::DescriptorSetLayout layouts[] = { **blurDescriptorSetLayout_ };
-        auto layoutInfo = vk::PipelineLayoutCreateInfo{}
-            .setSetLayouts(layouts)
-            .setPushConstantRanges(pushConstantRange);
-        blurPipelineLayout_.emplace(*raiiDevice_, layoutInfo);
-    } catch (const std::exception& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur pipeline layout: %s", e.what());
+    // Pipeline layout using builder
+    if (!PipelineLayoutBuilder(*raiiDevice_)
+            .addDescriptorSetLayout(**blurDescriptorSetLayout_)
+            .addPushConstantRange<BlurPushConstants>(vk::ShaderStageFlagBits::eCompute)
+            .buildInto(blurPipelineLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur pipeline layout");
         return false;
     }
 
@@ -520,25 +497,7 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
     // If blur is enabled, dispatch blur pass
     if (blurEnabled && blurPipeline_) {
         // Barrier: SSR output -> blur input
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eGeneral)
-            .setNewLayout(vk::ImageLayout::eGeneral)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(ssrOutputImage)
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1));
-
-        vkCmd.pipelineBarrier(
-            vk::PipelineStageFlagBits::eComputeShader,
-            vk::PipelineStageFlagBits::eComputeShader,
-            {}, {}, {}, barrier);
+        BarrierHelpers::computeWriteToComputeRead(vkCmd, ssrOutputImage);
 
         // Update blur descriptor set using SetWriter
         DescriptorManager::SetWriter(device, blurDescriptorSets[frameIndex])
@@ -564,48 +523,10 @@ void SSRSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex,
         vkCmd.dispatch(groupsX, groupsY, 1);
 
         // Final barrier: blur output -> fragment shader
-        {
-            auto barrier = vk::ImageMemoryBarrier{}
-                .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-                .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-                .setOldLayout(vk::ImageLayout::eGeneral)
-                .setNewLayout(vk::ImageLayout::eGeneral)
-                .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .setImage(ssrResult[writeBuffer])
-                .setSubresourceRange(vk::ImageSubresourceRange{}
-                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                    .setBaseMipLevel(0)
-                    .setLevelCount(1)
-                    .setBaseArrayLayer(0)
-                    .setLayerCount(1));
-
-            vkCmd.pipelineBarrier(
-                vk::PipelineStageFlagBits::eComputeShader,
-                vk::PipelineStageFlagBits::eFragmentShader,
-                {}, {}, {}, barrier);
-        }
+        BarrierHelpers::computeToFragment(vkCmd, ssrResult[writeBuffer]);
     } else {
         // No blur - barrier directly to fragment shader
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eGeneral)
-            .setNewLayout(vk::ImageLayout::eGeneral)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(ssrOutputImage)
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1));
-
-        vkCmd.pipelineBarrier(
-            vk::PipelineStageFlagBits::eComputeShader,
-            vk::PipelineStageFlagBits::eFragmentShader,
-            {}, {}, {}, barrier);
+        BarrierHelpers::computeToFragment(vkCmd, ssrOutputImage);
     }
 
     // Swap buffers for next frame

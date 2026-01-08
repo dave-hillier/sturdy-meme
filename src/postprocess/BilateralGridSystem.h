@@ -108,11 +108,6 @@ private:
     // Clear grid before each frame
     void recordClearGrid(VkCommandBuffer cmd);
 
-    // Barrier between passes
-    void recordGridBarrier(VkCommandBuffer cmd, VkImage image,
-                          VkAccessFlags srcAccess, VkAccessFlags dstAccess,
-                          VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage);
-
     VkDevice device = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
     DescriptorManager::Pool* descriptorPool = nullptr;

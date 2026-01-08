@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "VmaResources.h"
 #include "DescriptorManager.h"
+#include "core/vulkan/PipelineLayoutBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -139,29 +140,13 @@ bool FoamBuffer::createFoamBuffers() {
         }
     }
 
-    // Create sampler
-    auto samplerInfo = vk::SamplerCreateInfo{}
-        .setMagFilter(vk::Filter::eLinear)
-        .setMinFilter(vk::Filter::eLinear)
-        .setMipmapMode(vk::SamplerMipmapMode::eNearest)
-        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
-        .setMipLodBias(0.0f)
-        .setAnisotropyEnable(VK_FALSE)
-        .setMaxAnisotropy(1.0f)
-        .setCompareEnable(VK_FALSE)
-        .setMinLod(0.0f)
-        .setMaxLod(0.0f)
-        .setBorderColor(vk::BorderColor::eFloatTransparentBlack);
-
-    try {
-        sampler_.emplace(*raiiDevice_, samplerInfo);
-        return true;
-    } catch (const std::exception& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create foam sampler: %s", e.what());
+    // Create sampler using factory
+    sampler_ = SamplerFactory::createSamplerLinearClampLimitedMip(*raiiDevice_, 0.0f);
+    if (!sampler_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create foam sampler");
         return false;
     }
+    return true;
 }
 
 bool FoamBuffer::createWakeBuffers() {
@@ -224,21 +209,12 @@ bool FoamBuffer::createComputePipeline() {
     }
     descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
-    // Push constant range
-    auto pushConstantRange = vk::PushConstantRange{}
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
-        .setOffset(0)
-        .setSize(sizeof(FoamPushConstants));
-
-    // Pipeline layout
-    try {
-        vk::DescriptorSetLayout layouts[] = { **descriptorSetLayout_ };
-        auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}
-            .setSetLayouts(layouts)
-            .setPushConstantRanges(pushConstantRange);
-        computePipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
-    } catch (const std::exception& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create foam pipeline layout: %s", e.what());
+    // Pipeline layout using builder
+    if (!PipelineLayoutBuilder(*raiiDevice_)
+            .addDescriptorSetLayout(**descriptorSetLayout_)
+            .addPushConstantRange<FoamPushConstants>(vk::ShaderStageFlagBits::eCompute)
+            .buildInto(computePipelineLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create foam pipeline layout");
         return false;
     }
 

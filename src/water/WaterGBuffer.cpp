@@ -3,6 +3,7 @@
 #include "Mesh.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
+#include "core/vulkan/VmaResources.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -387,25 +388,10 @@ bool WaterGBuffer::createFramebuffer() {
 }
 
 bool WaterGBuffer::createSampler() {
-    auto samplerInfo = vk::SamplerCreateInfo{}
-        .setMagFilter(vk::Filter::eLinear)
-        .setMinFilter(vk::Filter::eLinear)
-        .setMipmapMode(vk::SamplerMipmapMode::eNearest)
-        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
-        .setMipLodBias(0.0f)
-        .setAnisotropyEnable(VK_FALSE)
-        .setMaxAnisotropy(1.0f)
-        .setCompareEnable(VK_FALSE)
-        .setMinLod(0.0f)
-        .setMaxLod(0.0f)
-        .setBorderColor(vk::BorderColor::eFloatOpaqueBlack);
-
-    try {
-        sampler_.emplace(*raiiDevice_, samplerInfo);
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create sampler: %s", e.what());
+    // Use factory for linear clamp sampler
+    sampler_ = SamplerFactory::createSamplerLinearClampLimitedMip(*raiiDevice_, 0.0f);
+    if (!sampler_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create sampler");
         return false;
     }
     return true;

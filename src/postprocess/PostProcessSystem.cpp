@@ -5,6 +5,7 @@
 #include "DescriptorManager.h"
 #include "VmaResources.h"
 #include "CommandBufferUtils.h"
+#include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL.h>
 #include <array>
 #include <vulkan/vulkan.hpp>
@@ -969,16 +970,7 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     vkCmd.fillBuffer(histogramBuffer.get(), 0, HISTOGRAM_BINS * sizeof(uint32_t), 0);
 
     // Barrier after fillBuffer
-    {
-        auto memBarrier = vk::MemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite);
-
-        vkCmd.pipelineBarrier(
-            vk::PipelineStageFlagBits::eTransfer,
-            vk::PipelineStageFlagBits::eComputeShader,
-            {}, memBarrier, {}, {});
-    }
+    BarrierHelpers::fillBufferToCompute(vkCmd);
 
     // Dispatch histogram build
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, histogramBuildPipeline);
@@ -990,21 +982,7 @@ void PostProcessSystem::recordHistogramCompute(VkCommandBuffer cmd, uint32_t fra
     vkCmd.dispatch(groupsX, groupsY, 1);
 
     // Barrier: histogram build -> reduce
-    {
-        auto bufBarrier = vk::BufferMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setBuffer(histogramBuffer.get())
-            .setOffset(0)
-            .setSize(HISTOGRAM_BINS * sizeof(uint32_t));
-
-        vkCmd.pipelineBarrier(
-            vk::PipelineStageFlagBits::eComputeShader,
-            vk::PipelineStageFlagBits::eComputeShader,
-            {}, {}, bufBarrier, {});
-    }
+    BarrierHelpers::bufferComputeToCompute(vkCmd, histogramBuffer.get());
 
     // Dispatch histogram reduce (single workgroup of 256 threads)
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, histogramReducePipeline);

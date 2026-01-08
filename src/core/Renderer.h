@@ -23,6 +23,9 @@
 #include "RendererSystems.h"
 #include "PerformanceToggles.h"
 #include "TripleBuffering.h"
+#include "vulkan/AsyncTransferManager.h"
+#include "vulkan/ThreadedCommandPool.h"
+#include "pipeline/FrameGraph.h"
 
 // Forward declarations
 class PhysicsWorld;
@@ -189,6 +192,14 @@ public:
     std::string getShaderPath() const { return resourcePath + "/shaders"; }
     const std::string& getResourcePath() const { return resourcePath; }
 
+    // Multi-threading infrastructure (from video: async transfers, threaded command pools, frame graph)
+    AsyncTransferManager& getAsyncTransferManager() { return asyncTransferManager_; }
+    const AsyncTransferManager& getAsyncTransferManager() const { return asyncTransferManager_; }
+    ThreadedCommandPool& getThreadedCommandPool() { return threadedCommandPool_; }
+    const ThreadedCommandPool& getThreadedCommandPool() const { return threadedCommandPool_; }
+    FrameGraph& getFrameGraph() { return frameGraph_; }
+    const FrameGraph& getFrameGraph() const { return frameGraph_; }
+
     // Performance control
     PerformanceToggles& getPerformanceToggles() { return perfToggles; }
     const PerformanceToggles& getPerformanceToggles() const { return perfToggles; }
@@ -284,6 +295,11 @@ private:
 
     // Triple buffering: frame synchronization and indexing
     TripleBuffering frameSync_;
+
+    // Multi-threading infrastructure
+    AsyncTransferManager asyncTransferManager_;
+    ThreadedCommandPool threadedCommandPool_;
+    FrameGraph frameGraph_;
 
     // Rock descriptor sets (RockSystem has its own textures, not in MaterialRegistry)
     std::vector<VkDescriptorSet> rockDescriptorSets;

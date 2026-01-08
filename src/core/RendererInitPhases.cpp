@@ -51,6 +51,7 @@
 #include "EnvironmentSettings.h"
 #include "UBOBuilder.h"
 #include "WindSystem.h"
+#include "threading/TaskScheduler.h"
 #include <SDL3/SDL.h>
 
 bool Renderer::initCoreVulkanResources() {
@@ -58,6 +59,28 @@ bool Renderer::initCoreVulkanResources() {
     if (!createDepthResources()) return false;
     if (!createFramebuffers()) return false;
     if (!createCommandPool()) return false;
+
+    // Initialize multi-threading infrastructure (from video architecture)
+    {
+        INIT_PROFILE_PHASE("ThreadingInfra");
+
+        // Initialize async transfer manager for non-blocking GPU uploads
+        if (!asyncTransferManager_.initialize(*vulkanContext_)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "AsyncTransferManager initialization failed - using synchronous transfers");
+        }
+
+        // Initialize threaded command pool for parallel command recording
+        // Use TaskScheduler thread count + 1 for main thread
+        uint32_t threadCount = TaskScheduler::instance().getThreadCount();
+        if (threadCount > 0) {
+            if (!threadedCommandPool_.initialize(*vulkanContext_, threadCount + 1)) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "ThreadedCommandPool initialization failed - using single-threaded recording");
+            }
+        }
+    }
+
     return true;
 }
 
