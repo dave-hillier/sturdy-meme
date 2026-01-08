@@ -26,6 +26,7 @@
 #include "vulkan/AsyncTransferManager.h"
 #include "vulkan/ThreadedCommandPool.h"
 #include "pipeline/FrameGraph.h"
+#include "loading/LoadJobFactory.h"
 
 // Forward declarations
 class PhysicsWorld;
@@ -199,6 +200,8 @@ public:
     const ThreadedCommandPool& getThreadedCommandPool() const { return threadedCommandPool_; }
     FrameGraph& getFrameGraph() { return frameGraph_; }
     const FrameGraph& getFrameGraph() const { return frameGraph_; }
+    Loading::AsyncTextureUploader& getAsyncTextureUploader() { return asyncTextureUploader_; }
+    const Loading::AsyncTextureUploader& getAsyncTextureUploader() const { return asyncTextureUploader_; }
 
     // Performance control
     PerformanceToggles& getPerformanceToggles() { return perfToggles; }
@@ -303,6 +306,7 @@ private:
     AsyncTransferManager asyncTransferManager_;
     ThreadedCommandPool threadedCommandPool_;
     FrameGraph frameGraph_;
+    Loading::AsyncTextureUploader asyncTextureUploader_;
 
     // Rock descriptor sets (RockSystem has its own textures, not in MaterialRegistry)
     std::vector<VkDescriptorSet> rockDescriptorSets;

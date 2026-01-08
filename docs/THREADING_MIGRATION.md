@@ -31,6 +31,7 @@ This document describes how to migrate rendering code to use the multi-threaded 
 | `AsyncTransferManager` | Non-blocking GPU transfers | `src/core/vulkan/AsyncTransferManager.h` |
 | `ThreadedCommandPool` | Per-thread command pools | `src/core/vulkan/ThreadedCommandPool.h` |
 | `FrameGraph` | Dependency-driven pass scheduling | `src/core/pipeline/FrameGraph.h` |
+| `AsyncTextureUploader` | Non-blocking texture uploads | `src/core/loading/LoadJobFactory.h` |
 
 ## Migration Steps
 
@@ -374,9 +375,26 @@ SDL_Log("%s", frameGraph_.debugString().c_str());
    - TaskScheduler starts at application launch
    - AsyncTransferManager and ThreadedCommandPool created in Renderer
 
-2. **Phase 2**: Async loading
-   - Migrate texture loading to AsyncTransferManager
-   - Update LoadJobQueue to use async transfers
+2. **Phase 2**: Async loading (done)
+   - `AsyncTextureUploader` class for non-blocking texture uploads via `AsyncTransferManager`
+   - `processPendingTransfers()` called each frame in render loop
+   - VirtualTexture tile loading already uses async pattern (loads tiles in worker threads)
+
+   **Using AsyncTextureUploader:**
+   ```cpp
+   // Get uploader from renderer
+   auto& uploader = renderer.getAsyncTextureUploader();
+
+   // Submit staged texture for async upload
+   AsyncTextureHandle handle = uploader.submitTexture(stagedTexture);
+
+   // Each frame, check for completed uploads
+   auto completed = uploader.takeAllCompleted();
+   for (auto& tex : completed) {
+       // tex.image, tex.view, tex.allocation are ready to use
+       createDescriptorSet(tex.view);
+   }
+   ```
 
 3. **Phase 3**: Frame graph (done)
    - Convert RenderPipeline stages to FrameGraph passes

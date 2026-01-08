@@ -97,7 +97,8 @@ VmaBuffer AsyncTransferManager::acquireStagingBuffer(vk::DeviceSize size) {
     VmaBuffer buffer;
     if (!VmaBufferFactory::createStagingBuffer(allocator_, size, buffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-            "AsyncTransferManager: Failed to create staging buffer (size: %zu)", size);
+            "AsyncTransferManager: Failed to create staging buffer (size: %llu)",
+            static_cast<unsigned long long>(size));
         return {};
     }
     return buffer;

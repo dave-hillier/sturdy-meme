@@ -549,6 +549,7 @@ void Renderer::cleanup() {
         vkDeviceWaitIdle(device);
 
         // Shutdown multi-threading infrastructure
+        asyncTextureUploader_.shutdown();  // Must shutdown before transfer manager
         asyncTransferManager_.shutdown();
         threadedCommandPool_.shutdown();
 
@@ -980,6 +981,10 @@ bool Renderer::render(const Camera& camera) {
     }
 
     frameSync_.resetCurrentFence();
+
+    // Process completed async transfers (textures, buffers uploaded via AsyncTransferManager)
+    // Must be called after fence wait to safely reuse staging buffers
+    asyncTransferManager_.processPendingTransfers();
 
     // Update time system (frame timing and day/night cycle)
     TimingData timing = systems_->time().update();
