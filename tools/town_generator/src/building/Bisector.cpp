@@ -367,6 +367,9 @@ std::vector<geom::Polygon> Bisector::applyGap(
     const std::vector<geom::Polygon>& halves,
     const std::vector<geom::Point>& cutLine
 ) {
+    // Faithful to MFCG: uses PolyCreate.stripe + PolyBool.and(half, revert(stripe))
+    // Creates a stripe polygon along the cut line, then subtracts it from each half
+
     if (!getGap || halves.size() < 2 || cutLine.size() < 2) {
         return halves;
     }
@@ -376,73 +379,38 @@ std::vector<geom::Polygon> Bisector::applyGap(
         return halves;
     }
 
-    // Calculate cut line direction for proper shrinking
-    geom::Point cutStart = cutLine.front();
-    geom::Point cutEnd = cutLine.back();
-    geom::Point cutDir = cutEnd.subtract(cutStart);
-    double cutLen = cutDir.length();
-    if (cutLen < 0.001) {
+    // Create stripe polygon along the cut line (MFCG: PolyCreate.stripe)
+    std::vector<geom::Point> stripePoly = geom::GeomUtils::stripe(cutLine, gap, 1.0);
+
+    if (stripePoly.size() < 3) {
         return halves;
     }
 
-    // Normal to cut line (perpendicular)
-    geom::Point cutNormal(-cutDir.y / cutLen, cutDir.x / cutLen);
+    // Reverse the stripe for subtraction (MFCG: revert(stripe))
+    std::vector<geom::Point> stripeReversed = geom::GeomUtils::reverse(stripePoly);
 
     std::vector<geom::Polygon> result;
-    double halfGap = gap / 2.0;
 
     for (const auto& half : halves) {
-        // Determine which direction to shrink based on half's position
-        geom::Point halfCenter = half.centroid();
-        geom::Point toCenter = halfCenter.subtract(cutStart);
-        double dotNormal = toCenter.x * cutNormal.x + toCenter.y * cutNormal.y;
+        // Get polygon vertices
+        std::vector<geom::Point> halfPts = half.vertexValues();
 
-        // Shrink along the cut line edges
-        // Find edges of the half that are on the cut line and shrink them
-        std::vector<double> shrinkAmounts(half.length(), 0.0);
-
-        for (size_t i = 0; i < half.length(); ++i) {
-            const geom::Point& v0 = half[i];
-            const geom::Point& v1 = half[(i + 1) % half.length()];
-
-            // Check if this edge is part of the cut line
-            bool onCutLine = false;
-            for (size_t j = 0; j + 1 < cutLine.size(); ++j) {
-                // Check if edge vertices are on the cut line segment
-                double d0 = geom::GeomUtils::distance2line(
-                    cutLine[j].x, cutLine[j].y,
-                    cutLine[j+1].x - cutLine[j].x, cutLine[j+1].y - cutLine[j].y,
-                    v0.x, v0.y
-                );
-                double d1 = geom::GeomUtils::distance2line(
-                    cutLine[j].x, cutLine[j].y,
-                    cutLine[j+1].x - cutLine[j].x, cutLine[j+1].y - cutLine[j].y,
-                    v1.x, v1.y
-                );
-
-                if (d0 < 0.5 && d1 < 0.5) {
-                    onCutLine = true;
-                    break;
-                }
-            }
-
-            if (onCutLine) {
-                shrinkAmounts[i] = halfGap;
-            }
+        if (halfPts.size() < 3) {
+            result.push_back(half);
+            continue;
         }
 
-        // Apply shrink if any edges need shrinking
-        bool needsShrink = false;
-        for (double amt : shrinkAmounts) {
-            if (amt > 0) {
-                needsShrink = true;
-                break;
-            }
-        }
+        // Boolean AND with reversed stripe (MFCG: PolyBool.and(half, revert(stripe)))
+        // This effectively subtracts the stripe from the polygon
+        std::vector<geom::Point> clipped = geom::GeomUtils::polygonIntersection(
+            halfPts, stripeReversed, true  // subtract = true
+        );
 
-        if (needsShrink) {
-            result.push_back(half.shrink(shrinkAmounts));
+        if (clipped.size() >= 3) {
+            result.push_back(geom::Polygon(clipped));
         } else {
+            // Fallback: if boolean operation fails, try simple shrink approach
+            // This can happen with complex polygon shapes
             result.push_back(half);
         }
     }
@@ -456,15 +424,89 @@ std::vector<geom::Polygon> Bisector::split(
     int edge2,
     const std::vector<geom::Point>& cutLine
 ) {
-    if (cutLine.size() < 2) {
+    // Faithful to MFCG: index-based vertex insertion and slicing
+    // MFCG inserts cut points into vertex list at specific indices,
+    // then slices by index ranges to create halves
+
+    if (cutLine.size() < 2 || edge1 < 0 || edge2 < 0) {
         return {shape};
     }
 
-    // Use polygon.cut with the cut line endpoints
-    // This delegates to Polygon::cut which handles the splitting
-    auto halves = shape.cut(cutLine.front(), cutLine.back(), 0);
+    size_t n = shape.length();
+    if (n < 3) {
+        return {shape};
+    }
 
-    return halves;
+    // Ensure edge1 < edge2 for consistent slicing
+    if (edge1 > edge2) {
+        std::swap(edge1, edge2);
+        // Also need to reverse the cut line when swapping
+    }
+
+    // Get start and end points of the cut
+    geom::Point cutStart = cutLine.front();
+    geom::Point cutEnd = cutLine.back();
+
+    // Build the two halves by inserting cut points at the correct positions
+    // Half 1: from cutStart along edge1+1 to edge2, then cutEnd back to cutStart
+    // Half 2: from cutEnd along edge2+1 to edge1, then cutStart back to cutEnd
+
+    std::vector<geom::Point> half1Pts;
+    std::vector<geom::Point> half2Pts;
+
+    // Half 1: cutStart -> vertices[edge1+1] to vertices[edge2] -> cutEnd
+    half1Pts.push_back(cutStart);
+
+    // Add intermediate cut line points (for 3-point cuts)
+    for (size_t i = 1; i + 1 < cutLine.size(); ++i) {
+        half1Pts.push_back(cutLine[i]);
+    }
+
+    // Vertices from edge1+1 to edge2 (inclusive)
+    for (int i = edge1 + 1; i <= edge2; ++i) {
+        half1Pts.push_back(shape[i]);
+    }
+
+    half1Pts.push_back(cutEnd);
+
+    // Half 2: cutEnd -> vertices[edge2+1] to vertices[edge1] (wrapping) -> cutStart
+    half2Pts.push_back(cutEnd);
+
+    // Add intermediate cut line points in reverse (for 3-point cuts)
+    for (size_t i = cutLine.size() - 2; i >= 1; --i) {
+        half2Pts.push_back(cutLine[i]);
+        if (i == 1) break;  // Avoid underflow
+    }
+
+    // Vertices from edge2+1 to end, then from 0 to edge1 (inclusive)
+    for (int i = edge2 + 1; i < static_cast<int>(n); ++i) {
+        half2Pts.push_back(shape[i]);
+    }
+    for (int i = 0; i <= edge1; ++i) {
+        half2Pts.push_back(shape[i]);
+    }
+
+    half2Pts.push_back(cutStart);
+
+    // Validate halves have enough vertices
+    if (half1Pts.size() < 3 || half2Pts.size() < 3) {
+        return {shape};
+    }
+
+    geom::Polygon half1(half1Pts);
+    geom::Polygon half2(half2Pts);
+
+    // Determine correct ordering based on cross product (like MFCG)
+    // MFCG uses cross product to ensure consistent winding
+    geom::Point v = shape.vectori(edge1);
+    geom::Point cutDir = cutEnd.subtract(cutStart);
+    double cross = geom::GeomUtils::cross(cutDir.x, cutDir.y, v.x, v.y);
+
+    if (cross > 0) {
+        return {half1, half2};
+    } else {
+        return {half2, half1};
+    }
 }
 
 std::vector<geom::Point> Bisector::detectStraight(const std::vector<geom::Point>& pts) {

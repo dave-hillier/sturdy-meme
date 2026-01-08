@@ -7,6 +7,8 @@ namespace town_generator {
 namespace geom {
 
 std::vector<Polygon> Polygon::cut(const Point& p1, const Point& p2, double gap) const {
+    // Faithful to MFCG: uses index-based splitting and stripe + boolean for gap
+
     double x1 = p1.x;
     double y1 = p1.y;
     double dx1 = p2.x - x1;
@@ -60,9 +62,34 @@ std::vector<Polygon> Polygon::cut(const Point& p1, const Point& p2, double gap) 
         half2_pts.push_back(point1);
         Polygon half2(half2_pts);
 
+        // Apply gap using stripe + boolean subtraction (MFCG approach)
         if (gap > 0) {
-            half1 = half1.peel(point2, gap / 2);
-            half2 = half2.peel(point1, gap / 2);
+            // Create cut line for stripe
+            std::vector<Point> cutLine = {point1, point2};
+
+            // Create stripe polygon along the cut line
+            std::vector<Point> stripePoly = GeomUtils::stripe(cutLine, gap, 1.0);
+
+            if (stripePoly.size() >= 3) {
+                // Reverse stripe for subtraction
+                std::vector<Point> stripeReversed = GeomUtils::reverse(stripePoly);
+
+                // Subtract stripe from half1
+                std::vector<Point> half1Clipped = GeomUtils::polygonIntersection(
+                    half1.vertexValues(), stripeReversed, true
+                );
+                if (half1Clipped.size() >= 3) {
+                    half1 = Polygon(half1Clipped);
+                }
+
+                // Subtract stripe from half2
+                std::vector<Point> half2Clipped = GeomUtils::polygonIntersection(
+                    half2.vertexValues(), stripeReversed, true
+                );
+                if (half2Clipped.size() >= 3) {
+                    half2 = Polygon(half2Clipped);
+                }
+            }
         }
 
         Point v = vectori(edge1);
