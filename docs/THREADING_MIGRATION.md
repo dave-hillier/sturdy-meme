@@ -378,9 +378,20 @@ SDL_Log("%s", frameGraph_.debugString().c_str());
    - Migrate texture loading to AsyncTransferManager
    - Update LoadJobQueue to use async transfers
 
-3. **Phase 3**: Frame graph
+3. **Phase 3**: Frame graph (done)
    - Convert RenderPipeline stages to FrameGraph passes
    - Identify parallel opportunities between passes
+   - Implementation in `Renderer::setupFrameGraph()`:
+     ```
+     ComputeStage ──┬──> ShadowPass ──┐
+                    ├──> Froxel ──────┼──> HDR ──┬──> SSR ─────────┐
+                    └──> WaterGBuffer ┘          ├──> WaterTileCull┼──> PostProcess
+                                                 ├──> HiZ ──> Bloom┤
+                                                 └──> BilateralGrid┘
+     ```
+   - Toggle with `Renderer::useFrameGraph` (default: true)
+   - Shadow and Froxel can run in parallel after Compute completes
+   - SSR, WaterTileCull, HiZ, and BilateralGrid can all run in parallel after HDR
 
 4. **Phase 4**: Secondary command buffers
    - Group draw calls by pipeline

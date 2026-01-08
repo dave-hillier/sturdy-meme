@@ -249,6 +249,9 @@ private:
     // Setup render pipeline stages with lambdas (called once during init)
     void setupRenderPipeline();
 
+    // Setup frame graph passes with dependencies (Phase 3: frame graph integration)
+    void setupFrameGraph();
+
     // Pure calculation helpers (no state mutation)
     glm::vec2 calculateSunScreenPos(const Camera& camera, const glm::vec3& sunDir) const;
 
@@ -332,6 +335,7 @@ private:
     float skyExposure = 5.0f;              // Sky brightness multiplier (1-20)
     bool framebufferResized = false;       // true = window resized, need to recreate swapchain
     bool windowSuspended = false;          // true = window minimized/hidden (macOS screen lock)
+    bool useFrameGraph = true;             // true = use FrameGraph for pass scheduling (Phase 3)
 
     // Player position for grass displacement
     glm::vec3 playerPosition = glm::vec3(0.0f);

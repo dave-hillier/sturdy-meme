@@ -42,6 +42,7 @@
 #include "RoadRiverVisualization.h"
 #include "HiZSystem.h"
 #include "interfaces/IDebugControl.h"
+#include "threading/TaskScheduler.h"
 // Vegetation
 #include "GrassSystem.h"
 #include "RockSystem.h"
@@ -165,6 +166,13 @@ bool Renderer::initInternal(const InitInfo& info) {
     }
     SDL_Log("Render pipeline configured");
 
+    // Setup frame graph with dependencies (Phase 3: threading migration)
+    {
+        INIT_PROFILE_PHASE("FrameGraph");
+        setupFrameGraph();
+    }
+    SDL_Log("Frame graph configured");
+
     return true;
 }
 
@@ -194,6 +202,264 @@ void Renderer::setupRenderPipeline() {
 void Renderer::syncPerformanceToggles() {
     // Use factory to sync toggles (reduces code duplication)
     RenderPipelineFactory::syncToggles(renderPipeline, perfToggles);
+}
+
+void Renderer::setupFrameGraph() {
+    // Clear any existing passes
+    frameGraph_.clear();
+
+    // Capture state needed by pass lambdas
+    float* lastSunIntensity = &this->lastSunIntensity;
+
+    // ===== PASS DEFINITIONS =====
+    // The frame graph organizes passes by dependencies, enabling parallel execution
+    // where possible. The dependency structure is:
+    //
+    //   ComputeStage ──┬──> ShadowPass ──┐
+    //                  ├──> Froxel ──────┼──> HDR ──┬──> SSR ─────────┐
+    //                  └──> WaterGBuffer ┘          ├──> WaterTileCull┼──> PostProcess
+    //                                               ├──> HiZ ──> Bloom┤
+    //                                               └──> BilateralGrid┘
+    //
+    // Shadow and Froxel can run in parallel after Compute completes.
+
+    // Compute pass - runs all GPU compute dispatches
+    auto compute = frameGraph_.addPass({
+        .name = "Compute",
+        .execute = [this](FrameGraph::RenderContext& ctx) {
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            systems_->profiler().beginCpuZone("ComputeDispatch");
+            renderPipeline.computeStage.execute(*renderCtx);
+            systems_->profiler().endCpuZone("ComputeDispatch");
+        },
+        .canUseSecondary = false,
+        .mainThreadOnly = true,
+        .priority = 100  // Highest priority - runs first
+    });
+
+    // Shadow pass - renders shadow maps for cascaded shadows
+    auto shadow = frameGraph_.addPass({
+        .name = "Shadow",
+        .execute = [this, lastSunIntensity](FrameGraph::RenderContext& ctx) {
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (*lastSunIntensity > 0.001f && perfToggles.shadowPass) {
+                systems_->profiler().beginCpuZone("ShadowRecord");
+                systems_->profiler().beginGpuZone(ctx.commandBuffer, "ShadowPass");
+                recordShadowPass(ctx.commandBuffer, ctx.frameIndex,
+                                renderCtx->frame.time, renderCtx->frame.cameraPosition);
+                systems_->profiler().endGpuZone(ctx.commandBuffer, "ShadowPass");
+                systems_->profiler().endCpuZone("ShadowRecord");
+            }
+        },
+        .canUseSecondary = false,
+        .mainThreadOnly = true,
+        .priority = 50
+    });
+
+    // Froxel/Atmosphere pass - volumetric fog and atmosphere LUTs
+    // Can run in parallel with Shadow since they don't share resources
+    auto froxel = frameGraph_.addPass({
+        .name = "Froxel",
+        .execute = [this](FrameGraph::RenderContext& ctx) {
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            systems_->postProcess().setCameraPlanes(
+                renderCtx->frame.nearPlane, renderCtx->frame.farPlane);
+            if (renderPipeline.froxelStageFn && (perfToggles.froxelFog || perfToggles.atmosphereLUT)) {
+                renderPipeline.froxelStageFn(*renderCtx);
+            }
+        },
+        .canUseSecondary = false,
+        .mainThreadOnly = false,  // Can run parallel with Shadow
+        .priority = 50
+    });
+
+    // Water G-buffer pass - renders water to mini G-buffer
+    auto waterGBuffer = frameGraph_.addPass({
+        .name = "WaterGBuffer",
+        .execute = [this](FrameGraph::RenderContext& ctx) {
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            vk::CommandBuffer vkCmd(ctx.commandBuffer);
+
+            if (perfToggles.waterGBuffer &&
+                systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
+                systems_->waterTileCull().wasWaterVisibleLastFrame(ctx.frameIndex)) {
+                systems_->profiler().beginGpuZone(ctx.commandBuffer, "WaterGBuffer");
+                systems_->waterGBuffer().beginRenderPass(ctx.commandBuffer);
+
+                vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics,
+                                   systems_->waterGBuffer().getPipeline());
+                vk::DescriptorSet gbufferDescSet =
+                    systems_->waterGBuffer().getDescriptorSet(ctx.frameIndex);
+                vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                        systems_->waterGBuffer().getPipelineLayout(),
+                                        0, gbufferDescSet, {});
+
+                systems_->water().recordMeshDraw(ctx.commandBuffer);
+                systems_->waterGBuffer().endRenderPass(ctx.commandBuffer);
+                systems_->profiler().endGpuZone(ctx.commandBuffer, "WaterGBuffer");
+            }
+        },
+        .canUseSecondary = false,
+        .mainThreadOnly = true,
+        .priority = 40
+    });
+
+    // HDR pass - main scene rendering
+    auto hdr = frameGraph_.addPass({
+        .name = "HDR",
+        .execute = [this](FrameGraph::RenderContext& ctx) {
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (hdrPassEnabled) {
+                systems_->profiler().beginCpuZone("RenderPassRecord");
+                recordHDRPass(ctx.commandBuffer, ctx.frameIndex, renderCtx->frame.time);
+                systems_->profiler().endCpuZone("RenderPassRecord");
+            }
+        },
+        .canUseSecondary = true,  // Future: parallel secondary buffer recording
+        .mainThreadOnly = true,
+        .priority = 30
+    });
+
+    // SSR pass - screen-space reflections
+    auto ssr = frameGraph_.addPass({
+        .name = "SSR",
+        .execute = [this](FrameGraph::RenderContext& ctx) {
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (hdrPassEnabled && perfToggles.ssr && systems_->ssr().isEnabled()) {
+                systems_->profiler().beginGpuZone(ctx.commandBuffer, "SSR");
+                systems_->ssr().recordCompute(ctx.commandBuffer, ctx.frameIndex,
+                                        systems_->postProcess().getHDRColorView(),
+                                        systems_->postProcess().getHDRDepthView(),
+                                        renderCtx->frame.view, renderCtx->frame.projection,
+                                        renderCtx->frame.cameraPosition);
+                systems_->profiler().endGpuZone(ctx.commandBuffer, "SSR");
+            }
+        },
+        .canUseSecondary = false,
+        .mainThreadOnly = true,
+        .priority = 20
+    });
+
+    // Water tile culling pass
+    auto waterTileCull = frameGraph_.addPass({
+        .name = "WaterTileCull",
+        .execute = [this](FrameGraph::RenderContext& ctx) {
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (hdrPassEnabled && perfToggles.waterTileCull && systems_->waterTileCull().isEnabled()) {
+                systems_->profiler().beginGpuZone(ctx.commandBuffer, "WaterTileCull");
+                glm::mat4 viewProj = renderCtx->frame.projection * renderCtx->frame.view;
+                systems_->waterTileCull().recordTileCull(ctx.commandBuffer, ctx.frameIndex,
+                                              viewProj, renderCtx->frame.cameraPosition,
+                                              systems_->water().getWaterLevel(),
+                                              systems_->postProcess().getHDRDepthView());
+                systems_->profiler().endGpuZone(ctx.commandBuffer, "WaterTileCull");
+            }
+        },
+        .canUseSecondary = false,
+        .mainThreadOnly = true,
+        .priority = 20
+    });
+
+    // Hi-Z pass - hierarchical Z-buffer generation
+    auto hiZ = frameGraph_.addPass({
+        .name = "HiZ",
+        .execute = [this](FrameGraph::RenderContext& ctx) {
+            if (renderPipeline.postStage.hiZRecordFn) {
+                RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+                renderPipeline.postStage.hiZRecordFn(*renderCtx);
+            }
+        },
+        .canUseSecondary = false,
+        .mainThreadOnly = true,
+        .priority = 15
+    });
+
+    // Bloom pass - multi-pass bloom effect
+    auto bloom = frameGraph_.addPass({
+        .name = "Bloom",
+        .execute = [this](FrameGraph::RenderContext& ctx) {
+            if (systems_->postProcess().isBloomEnabled() && renderPipeline.postStage.bloomRecordFn) {
+                RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+                renderPipeline.postStage.bloomRecordFn(*renderCtx);
+            }
+        },
+        .canUseSecondary = false,
+        .mainThreadOnly = true,
+        .priority = 10
+    });
+
+    // Bilateral grid pass - local tone mapping
+    auto bilateralGrid = frameGraph_.addPass({
+        .name = "BilateralGrid",
+        .execute = [this](FrameGraph::RenderContext& ctx) {
+            if (systems_->postProcess().isLocalToneMapEnabled()) {
+                systems_->profiler().beginGpuZone(ctx.commandBuffer, "BilateralGrid");
+                systems_->bilateralGrid().recordBilateralGrid(ctx.commandBuffer, ctx.frameIndex,
+                                                               systems_->postProcess().getHDRColorView());
+                systems_->profiler().endGpuZone(ctx.commandBuffer, "BilateralGrid");
+            }
+        },
+        .canUseSecondary = false,
+        .mainThreadOnly = true,
+        .priority = 10
+    });
+
+    // Post-process pass - final composite with tone mapping and GUI
+    auto postProcess = frameGraph_.addPass({
+        .name = "PostProcess",
+        .execute = [this](FrameGraph::RenderContext& ctx) {
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            systems_->profiler().beginGpuZone(ctx.commandBuffer, "PostProcess");
+            systems_->postProcess().recordPostProcess(ctx.commandBuffer, ctx.frameIndex,
+                *framebuffers_[ctx.imageIndex], renderCtx->frame.deltaTime, guiRenderCallback);
+            systems_->profiler().endGpuZone(ctx.commandBuffer, "PostProcess");
+        },
+        .canUseSecondary = false,
+        .mainThreadOnly = true,
+        .priority = 0  // Lowest priority - runs last
+    });
+
+    // ===== DEPENDENCY DEFINITIONS =====
+    // Shadow depends on Compute (needs terrain compute results)
+    frameGraph_.addDependency(compute, shadow);
+
+    // Froxel depends on Compute (needs cloud shadow compute)
+    frameGraph_.addDependency(compute, froxel);
+
+    // Water G-buffer depends on Compute
+    frameGraph_.addDependency(compute, waterGBuffer);
+
+    // HDR depends on Shadow (needs shadow maps)
+    frameGraph_.addDependency(shadow, hdr);
+
+    // HDR depends on Froxel (needs volumetric fog data)
+    frameGraph_.addDependency(froxel, hdr);
+
+    // HDR depends on Water G-buffer (needs water depth)
+    frameGraph_.addDependency(waterGBuffer, hdr);
+
+    // SSR, WaterTileCull, HiZ, BilateralGrid all depend on HDR
+    frameGraph_.addDependency(hdr, ssr);
+    frameGraph_.addDependency(hdr, waterTileCull);
+    frameGraph_.addDependency(hdr, hiZ);
+    frameGraph_.addDependency(hdr, bilateralGrid);
+
+    // Bloom depends on HiZ (uses Hi-Z for optimization)
+    frameGraph_.addDependency(hiZ, bloom);
+
+    // PostProcess depends on all post-HDR passes
+    frameGraph_.addDependency(ssr, postProcess);
+    frameGraph_.addDependency(waterTileCull, postProcess);
+    frameGraph_.addDependency(bloom, postProcess);
+    frameGraph_.addDependency(bilateralGrid, postProcess);
+
+    // Compile the graph
+    if (!frameGraph_.compile()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to compile FrameGraph");
+        useFrameGraph = false;
+    } else {
+        SDL_Log("FrameGraph setup complete:\n%s", frameGraph_.debugString().c_str());
+    }
 }
 
 // Note: initCoreVulkanResources(), initDescriptorInfrastructure(), initSubsystems(),
@@ -954,102 +1220,121 @@ bool Renderer::render(const Camera& camera) {
     RenderResources resources = buildRenderResources(imageIndex);
     RenderContext ctx(cmd, frame.frameIndex, frame, resources);
 
-    // Execute all compute passes via pipeline
-    systems_->profiler().beginCpuZone("ComputeDispatch");
-    renderPipeline.computeStage.execute(ctx);
-    systems_->profiler().endCpuZone("ComputeDispatch");
+    if (useFrameGraph) {
+        // ===== FRAME GRAPH EXECUTION PATH =====
+        // Uses dependency-driven scheduling with parallel execution opportunities
+        FrameGraph::RenderContext fgCtx{
+            .commandBuffer = vkCmd,
+            .frameIndex = frame.frameIndex,
+            .imageIndex = imageIndex,
+            .deltaTime = frame.deltaTime,
+            .userData = &ctx  // Pass full RenderContext to passes
+        };
 
-    // Shadow pass (skip when sun is below horizon or shadows disabled)
-    if (lastSunIntensity > 0.001f && perfToggles.shadowPass) {
-        systems_->profiler().beginCpuZone("ShadowRecord");
-        systems_->profiler().beginGpuZone(cmd, "ShadowPass");
-        recordShadowPass(cmd, frame.frameIndex, frame.time, frame.cameraPosition);
-        systems_->profiler().endGpuZone(cmd, "ShadowPass");
-        systems_->profiler().endCpuZone("ShadowRecord");
-    }
+        // Execute all passes in dependency order
+        // TaskScheduler enables parallel execution of independent passes
+        frameGraph_.execute(fgCtx, &TaskScheduler::instance());
+    } else {
+        // ===== LEGACY EXECUTION PATH =====
+        // Sequential execution for fallback/debugging
 
-    // Froxel volumetric fog and atmosphere updates via pipeline
-    systems_->postProcess().setCameraPlanes(camera.getNearPlane(), camera.getFarPlane());
-    if (renderPipeline.froxelStageFn && (perfToggles.froxelFog || perfToggles.atmosphereLUT)) {
-        renderPipeline.froxelStageFn(ctx);
-    }
+        // Execute all compute passes via pipeline
+        systems_->profiler().beginCpuZone("ComputeDispatch");
+        renderPipeline.computeStage.execute(ctx);
+        systems_->profiler().endCpuZone("ComputeDispatch");
 
-    // Water G-buffer pass (Phase 3) - renders water mesh to mini G-buffer
-    // Skip if water was not visible last frame (temporal culling) or disabled
-    if (perfToggles.waterGBuffer &&
-        systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
-        systems_->waterTileCull().wasWaterVisibleLastFrame(frame.frameIndex)) {
-        systems_->profiler().beginGpuZone(cmd, "WaterGBuffer");
-        systems_->waterGBuffer().beginRenderPass(cmd);
-
-        // Bind G-buffer pipeline and descriptor set
-        vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, systems_->waterGBuffer().getPipeline());
-        vk::DescriptorSet gbufferDescSet = systems_->waterGBuffer().getDescriptorSet(frame.frameIndex);
-        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                                 systems_->waterGBuffer().getPipelineLayout(), 0, gbufferDescSet, {});
-
-        // Draw water mesh
-        systems_->water().recordMeshDraw(cmd);
-
-        systems_->waterGBuffer().endRenderPass(cmd);
-        systems_->profiler().endGpuZone(cmd, "WaterGBuffer");
-    }
-
-    // HDR scene render pass (can be disabled for performance debugging)
-    // Note: HDRPass is not wrapped in a profiler zone because recordHDRPass()
-    // contains granular HDR:* sub-zones. Nesting would confuse the profiler.
-    if (hdrPassEnabled) {
-        systems_->profiler().beginCpuZone("RenderPassRecord");
-        recordHDRPass(cmd, frame.frameIndex, frame.time);
-        systems_->profiler().endCpuZone("RenderPassRecord");
-
-        // Screen-Space Reflections compute pass (Phase 10)
-        // Computes SSR for next frame's water - uses current scene for temporal stability
-        if (perfToggles.ssr && systems_->ssr().isEnabled()) {
-            systems_->profiler().beginGpuZone(cmd, "SSR");
-            systems_->ssr().recordCompute(cmd, frame.frameIndex,
-                                    systems_->postProcess().getHDRColorView(),
-                                    systems_->postProcess().getHDRDepthView(),
-                                    frame.view, frame.projection,
-                                    frame.cameraPosition);
-            systems_->profiler().endGpuZone(cmd, "SSR");
+        // Shadow pass (skip when sun is below horizon or shadows disabled)
+        if (lastSunIntensity > 0.001f && perfToggles.shadowPass) {
+            systems_->profiler().beginCpuZone("ShadowRecord");
+            systems_->profiler().beginGpuZone(cmd, "ShadowPass");
+            recordShadowPass(cmd, frame.frameIndex, frame.time, frame.cameraPosition);
+            systems_->profiler().endGpuZone(cmd, "ShadowPass");
+            systems_->profiler().endCpuZone("ShadowRecord");
         }
 
-        // Water tile culling compute pass (Phase 7)
-        // Determines which screen tiles contain water for optimized rendering
-        if (perfToggles.waterTileCull && systems_->waterTileCull().isEnabled()) {
-            systems_->profiler().beginGpuZone(cmd, "WaterTileCull");
-            glm::mat4 viewProj = frame.projection * frame.view;
-            systems_->waterTileCull().recordTileCull(cmd, frame.frameIndex,
-                                          viewProj, frame.cameraPosition,
-                                          systems_->water().getWaterLevel(),
-                                          systems_->postProcess().getHDRDepthView());
-            systems_->profiler().endGpuZone(cmd, "WaterTileCull");
+        // Froxel volumetric fog and atmosphere updates via pipeline
+        systems_->postProcess().setCameraPlanes(camera.getNearPlane(), camera.getFarPlane());
+        if (renderPipeline.froxelStageFn && (perfToggles.froxelFog || perfToggles.atmosphereLUT)) {
+            renderPipeline.froxelStageFn(ctx);
         }
-    }
 
-    // Hi-Z pyramid and Bloom via pipeline post stage
-    if (renderPipeline.postStage.hiZRecordFn) {
-        renderPipeline.postStage.hiZRecordFn(ctx);
-    }
-    // Only run bloom passes if bloom is enabled (skip for performance)
-    if (systems_->postProcess().isBloomEnabled() && renderPipeline.postStage.bloomRecordFn) {
-        renderPipeline.postStage.bloomRecordFn(ctx);
-    }
+        // Water G-buffer pass (Phase 3) - renders water mesh to mini G-buffer
+        // Skip if water was not visible last frame (temporal culling) or disabled
+        if (perfToggles.waterGBuffer &&
+            systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
+            systems_->waterTileCull().wasWaterVisibleLastFrame(frame.frameIndex)) {
+            systems_->profiler().beginGpuZone(cmd, "WaterGBuffer");
+            systems_->waterGBuffer().beginRenderPass(cmd);
 
-    // Bilateral grid for local tone mapping (if enabled)
-    if (systems_->postProcess().isLocalToneMapEnabled()) {
-        systems_->profiler().beginGpuZone(cmd, "BilateralGrid");
-        systems_->bilateralGrid().recordBilateralGrid(cmd, frame.frameIndex,
-                                                       systems_->postProcess().getHDRColorView());
-        systems_->profiler().endGpuZone(cmd, "BilateralGrid");
-    }
+            // Bind G-buffer pipeline and descriptor set
+            vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, systems_->waterGBuffer().getPipeline());
+            vk::DescriptorSet gbufferDescSet = systems_->waterGBuffer().getDescriptorSet(frame.frameIndex);
+            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                     systems_->waterGBuffer().getPipelineLayout(), 0, gbufferDescSet, {});
 
-    // Post-process pass (with optional GUI overlay callback)
-    // Note: This is not in postStage because it needs framebuffer and guiRenderCallback
-    systems_->profiler().beginGpuZone(cmd, "PostProcess");
-    systems_->postProcess().recordPostProcess(cmd, frame.frameIndex, *framebuffers_[imageIndex], frame.deltaTime, guiRenderCallback);
-    systems_->profiler().endGpuZone(cmd, "PostProcess");
+            // Draw water mesh
+            systems_->water().recordMeshDraw(cmd);
+
+            systems_->waterGBuffer().endRenderPass(cmd);
+            systems_->profiler().endGpuZone(cmd, "WaterGBuffer");
+        }
+
+        // HDR scene render pass (can be disabled for performance debugging)
+        // Note: HDRPass is not wrapped in a profiler zone because recordHDRPass()
+        // contains granular HDR:* sub-zones. Nesting would confuse the profiler.
+        if (hdrPassEnabled) {
+            systems_->profiler().beginCpuZone("RenderPassRecord");
+            recordHDRPass(cmd, frame.frameIndex, frame.time);
+            systems_->profiler().endCpuZone("RenderPassRecord");
+
+            // Screen-Space Reflections compute pass (Phase 10)
+            // Computes SSR for next frame's water - uses current scene for temporal stability
+            if (perfToggles.ssr && systems_->ssr().isEnabled()) {
+                systems_->profiler().beginGpuZone(cmd, "SSR");
+                systems_->ssr().recordCompute(cmd, frame.frameIndex,
+                                        systems_->postProcess().getHDRColorView(),
+                                        systems_->postProcess().getHDRDepthView(),
+                                        frame.view, frame.projection,
+                                        frame.cameraPosition);
+                systems_->profiler().endGpuZone(cmd, "SSR");
+            }
+
+            // Water tile culling compute pass (Phase 7)
+            // Determines which screen tiles contain water for optimized rendering
+            if (perfToggles.waterTileCull && systems_->waterTileCull().isEnabled()) {
+                systems_->profiler().beginGpuZone(cmd, "WaterTileCull");
+                glm::mat4 viewProj = frame.projection * frame.view;
+                systems_->waterTileCull().recordTileCull(cmd, frame.frameIndex,
+                                              viewProj, frame.cameraPosition,
+                                              systems_->water().getWaterLevel(),
+                                              systems_->postProcess().getHDRDepthView());
+                systems_->profiler().endGpuZone(cmd, "WaterTileCull");
+            }
+        }
+
+        // Hi-Z pyramid and Bloom via pipeline post stage
+        if (renderPipeline.postStage.hiZRecordFn) {
+            renderPipeline.postStage.hiZRecordFn(ctx);
+        }
+        // Only run bloom passes if bloom is enabled (skip for performance)
+        if (systems_->postProcess().isBloomEnabled() && renderPipeline.postStage.bloomRecordFn) {
+            renderPipeline.postStage.bloomRecordFn(ctx);
+        }
+
+        // Bilateral grid for local tone mapping (if enabled)
+        if (systems_->postProcess().isLocalToneMapEnabled()) {
+            systems_->profiler().beginGpuZone(cmd, "BilateralGrid");
+            systems_->bilateralGrid().recordBilateralGrid(cmd, frame.frameIndex,
+                                                           systems_->postProcess().getHDRColorView());
+            systems_->profiler().endGpuZone(cmd, "BilateralGrid");
+        }
+
+        // Post-process pass (with optional GUI overlay callback)
+        // Note: This is not in postStage because it needs framebuffer and guiRenderCallback
+        systems_->profiler().beginGpuZone(cmd, "PostProcess");
+        systems_->postProcess().recordPostProcess(cmd, frame.frameIndex, *framebuffers_[imageIndex], frame.deltaTime, guiRenderCallback);
+        systems_->profiler().endGpuZone(cmd, "PostProcess");
+    }
 
     // End GPU profiling frame
     systems_->profiler().endGpuFrame(cmd, frame.frameIndex);
@@ -1222,6 +1507,8 @@ FrameData Renderer::buildFrameData(const Camera& camera, float deltaTime, float 
     frame.view = camera.getViewMatrix();
     frame.projection = camera.getProjectionMatrix();
     frame.viewProj = frame.projection * frame.view;
+    frame.nearPlane = camera.getNearPlane();
+    frame.farPlane = camera.getFarPlane();
 
     // Extract frustum planes from view-projection matrix (normalized)
     glm::mat4 m = glm::transpose(frame.viewProj);
