@@ -79,6 +79,15 @@ bool Renderer::initCoreVulkanResources() {
                     "ThreadedCommandPool initialization failed - using single-threaded recording");
             }
         }
+
+        // Initialize async texture uploader for non-blocking texture uploads
+        if (!asyncTextureUploader_.initialize(
+                vulkanContext_->getVkDevice(),
+                vulkanContext_->getAllocator(),
+                &asyncTransferManager_)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "AsyncTextureUploader initialization failed - using synchronous uploads");
+        }
     }
 
     return true;

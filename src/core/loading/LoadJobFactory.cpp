@@ -357,4 +357,255 @@ VkBuffer StagedResourceUploader::uploadBuffer(const StagedBuffer& staged, VkBuff
     return deviceBuffer.release();
 }
 
+// AsyncTextureUploader implementation
+
+AsyncTextureUploader::~AsyncTextureUploader() {
+    shutdown();
+}
+
+bool AsyncTextureUploader::initialize(VkDevice device, VmaAllocator allocator,
+                                       AsyncTransferManager* transferManager) {
+    if (initialized_) {
+        return true;
+    }
+
+    if (!device || !allocator || !transferManager) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "AsyncTextureUploader: Invalid initialization parameters");
+        return false;
+    }
+
+    device_ = device;
+    allocator_ = allocator;
+    transferManager_ = transferManager;
+    initialized_ = true;
+
+    SDL_Log("AsyncTextureUploader: Initialized");
+    return true;
+}
+
+void AsyncTextureUploader::shutdown() {
+    if (!initialized_) {
+        return;
+    }
+
+    // Wait for all pending transfers and clean up
+    {
+        std::lock_guard<std::mutex> lock(pendingMutex_);
+        for (auto& [id, upload] : pendingUploads_) {
+            // Wait for transfer to complete before destroying resources
+            if (upload.transferHandle.isValid()) {
+                transferManager_->wait(upload.transferHandle);
+            }
+
+            // Clean up GPU resources
+            if (upload.view != VK_NULL_HANDLE) {
+                vkDestroyImageView(device_, upload.view, nullptr);
+            }
+            // ManagedImage destructor handles image cleanup
+        }
+        pendingUploads_.clear();
+    }
+
+    initialized_ = false;
+    SDL_Log("AsyncTextureUploader: Shutdown complete");
+}
+
+AsyncTextureHandle AsyncTextureUploader::submitTexture(const StagedTexture& staged) {
+    if (!initialized_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "AsyncTextureUploader: Not initialized");
+        return {};
+    }
+
+    if (staged.pixels.empty() || staged.width == 0 || staged.height == 0) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "AsyncTextureUploader: Cannot upload empty texture '%s'", staged.name.c_str());
+        return {};
+    }
+
+    VkFormat imageFormat = staged.srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+
+    // Create GPU image immediately (this is fast, just allocation)
+    ManagedImage managedImage;
+    if (!ImageBuilder(allocator_)
+            .setExtent(staged.width, staged.height)
+            .setFormat(imageFormat)
+            .asTexture()
+            .build(managedImage)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "AsyncTextureUploader: Failed to create image for '%s'", staged.name.c_str());
+        return {};
+    }
+
+    // Create image view immediately (also fast)
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = managedImage.get();
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = imageFormat;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    VkImageView imageView;
+    if (vkCreateImageView(device_, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "AsyncTextureUploader: Failed to create image view for '%s'", staged.name.c_str());
+        return {};
+    }
+
+    // Submit async transfer
+    TransferHandle transferHandle = transferManager_->submitImageTransfer(
+        staged.pixels.data(),
+        static_cast<vk::DeviceSize>(staged.pixels.size()),
+        vk::Image(managedImage.get()),
+        vk::Extent3D{staged.width, staged.height, 1},
+        vk::ImageLayout::eShaderReadOnlyOptimal,
+        1,  // mipLevels
+        1   // layerCount
+    );
+
+    if (!transferHandle.isValid()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "AsyncTextureUploader: Failed to submit transfer for '%s'", staged.name.c_str());
+        vkDestroyImageView(device_, imageView, nullptr);
+        return {};
+    }
+
+    // Track pending upload
+    uint64_t id = nextId_++;
+    {
+        std::lock_guard<std::mutex> lock(pendingMutex_);
+        pendingUploads_[id] = PendingUpload{
+            .id = id,
+            .transferHandle = transferHandle,
+            .image = std::move(managedImage),
+            .view = imageView,
+            .width = staged.width,
+            .height = staged.height,
+            .name = staged.name
+        };
+    }
+
+    SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
+        "AsyncTextureUploader: Submitted async upload for '%s' (id=%llu)",
+        staged.name.c_str(), static_cast<unsigned long long>(id));
+
+    return AsyncTextureHandle{id};
+}
+
+bool AsyncTextureUploader::isComplete(AsyncTextureHandle handle) const {
+    if (!initialized_ || !handle.isValid()) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(pendingMutex_);
+    auto it = pendingUploads_.find(handle.id);
+    if (it == pendingUploads_.end()) {
+        return false;  // Already taken or invalid
+    }
+
+    return transferManager_->isComplete(it->second.transferHandle);
+}
+
+AsyncUploadedTexture AsyncTextureUploader::takeCompletedTexture(AsyncTextureHandle handle) {
+    AsyncUploadedTexture result;
+
+    if (!initialized_ || !handle.isValid()) {
+        return result;
+    }
+
+    std::lock_guard<std::mutex> lock(pendingMutex_);
+    auto it = pendingUploads_.find(handle.id);
+    if (it == pendingUploads_.end()) {
+        return result;  // Already taken or invalid
+    }
+
+    // Check if complete
+    if (!transferManager_->isComplete(it->second.transferHandle)) {
+        return result;  // Not ready yet
+    }
+
+    // Extract the completed upload
+    PendingUpload& upload = it->second;
+
+    // Transfer ownership to result
+    VkImage rawImage;
+    VmaAllocation rawAlloc;
+    upload.image.releaseToRaw(rawImage, rawAlloc);
+
+    result.image = rawImage;
+    result.view = upload.view;
+    result.allocation = rawAlloc;
+    result.width = upload.width;
+    result.height = upload.height;
+    result.name = std::move(upload.name);
+    result.valid = true;
+
+    // Remove from pending
+    pendingUploads_.erase(it);
+
+    SDL_Log("AsyncTextureUploader: Completed upload '%s' (%ux%u)",
+        result.name.c_str(), result.width, result.height);
+
+    return result;
+}
+
+std::vector<AsyncUploadedTexture> AsyncTextureUploader::takeAllCompleted() {
+    std::vector<AsyncUploadedTexture> results;
+
+    if (!initialized_) {
+        return results;
+    }
+
+    std::lock_guard<std::mutex> lock(pendingMutex_);
+
+    std::vector<uint64_t> completedIds;
+    for (const auto& [id, upload] : pendingUploads_) {
+        if (transferManager_->isComplete(upload.transferHandle)) {
+            completedIds.push_back(id);
+        }
+    }
+
+    for (uint64_t id : completedIds) {
+        auto it = pendingUploads_.find(id);
+        if (it == pendingUploads_.end()) continue;
+
+        PendingUpload& upload = it->second;
+
+        AsyncUploadedTexture result;
+        VkImage rawImage;
+        VmaAllocation rawAlloc;
+        upload.image.releaseToRaw(rawImage, rawAlloc);
+
+        result.image = rawImage;
+        result.view = upload.view;
+        result.allocation = rawAlloc;
+        result.width = upload.width;
+        result.height = upload.height;
+        result.name = std::move(upload.name);
+        result.valid = true;
+
+        results.push_back(std::move(result));
+        pendingUploads_.erase(it);
+
+        SDL_Log("AsyncTextureUploader: Completed upload '%s' (%ux%u)",
+            results.back().name.c_str(), results.back().width, results.back().height);
+    }
+
+    return results;
+}
+
+size_t AsyncTextureUploader::getPendingCount() const {
+    if (!initialized_) {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock(pendingMutex_);
+    return pendingUploads_.size();
+}
+
 } // namespace Loading
