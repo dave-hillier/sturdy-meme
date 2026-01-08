@@ -34,6 +34,7 @@
 
 // Storage Buffers
 #define BINDING_LIGHT_BUFFER            4   // Point/spot light array
+#define BINDING_SCENE_INSTANCE_BUFFER  18   // Scene object instance data (for batched rendering)
 
 // =============================================================================
 // Skinned Mesh Descriptor Set (extends main set)
@@ -472,6 +473,7 @@ constexpr uint32_t SPOT_SHADOW_MAP        = BINDING_SPOT_SHADOW_MAP;
 constexpr uint32_t SNOW_MASK              = BINDING_SNOW_MASK;
 constexpr uint32_t CLOUD_SHADOW_MAP       = BINDING_CLOUD_SHADOW_MAP;
 constexpr uint32_t LIGHT_BUFFER           = BINDING_LIGHT_BUFFER;
+constexpr uint32_t SCENE_INSTANCE_BUFFER  = BINDING_SCENE_INSTANCE_BUFFER;
 constexpr uint32_t BONE_MATRICES          = BINDING_BONE_MATRICES;
 
 // PBR Material Textures
