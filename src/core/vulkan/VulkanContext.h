@@ -63,12 +63,15 @@ public:
     vk::Device getVkDevice() const { return vk::Device(device); }
     vk::Queue getVkGraphicsQueue() const { return vk::Queue(graphicsQueue); }
     vk::Queue getVkPresentQueue() const { return vk::Queue(presentQueue); }
+    vk::Queue getVkTransferQueue() const { return vk::Queue(transferQueue_); }
     vk::SwapchainKHR getVkSwapchain() const { return vk::SwapchainKHR(swapchain); }
     vk::Format getVkSwapchainImageFormat() const { return static_cast<vk::Format>(swapchainImageFormat); }
     vk::Extent2D getVkSwapchainExtent() const { return vk::Extent2D{swapchainExtent.width, swapchainExtent.height}; }
 
     uint32_t getGraphicsQueueFamily() const;
     uint32_t getPresentQueueFamily() const;
+    uint32_t getTransferQueueFamily() const;
+    bool hasDedicatedTransferQueue() const { return hasDedicatedTransfer_; }
     VmaAllocator getAllocator() const { return allocator; }
     VkPipelineCache getPipelineCache() const { return pipelineCache.getCache(); }
 
@@ -106,6 +109,9 @@ private:
     VkDevice device = VK_NULL_HANDLE;
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkQueue presentQueue = VK_NULL_HANDLE;
+    VkQueue transferQueue_ = VK_NULL_HANDLE;
+    uint32_t transferQueueFamily_ = 0;
+    bool hasDedicatedTransfer_ = false;
 
     VmaAllocator allocator = VK_NULL_HANDLE;
 

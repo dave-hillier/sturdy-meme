@@ -7,6 +7,7 @@
 #include "core/LoadingRenderer.h"
 #include "core/loading/LoadJobQueue.h"
 #include "core/loading/LoadJobFactory.h"
+#include "core/threading/TaskScheduler.h"
 #include "InitProfiler.h"
 #include "Profiler.h"
 
@@ -47,6 +48,12 @@ bool Application::init(const std::string& title, int width, int height) {
             SDL_Log("Failed to initialize SDL: %s", SDL_GetError());
             return false;
         }
+    }
+
+    // Initialize task scheduler early for multi-threaded operations
+    {
+        INIT_PROFILE_PHASE("TaskScheduler");
+        TaskScheduler::instance().initialize();
     }
 
     // Early Vulkan initialization: create instance BEFORE window
@@ -624,6 +631,9 @@ void Application::shutdown() {
         SDL_DestroyWindow(window);
         window = nullptr;
     }
+
+    // Shutdown task scheduler (waits for all tasks to complete)
+    TaskScheduler::instance().shutdown();
 
     SDL_Quit();
 }

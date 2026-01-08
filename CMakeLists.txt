@@ -55,6 +55,10 @@ set(SOURCES
     src/core/controls/SceneControlSubsystem.cpp
     src/core/controls/PlayerControlSubsystem.cpp
     src/core/vulkan/VulkanContext.cpp
+    src/core/vulkan/AsyncTransferManager.cpp
+    src/core/vulkan/ThreadedCommandPool.cpp
+    src/core/threading/TaskScheduler.cpp
+    src/core/pipeline/FrameGraph.cpp
     src/core/LoadingRenderer.cpp
     src/core/loading/LoadJobQueue.cpp
     src/core/loading/AsyncStartupLoader.cpp
@@ -205,6 +209,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/atmosphere
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core/vulkan
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/threading
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core/pipeline
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core/material
     ${CMAKE_CURRENT_SOURCE_DIR}/src/debug

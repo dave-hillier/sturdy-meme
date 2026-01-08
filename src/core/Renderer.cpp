@@ -280,6 +280,10 @@ void Renderer::cleanup() {
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
 
+        // Shutdown multi-threading infrastructure
+        asyncTransferManager_.shutdown();
+        threadedCommandPool_.shutdown();
+
         // RAII handles cleanup of sync objects via TripleBuffering
         frameSync_.destroy();
 

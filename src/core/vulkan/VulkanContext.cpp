@@ -179,6 +179,25 @@ bool VulkanContext::createLogicalDevice() {
     }
     presentQueue = presentQueueRet.value();
 
+    // Try to get a dedicated transfer queue (as recommended in video for async asset loading)
+    auto transferQueueRet = vkbDevice.get_dedicated_queue(vkb::QueueType::transfer);
+    if (transferQueueRet) {
+        transferQueue_ = transferQueueRet.value();
+        auto transferFamilyRet = vkbDevice.get_dedicated_queue_index(vkb::QueueType::transfer);
+        if (transferFamilyRet) {
+            transferQueueFamily_ = transferFamilyRet.value();
+            hasDedicatedTransfer_ = true;
+            SDL_Log("Using dedicated transfer queue (family %u)", transferQueueFamily_);
+        }
+    }
+
+    // Fall back to graphics queue for transfers if no dedicated queue available
+    if (!hasDedicatedTransfer_) {
+        transferQueue_ = graphicsQueue;
+        transferQueueFamily_ = vkbDevice.get_queue_index(vkb::QueueType::graphics).value();
+        SDL_Log("No dedicated transfer queue, using graphics queue for transfers");
+    }
+
     return true;
 }
 
@@ -252,6 +271,10 @@ uint32_t VulkanContext::getGraphicsQueueFamily() const {
 
 uint32_t VulkanContext::getPresentQueueFamily() const {
     return vkbDevice.get_queue_index(vkb::QueueType::present).value();
+}
+
+uint32_t VulkanContext::getTransferQueueFamily() const {
+    return transferQueueFamily_;
 }
 
 bool VulkanContext::createPipelineCache() {

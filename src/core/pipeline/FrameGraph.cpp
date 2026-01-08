@@ -1,0 +1,280 @@
+#include "FrameGraph.h"
+#include "threading/TaskScheduler.h"
+#include <SDL3/SDL_log.h>
+#include <algorithm>
+#include <queue>
+#include <sstream>
+
+FrameGraph::PassId FrameGraph::addPass(const std::string& name, PassFunction execute) {
+    return addPass(PassConfig{
+        .name = name,
+        .execute = std::move(execute),
+        .canUseSecondary = false,
+        .mainThreadOnly = true,
+        .priority = 0
+    });
+}
+
+FrameGraph::PassId FrameGraph::addPass(const PassConfig& config) {
+    PassId id = nextPassId_++;
+
+    Pass pass;
+    pass.id = id;
+    pass.config = config;
+    pass.enabled = true;
+
+    passes_.push_back(std::move(pass));
+    nameToId_[config.name] = id;
+
+    compiled_ = false;
+    return id;
+}
+
+void FrameGraph::addDependency(PassId from, PassId to) {
+    if (from >= passes_.size() || to >= passes_.size()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "FrameGraph: Invalid pass ID in addDependency(%u, %u)", from, to);
+        return;
+    }
+
+    if (from == to) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "FrameGraph: Cannot add self-dependency for pass %u", from);
+        return;
+    }
+
+    // Add 'to' depends on 'from'
+    auto& deps = passes_[to].dependencies;
+    if (std::find(deps.begin(), deps.end(), from) == deps.end()) {
+        deps.push_back(from);
+    }
+
+    // Add 'from' has dependent 'to'
+    auto& dependents = passes_[from].dependents;
+    if (std::find(dependents.begin(), dependents.end(), to) == dependents.end()) {
+        dependents.push_back(to);
+    }
+
+    compiled_ = false;
+}
+
+void FrameGraph::removePass(PassId id) {
+    if (id >= passes_.size()) {
+        return;
+    }
+
+    // Remove from name map
+    nameToId_.erase(passes_[id].config.name);
+
+    // Remove references from other passes
+    for (auto& pass : passes_) {
+        auto& deps = pass.dependencies;
+        deps.erase(std::remove(deps.begin(), deps.end(), id), deps.end());
+
+        auto& dependents = pass.dependents;
+        dependents.erase(std::remove(dependents.begin(), dependents.end(), id), dependents.end());
+    }
+
+    // Mark as removed (don't actually erase to preserve IDs)
+    passes_[id].config.name = "";
+    passes_[id].config.execute = nullptr;
+    passes_[id].enabled = false;
+
+    compiled_ = false;
+}
+
+void FrameGraph::setPassEnabled(PassId id, bool enabled) {
+    if (id < passes_.size()) {
+        passes_[id].enabled = enabled;
+    }
+}
+
+bool FrameGraph::isPassEnabled(PassId id) const {
+    return id < passes_.size() && passes_[id].enabled;
+}
+
+bool FrameGraph::topologicalSort(std::vector<std::vector<PassId>>& levels) {
+    levels.clear();
+
+    // Calculate in-degree for each pass (only count enabled passes)
+    std::vector<uint32_t> inDegree(passes_.size(), 0);
+    std::vector<bool> active(passes_.size(), false);
+
+    for (const auto& pass : passes_) {
+        if (!pass.enabled || !pass.config.execute) continue;
+        active[pass.id] = true;
+
+        for (PassId dep : pass.dependencies) {
+            if (dep < passes_.size() && passes_[dep].enabled && passes_[dep].config.execute) {
+                inDegree[pass.id]++;
+            }
+        }
+    }
+
+    // Find all passes with no dependencies (start nodes)
+    std::queue<PassId> readyQueue;
+    for (size_t i = 0; i < passes_.size(); ++i) {
+        if (active[i] && inDegree[i] == 0) {
+            readyQueue.push(static_cast<PassId>(i));
+        }
+    }
+
+    size_t processedCount = 0;
+    size_t activeCount = 0;
+    for (bool a : active) if (a) activeCount++;
+
+    while (!readyQueue.empty()) {
+        // Process all passes at current level
+        std::vector<PassId> currentLevel;
+        size_t levelSize = readyQueue.size();
+
+        for (size_t i = 0; i < levelSize; ++i) {
+            PassId id = readyQueue.front();
+            readyQueue.pop();
+
+            currentLevel.push_back(id);
+            processedCount++;
+
+            // Decrement in-degree for dependents
+            for (PassId dependent : passes_[id].dependents) {
+                if (active[dependent]) {
+                    inDegree[dependent]--;
+                    if (inDegree[dependent] == 0) {
+                        readyQueue.push(dependent);
+                    }
+                }
+            }
+        }
+
+        // Sort level by priority (higher priority first)
+        std::sort(currentLevel.begin(), currentLevel.end(),
+            [this](PassId a, PassId b) {
+                return passes_[a].config.priority > passes_[b].config.priority;
+            });
+
+        levels.push_back(std::move(currentLevel));
+    }
+
+    // Check for cycles
+    if (processedCount != activeCount) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "FrameGraph: Cycle detected! Processed %zu of %zu active passes",
+            processedCount, activeCount);
+        return false;
+    }
+
+    return true;
+}
+
+bool FrameGraph::compile() {
+    if (!topologicalSort(executionLevels_)) {
+        compiled_ = false;
+        return false;
+    }
+
+    SDL_Log("FrameGraph: Compiled with %zu levels:", executionLevels_.size());
+    for (size_t i = 0; i < executionLevels_.size(); ++i) {
+        std::string passNames;
+        for (PassId id : executionLevels_[i]) {
+            if (!passNames.empty()) passNames += ", ";
+            passNames += passes_[id].config.name;
+        }
+        SDL_Log("  Level %zu: [%s]", i, passNames.c_str());
+    }
+
+    compiled_ = true;
+    return true;
+}
+
+void FrameGraph::execute(RenderContext& context, TaskScheduler* scheduler) {
+    if (!compiled_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "FrameGraph: Cannot execute - not compiled");
+        return;
+    }
+
+    for (const auto& level : executionLevels_) {
+        if (level.empty()) continue;
+
+        // Check if we can parallelize this level
+        bool canParallelize = scheduler != nullptr && level.size() > 1;
+        if (canParallelize) {
+            // Check if all passes in level support parallel execution
+            for (PassId id : level) {
+                if (passes_[id].config.mainThreadOnly) {
+                    canParallelize = false;
+                    break;
+                }
+            }
+        }
+
+        if (canParallelize) {
+            // Execute passes in parallel using task scheduler
+            TaskGroup group;
+            for (PassId id : level) {
+                if (!passes_[id].enabled) continue;
+
+                scheduler->submit([this, id, &context]() {
+                    passes_[id].config.execute(context);
+                }, &group);
+            }
+            group.wait();
+        } else {
+            // Execute passes sequentially
+            for (PassId id : level) {
+                if (!passes_[id].enabled) continue;
+                passes_[id].config.execute(context);
+            }
+        }
+    }
+}
+
+FrameGraph::PassId FrameGraph::getPass(const std::string& name) const {
+    auto it = nameToId_.find(name);
+    return (it != nameToId_.end()) ? it->second : INVALID_PASS;
+}
+
+void FrameGraph::clear() {
+    passes_.clear();
+    nameToId_.clear();
+    executionLevels_.clear();
+    nextPassId_ = 0;
+    compiled_ = false;
+}
+
+std::string FrameGraph::debugString() const {
+    std::stringstream ss;
+    ss << "FrameGraph (" << passes_.size() << " passes):\n";
+
+    for (const auto& pass : passes_) {
+        if (!pass.config.execute) continue;
+
+        ss << "  " << pass.config.name;
+        if (!pass.enabled) ss << " [DISABLED]";
+        ss << " (id=" << pass.id << ")";
+
+        if (!pass.dependencies.empty()) {
+            ss << " <- [";
+            for (size_t i = 0; i < pass.dependencies.size(); ++i) {
+                if (i > 0) ss << ", ";
+                ss << passes_[pass.dependencies[i]].config.name;
+            }
+            ss << "]";
+        }
+        ss << "\n";
+    }
+
+    if (compiled_) {
+        ss << "\nExecution order (" << executionLevels_.size() << " levels):\n";
+        for (size_t i = 0; i < executionLevels_.size(); ++i) {
+            ss << "  Level " << i << ": ";
+            for (size_t j = 0; j < executionLevels_[i].size(); ++j) {
+                if (j > 0) ss << ", ";
+                ss << passes_[executionLevels_[i][j]].config.name;
+            }
+            ss << "\n";
+        }
+    }
+
+    return ss.str();
+}
