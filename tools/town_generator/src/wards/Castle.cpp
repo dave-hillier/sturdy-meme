@@ -1,6 +1,7 @@
 #include "town_generator/wards/Castle.h"
 #include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
+#include "town_generator/building/Building.h"
 #include "town_generator/utils/Random.h"
 #include "town_generator/geom/GeomUtils.h"
 #include <cmath>
@@ -17,138 +18,6 @@ static double compactness(const geom::Polygon& poly) {
     double perimeter = poly.perimeter();
     if (perimeter < 0.001) return 0.0;
     return 4.0 * M_PI * area / (perimeter * perimeter);
-}
-
-// Helper: create a building using Dwellings-style cellular growth
-// Faithful to mfcg.js Jd.create (lines 9789-9808)
-static geom::Polygon createDwellingsBuilding(const geom::Polygon& outline, double minBlockSq) {
-    // Get OBB of the outline
-    auto obb = outline.orientedBoundingBox();
-    if (obb.size() < 4) return outline;
-
-    double sideLen = std::sqrt(minBlockSq);
-    double width = geom::Point::distance(obb[0], obb[1]);
-    double height = geom::Point::distance(obb[1], obb[2]);
-
-    int gridW = static_cast<int>(std::ceil(std::min(width, geom::Point::distance(obb[2], obb[3])) / sideLen));
-    int gridH = static_cast<int>(std::ceil(std::min(height, geom::Point::distance(obb[3], obb[0])) / sideLen));
-
-    if (gridW <= 1 || gridH <= 1) return outline;
-
-    // Generate a cellular plan (Jd.getPlan style)
-    // Start with a random cell and grow outward
-    std::vector<bool> plan(gridW * gridH, false);
-
-    int startX = utils::Random::intVal(0, gridW - 1);
-    int startY = utils::Random::intVal(0, gridH - 1);
-    plan[startX + startY * gridW] = true;
-
-    int minX = startX, maxX = startX;
-    int minY = startY, maxY = startY;
-
-    // Grow the building
-    int iterations = gridW * gridH * 2;
-    while (iterations-- > 0) {
-        int x = utils::Random::intVal(0, gridW - 1);
-        int y = utils::Random::intVal(0, gridH - 1);
-        int idx = x + y * gridW;
-
-        if (!plan[idx]) {
-            // Check if adjacent to existing cell
-            bool hasNeighbor = false;
-            if (x > 0 && plan[idx - 1]) hasNeighbor = true;
-            if (x < gridW - 1 && plan[idx + 1]) hasNeighbor = true;
-            if (y > 0 && plan[idx - gridW]) hasNeighbor = true;
-            if (y < gridH - 1 && plan[idx + gridW]) hasNeighbor = true;
-
-            if (hasNeighbor) {
-                plan[idx] = true;
-                minX = std::min(minX, x);
-                maxX = std::max(maxX, x);
-                minY = std::min(minY, y);
-                maxY = std::max(maxY, y);
-            }
-        }
-
-        // Stop if we've filled enough or expanded to edges
-        if (minX == 0 && maxX == gridW - 1 && minY == 0 && maxY == gridH - 1) {
-            if (utils::Random::boolVal(0.5)) break;
-        }
-    }
-
-    // Count filled cells
-    int filledCount = 0;
-    for (bool b : plan) if (b) filledCount++;
-
-    // If nearly full, just return the outline
-    if (filledCount >= gridW * gridH) return outline;
-
-    // Build individual cell rectangles and merge into circumference
-    // For simplicity, we'll create an L-shaped or irregular building
-    // by shrinking the outline and adding some cutouts
-
-    // Calculate cell dimensions
-    geom::Point v0 = obb[1].subtract(obb[0]);
-    geom::Point v1 = obb[3].subtract(obb[0]);
-    v0 = v0.scale(1.0 / gridW);
-    v1 = v1.scale(1.0 / gridH);
-
-    // For now, create a simplified L-shape if the plan is irregular
-    // This approximates the Dwellings engine output
-    std::vector<geom::Point> buildingPoints;
-
-    // Find the bounding box of filled cells
-    int cellMinX = gridW, cellMaxX = -1, cellMinY = gridH, cellMaxY = -1;
-    for (int y = 0; y < gridH; ++y) {
-        for (int x = 0; x < gridW; ++x) {
-            if (plan[x + y * gridW]) {
-                cellMinX = std::min(cellMinX, x);
-                cellMaxX = std::max(cellMaxX, x);
-                cellMinY = std::min(cellMinY, y);
-                cellMaxY = std::max(cellMaxY, y);
-            }
-        }
-    }
-
-    // Create a simple polygon covering the filled cells
-    // Start at top-left corner and trace clockwise
-    geom::Point origin = obb[0];
-
-    auto gridToWorld = [&](int x, int y) {
-        return origin.add(v0.scale(x)).add(v1.scale(y));
-    };
-
-    // Simple rectangular building covering filled area
-    buildingPoints.push_back(gridToWorld(cellMinX, cellMinY));
-    buildingPoints.push_back(gridToWorld(cellMaxX + 1, cellMinY));
-    buildingPoints.push_back(gridToWorld(cellMaxX + 1, cellMaxY + 1));
-    buildingPoints.push_back(gridToWorld(cellMinX, cellMaxY + 1));
-
-    // Add some L-shape variation if there are empty corners
-    bool topRightEmpty = !plan[cellMaxX + cellMinY * gridW];
-    bool bottomLeftEmpty = !plan[cellMinX + cellMaxY * gridW];
-
-    if (topRightEmpty && cellMaxX > cellMinX && cellMaxY > cellMinY) {
-        // Cut corner
-        buildingPoints.clear();
-        buildingPoints.push_back(gridToWorld(cellMinX, cellMinY));
-        buildingPoints.push_back(gridToWorld(cellMaxX, cellMinY));
-        buildingPoints.push_back(gridToWorld(cellMaxX, cellMinY + 1));
-        buildingPoints.push_back(gridToWorld(cellMaxX + 1, cellMinY + 1));
-        buildingPoints.push_back(gridToWorld(cellMaxX + 1, cellMaxY + 1));
-        buildingPoints.push_back(gridToWorld(cellMinX, cellMaxY + 1));
-    } else if (bottomLeftEmpty && cellMaxX > cellMinX && cellMaxY > cellMinY) {
-        // Cut corner
-        buildingPoints.clear();
-        buildingPoints.push_back(gridToWorld(cellMinX, cellMinY));
-        buildingPoints.push_back(gridToWorld(cellMaxX + 1, cellMinY));
-        buildingPoints.push_back(gridToWorld(cellMaxX + 1, cellMaxY + 1));
-        buildingPoints.push_back(gridToWorld(cellMinX + 1, cellMaxY + 1));
-        buildingPoints.push_back(gridToWorld(cellMinX + 1, cellMaxY));
-        buildingPoints.push_back(gridToWorld(cellMinX, cellMaxY));
-    }
-
-    return geom::Polygon(buildingPoints);
 }
 
 void Castle::adjustShape() {
@@ -258,15 +127,20 @@ void Castle::equalize(const geom::Point& center, double factor, const std::vecto
 }
 
 void Castle::createGeometry() {
+    // Faithful to mfcg.js Castle.createGeometry (lines 12548-12556)
     if (!patch || !model) return;
 
+    utils::Random::reset(patch->seed);
+
+    geometry.clear();
+
     // Adjust shape for better citadel appearance
-    // Note: In mfcg.js this is done in constructor, but we do it here
-    // since the curtain wall needs to be built first
-    // adjustShape();  // Disabled for now - requires model vertex mutation
+    // In mfcg.js this is done in constructor after wall creation
+    // We do it here since the curtain wall has been built by now
+    adjustShape();
 
     // Create keep building by shrinking the shape
-    // mfcg.js: gd.shrinkEq(this.patch.shape, pc.THICKNESS + 2)
+    // mfcg.js: a = PolyCut.shrinkEq(this.patch.shape, CurtainWall.THICKNESS + 2)
     double shrinkAmount = building::CurtainWall::THICKNESS + 2.0;
     geom::Polygon keepOutline = patch->shape.shrinkEq(shrinkAmount);
 
@@ -276,23 +150,46 @@ void Castle::createGeometry() {
         double radius = std::sqrt(std::abs(patch->shape.square()) / M_PI) * 0.4;
         keepOutline = geom::Polygon::rect(radius * 1.5, radius * 1.2);
         keepOutline.offset(center);
-    }
-
-    // Make outline convex (lira operation in mfcg.js)
-    // For now we skip this and just use the shrunk shape
-
-    // Create building using Dwellings engine
-    // mfcg.js: Jd.create(a, Sa.area(this.patch.shape) / 25, null, null, .4)
-    double minBlockSq = std::abs(patch->shape.square()) / 25.0;
-    building = createDwellingsBuilding(keepOutline, minBlockSq);
-
-    // If building creation failed, use outline directly
-    if (building.length() < 3) {
         building = keepOutline;
+        geometry.push_back(building);
+        return;
     }
 
-    // Add to geometry for rendering
-    geometry.clear();
+    // Find largest inscribed rectangle (LIRA)
+    // mfcg.js: a = PolyBounds.lira(a)
+    std::vector<geom::Point> outlinePts;
+    for (size_t i = 0; i < keepOutline.length(); ++i) {
+        outlinePts.push_back(keepOutline[i]);
+    }
+
+    std::vector<geom::Point> liraRect = geom::GeomUtils::lira(outlinePts);
+
+    if (liraRect.size() < 4) {
+        // LIRA failed, use outline directly
+        building = keepOutline;
+        geometry.push_back(building);
+        return;
+    }
+
+    geom::Polygon rectPoly(liraRect);
+
+    // Create building using Dwellings-style cellular growth
+    // mfcg.js: Building.create(a, PolyCore.area(this.patch.shape) / 25, null, null, .4)
+    // Parameters: minSq=area/25, hasFront=false, symmetric=false, gap=0.4
+    double minBlockSq = std::abs(patch->shape.square()) / 25.0;
+    building = building::Building::create(
+        rectPoly,
+        minBlockSq,
+        false,   // hasFront
+        false,   // symmetric
+        0.4      // gap
+    );
+
+    // If building creation failed, use LIRA rect directly
+    if (building.length() < 3) {
+        building = rectPoly;
+    }
+
     geometry.push_back(building);
 }
 

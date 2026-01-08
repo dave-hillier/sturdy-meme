@@ -1,5 +1,7 @@
 #include "town_generator/wards/Cathedral.h"
 #include "town_generator/building/City.h"
+#include "town_generator/building/Building.h"
+#include "town_generator/geom/GeomUtils.h"
 #include "town_generator/utils/Random.h"
 #include <cmath>
 
@@ -7,41 +9,56 @@ namespace town_generator {
 namespace wards {
 
 void Cathedral::createGeometry() {
+    // Faithful to mfcg.js Cathedral.createGeometry (lines 278-286)
+    // Uses getAvailable() -> LIRA -> Building.create(minSq=20, hasFront=false, symmetric=true, gap=0.2)
     if (!patch) return;
 
-    geom::Point center = patch->shape.centroid();
-    double area = std::abs(patch->shape.square());
-    double baseSize = std::sqrt(area) * 0.4;
+    utils::Random::reset(patch->seed);
 
-    // Main cathedral body (cross shape approximated as rectangles)
-    double mainLength = baseSize * 1.5;
-    double mainWidth = baseSize * 0.6;
-    double transeptLength = baseSize * 0.8;
-    double transeptWidth = baseSize * 0.4;
+    geometry.clear();
 
-    // Main nave
-    geom::Polygon nave = geom::Polygon::rect(mainWidth, mainLength);
-    nave.offset(center);
-    geometry.push_back(nave);
+    // Get available area after street/wall insets
+    auto cityBlock = getCityBlock();
+    if (cityBlock.empty()) return;
 
-    // Transept (cross arm)
-    geom::Point transeptCenter(center.x, center.y + mainLength * 0.2);
-    geom::Polygon transept = geom::Polygon::rect(transeptLength, transeptWidth);
-    transept.offset(transeptCenter);
-    geometry.push_back(transept);
+    geom::Polygon available = patch->shape.shrink(cityBlock);
+    if (available.length() < 3) return;
 
-    // Apse (semicircular end, approximated as rectangle)
-    geom::Point apseCenter(center.x, center.y + mainLength * 0.5 + transeptWidth * 0.3);
-    geom::Polygon apse = geom::Polygon::rect(mainWidth * 0.8, transeptWidth * 0.6);
-    apse.offset(apseCenter);
-    geometry.push_back(apse);
+    // Convert to vector for GeomUtils functions
+    std::vector<geom::Point> availablePts;
+    for (size_t i = 0; i < available.length(); ++i) {
+        availablePts.push_back(available[i]);
+    }
 
-    // Tower
-    geom::Point towerCenter(center.x, center.y - mainLength * 0.4);
-    double towerSize = mainWidth * 0.5;
-    geom::Polygon tower = geom::Polygon::rect(towerSize, towerSize);
-    tower.offset(towerCenter);
-    geometry.push_back(tower);
+    // Find largest inscribed rectangle aligned to any edge (LIRA)
+    // Faithful to mfcg.js: a = PolyBounds.lira(a)
+    std::vector<geom::Point> liraRect = geom::GeomUtils::lira(availablePts);
+
+    if (liraRect.size() < 4) {
+        // LIRA failed, use available shape directly
+        geometry.push_back(available);
+        return;
+    }
+
+    geom::Polygon rectPoly(liraRect);
+
+    // Create building using Dwellings-style cellular growth
+    // Faithful to mfcg.js: Building.create(a, 20, !1, !0, .2)
+    // Parameters: minSq=20, hasFront=false, symmetric=true, gap=0.2
+    geom::Polygon buildingPoly = building::Building::create(
+        rectPoly,
+        20.0,    // minSq
+        false,   // hasFront
+        true,    // symmetric
+        0.2      // gap
+    );
+
+    // If Building.create returns a valid shape, use it; otherwise use LIRA rect
+    if (buildingPoly.length() >= 3) {
+        geometry.push_back(buildingPoly);
+    } else {
+        geometry.push_back(rectPoly);
+    }
 }
 
 } // namespace wards

@@ -133,6 +133,21 @@ public:
         double minFront
     );
 
+    /**
+     * Inset a polygon with per-edge amounts and tower corner rounding
+     * Faithful to mfcg.js Ward.inset (lines 8-19 in 07-wards.js)
+     *
+     * @param poly The polygon to inset
+     * @param edgeInsets Per-edge inset amounts (same length as poly)
+     * @param towerRadii Per-vertex tower radii for corner rounding (same length as poly)
+     * @return The inset polygon with rounded corners at tower positions
+     */
+    static geom::Polygon inset(
+        const geom::Polygon& poly,
+        const std::vector<double>& edgeInsets,
+        const std::vector<double>& towerRadii
+    );
+
     // Create a church in a medium-sized block (faithful to mfcg.js createChurch)
     void createChurch(const geom::Polygon& block);
 

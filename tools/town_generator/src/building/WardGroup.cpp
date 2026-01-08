@@ -252,12 +252,32 @@ std::vector<double> WardGroup::getAvailable() const {
     // - ARTERY without landing: 1.2
     // - STREET: 1.0
     // - WALL: THICKNESS/2 + 1.2 ≈ 2.15
-    // - Plaza edge: 1.0
+    // - CANAL: canalWidth/2 + 1.2
     // - Default: 0.6
-    constexpr double INSET_ARTERY = 1.2;  // 2.0 for landing, 1.2 otherwise
+    constexpr double INSET_ARTERY_LANDING = 2.0;
+    constexpr double INSET_ARTERY = 1.2;
     constexpr double INSET_STREET = 1.0;
     constexpr double INSET_WALL = 2.15;   // THICKNESS/2 + 1.2
     constexpr double INSET_DEFAULT = 0.6; // ALLEY / 2
+
+    // Helper to check if edge borders a landing cell
+    auto hasLandingNeighbor = [this](const geom::Point& v0, const geom::Point& v1) -> bool {
+        // Find cells that share this edge but are NOT in our group
+        for (Cell* cell : cells) {
+            for (Cell* neighbor : cell->neighbors) {
+                // Skip cells that are in our group
+                if (neighbor->group == this) continue;
+
+                // Check if neighbor shares this edge
+                if (neighbor->shape.hasEdge(v0, v1) || neighbor->shape.hasEdge(v1, v0)) {
+                    if (neighbor->landing) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
 
     for (size_t i = 0; i < border.length(); ++i) {
         const geom::Point& v0 = border[i];
@@ -283,13 +303,32 @@ std::vector<double> WardGroup::getAvailable() const {
                 inset = INSET_WALL;
             }
         }
-        // Check if edge is on main artery
-        else if (isEdgeOnRoad(v0, v1, model->arteries)) {
-            inset = INSET_ARTERY;
-        }
-        // Check streets and roads
-        else if (isEdgeOnRoad(v0, v1, model->streets) || isEdgeOnRoad(v0, v1, model->roads)) {
-            inset = INSET_STREET;
+        // Check canals - use canal width / 2 + 1.2
+        else {
+            bool onCanal = false;
+            for (const auto& canal : model->canals) {
+                if (canal->containsEdge(v0, v1)) {
+                    inset = canal->width / 2.0 + 1.2;
+                    onCanal = true;
+                    break;
+                }
+            }
+
+            if (!onCanal) {
+                // Check if edge is on main artery
+                if (isEdgeOnRoad(v0, v1, model->arteries)) {
+                    // Faithful to mfcg.js: check if adjacent cell is a landing
+                    if (hasLandingNeighbor(v0, v1)) {
+                        inset = INSET_ARTERY_LANDING;
+                    } else {
+                        inset = INSET_ARTERY;
+                    }
+                }
+                // Check streets and roads
+                else if (isEdgeOnRoad(v0, v1, model->streets) || isEdgeOnRoad(v0, v1, model->roads)) {
+                    inset = INSET_STREET;
+                }
+            }
         }
         // Default: INSET_DEFAULT (0.6)
         // Note: We don't check for internal edges here because the border is already

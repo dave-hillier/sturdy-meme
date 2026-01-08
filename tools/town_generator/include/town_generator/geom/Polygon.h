@@ -868,6 +868,109 @@ public:
         }
         return result;
     }
+
+    /**
+     * Chaikin's corner cutting algorithm for smooth curves
+     * Faithful to mfcg.js Chaikin.render
+     *
+     * For each vertex, creates two new points at 25% toward prev and next neighbors.
+     * This progressively smooths sharp corners into curves.
+     *
+     * @param poly Input polygon
+     * @param closed If true, treat as closed polygon
+     * @param iterations Number of smoothing iterations (default 3)
+     * @param fixed Optional points to keep fixed (not smoothed)
+     * @return Smoothed polygon
+     */
+    static Polygon chaikin(const Polygon& poly, bool closed = true, int iterations = 3,
+                           const std::vector<Point>* fixed = nullptr) {
+        if (poly.length() < 3) return poly;
+
+        std::vector<Point> current = poly.vertexValues();
+
+        for (int iter = 0; iter < iterations; ++iter) {
+            std::vector<Point> result;
+            size_t len = current.size();
+
+            // Process interior vertices (1 to len-2)
+            for (size_t i = 1; i < len - 1; ++i) {
+                const Point& v = current[i];
+
+                // Check if point is fixed
+                bool isFixed = false;
+                if (fixed) {
+                    for (const auto& f : *fixed) {
+                        if (Point::distance(v, f) < 0.01) {
+                            isFixed = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (isFixed) {
+                    result.push_back(v);
+                } else {
+                    // Create two points: 25% toward prev, 25% toward next
+                    const Point& prev = current[i - 1];
+                    const Point& next = current[i + 1];
+                    result.emplace_back(v.x + (prev.x - v.x) * 0.25, v.y + (prev.y - v.y) * 0.25);
+                    result.emplace_back(v.x + (next.x - v.x) * 0.25, v.y + (next.y - v.y) * 0.25);
+                }
+            }
+
+            if (closed) {
+                // Handle last vertex (index len-1)
+                const Point& vLast = current[len - 1];
+                bool isFixedLast = false;
+                if (fixed) {
+                    for (const auto& f : *fixed) {
+                        if (Point::distance(vLast, f) < 0.01) {
+                            isFixedLast = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (isFixedLast) {
+                    result.push_back(vLast);
+                } else {
+                    const Point& prevLast = current[len - 2];
+                    const Point& nextLast = current[0];
+                    result.emplace_back(vLast.x + (prevLast.x - vLast.x) * 0.25, vLast.y + (prevLast.y - vLast.y) * 0.25);
+                    result.emplace_back(vLast.x + (nextLast.x - vLast.x) * 0.25, vLast.y + (nextLast.y - vLast.y) * 0.25);
+                }
+
+                // Handle first vertex (index 0)
+                const Point& vFirst = current[0];
+                bool isFixedFirst = false;
+                if (fixed) {
+                    for (const auto& f : *fixed) {
+                        if (Point::distance(vFirst, f) < 0.01) {
+                            isFixedFirst = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (isFixedFirst) {
+                    result.push_back(vFirst);
+                } else {
+                    const Point& prevFirst = current[len - 1];
+                    const Point& nextFirst = current[1];
+                    result.emplace_back(vFirst.x + (prevFirst.x - vFirst.x) * 0.25, vFirst.y + (prevFirst.y - vFirst.y) * 0.25);
+                    result.emplace_back(vFirst.x + (nextFirst.x - vFirst.x) * 0.25, vFirst.y + (nextFirst.y - vFirst.y) * 0.25);
+                }
+            } else {
+                // Open path: keep first and last vertices fixed
+                result.insert(result.begin(), current[0]);
+                result.push_back(current[len - 1]);
+            }
+
+            current = std::move(result);
+        }
+
+        return Polygon(current);
+    }
 };
 
 } // namespace geom

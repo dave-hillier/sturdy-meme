@@ -640,6 +640,88 @@ std::vector<geom::Point> Ward::semiSmooth(
     return result;
 }
 
+geom::Polygon Ward::inset(
+    const geom::Polygon& poly,
+    const std::vector<double>& edgeInsets,
+    const std::vector<double>& towerRadii
+) {
+    // Faithful to mfcg.js Ward.inset (lines 8-19 in 07-wards.js)
+    // Insets the polygon by per-edge amounts, then cuts out rounded corners at tower positions
+
+    if (poly.length() < 3 || edgeInsets.size() != poly.length()) {
+        return poly;
+    }
+
+    // Step 1: Basic polygon inset
+    geom::Polygon insetPoly = poly.shrink(edgeInsets);
+    if (insetPoly.length() < 3) {
+        return insetPoly;
+    }
+
+    // Step 2: Check for tower corner rounding
+    // If towerRadii is empty or wrong size, skip corner rounding
+    if (towerRadii.size() != poly.length()) {
+        return insetPoly;
+    }
+
+    // For each vertex, if tower radius > both adjacent edge insets,
+    // subtract a 9-sided polygon centered on the original vertex
+    bool needsClipping = false;
+    for (size_t i = 0; i < poly.length(); ++i) {
+        size_t prevIdx = (i + poly.length() - 1) % poly.length();
+        double towerR = towerRadii[i];
+
+        // Check if tower radius is larger than both adjacent edge insets
+        if (towerR > edgeInsets[prevIdx] && towerR > edgeInsets[i]) {
+            needsClipping = true;
+            break;
+        }
+    }
+
+    if (!needsClipping) {
+        return insetPoly;
+    }
+
+    // Perform clipping for each tower corner
+    std::vector<geom::Point> resultPts;
+    for (size_t i = 0; i < insetPoly.length(); ++i) {
+        resultPts.push_back(insetPoly[i]);
+    }
+
+    for (size_t i = 0; i < poly.length(); ++i) {
+        size_t prevIdx = (i + poly.length() - 1) % poly.length();
+        double towerR = towerRadii[i];
+
+        if (towerR > edgeInsets[prevIdx] && towerR > edgeInsets[i]) {
+            // Create 9-sided polygon at original vertex position
+            geom::Point towerCenter = poly[i];
+            geom::Polygon tower = geom::Polygon::regular(9, towerR);
+            tower.offset(towerCenter);
+
+            // Reverse winding for subtraction
+            std::vector<geom::Point> towerPts;
+            for (size_t j = tower.length(); j > 0; --j) {
+                towerPts.push_back(tower[j - 1]);
+            }
+
+            // Subtract tower from result using polygon intersection
+            std::vector<geom::Point> clipped = geom::GeomUtils::polygonIntersection(
+                resultPts, towerPts, true  // subtract=true
+            );
+
+            if (clipped.size() >= 3) {
+                resultPts = clipped;
+            }
+        }
+    }
+
+    if (resultPts.size() < 3) {
+        return insetPoly;  // Clipping failed, return basic inset
+    }
+
+    return geom::Polygon(resultPts);
+}
+
 void Ward::createChurch(const geom::Polygon& block) {
     // Faithful to mfcg.js createChurch
     // Creates a church building in a medium-sized block

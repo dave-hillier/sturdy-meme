@@ -40,56 +40,32 @@ void Park::createGeometry() {
 }
 
 geom::Polygon Park::createWavyBoundary(const geom::Polygon& shape) {
-    // Faithful to mfcg.js Hf.render - creates wavy organic boundary
-    // by adding intermediate points with noise displacement
+    // Faithful to mfcg.js Park.createGeometry (lines 687-694)
+    // For each vertex, add the vertex and a midpoint to the next vertex
+    // Then apply Chaikin smoothing (3 iterations, closed polygon)
 
     if (shape.length() < 3) return shape;
 
-    std::vector<geom::Point> wavyPoints;
+    std::vector<geom::Point> pointsWithMidpoints;
     size_t len = shape.length();
 
     for (size_t i = 0; i < len; ++i) {
         const geom::Point& v0 = shape[i];
         const geom::Point& v1 = shape[(i + 1) % len];
 
-        // Add start point
-        wavyPoints.push_back(v0);
+        // Add vertex
+        pointsWithMidpoints.push_back(v0);
 
-        // Calculate edge length
-        double edgeLen = geom::Point::distance(v0, v1);
-        int numSegments = static_cast<int>(edgeLen / 3.0);  // One wave per ~3 units
-        if (numSegments < 1) numSegments = 1;
-        if (numSegments > 8) numSegments = 8;
-
-        // Add intermediate points with wave displacement
-        geom::Point edgeDir = v1.subtract(v0);
-        if (edgeLen > 0.01) {
-            edgeDir = edgeDir.scale(1.0 / edgeLen);
-        }
-        geom::Point perpDir(-edgeDir.y, edgeDir.x);
-
-        for (int j = 1; j < numSegments; ++j) {
-            double t = static_cast<double>(j) / numSegments;
-            geom::Point basePoint = geom::GeomUtils::interpolate(v0, v1, t);
-
-            // Sinusoidal wave with some noise
-            double wavePhase = t * numSegments * M_PI;
-            double waveAmp = 0.5 + 0.5 * utils::Random::floatVal();
-            double offset = std::sin(wavePhase) * waveAmp;
-
-            // Add random perturbation
-            offset += (utils::Random::floatVal() - 0.5) * 0.3;
-
-            geom::Point wavyPoint = basePoint.add(perpDir.scale(offset));
-            wavyPoints.push_back(wavyPoint);
-        }
+        // Add midpoint to next vertex (lerp at 0.5)
+        pointsWithMidpoints.emplace_back(
+            (v0.x + v1.x) / 2.0,
+            (v0.y + v1.y) / 2.0
+        );
     }
 
-    // Smooth the result
-    geom::Polygon result(wavyPoints);
-    result = geom::Polygon::smooth(result);
-
-    return result;
+    // Apply Chaikin smoothing (closed=true, iterations=3)
+    geom::Polygon expanded(pointsWithMidpoints);
+    return geom::Polygon::chaikin(expanded, true, 3);
 }
 
 void Park::createPaths() {
