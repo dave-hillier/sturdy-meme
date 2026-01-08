@@ -1,5 +1,6 @@
 #include "FrameGraph.h"
 #include "threading/TaskScheduler.h"
+#include "vulkan/ThreadedCommandPool.h"
 #include <SDL3/SDL_log.h>
 #include <algorithm>
 #include <queue>
@@ -223,10 +224,87 @@ void FrameGraph::execute(RenderContext& context, TaskScheduler* scheduler) {
             // Execute passes sequentially
             for (PassId id : level) {
                 if (!passes_[id].enabled) continue;
-                passes_[id].config.execute(context);
+
+                const auto& config = passes_[id].config;
+
+                // Check if this pass uses secondary command buffers for parallel recording
+                if (config.canUseSecondary &&
+                    config.secondarySlots > 0 &&
+                    config.secondaryRecord &&
+                    context.threadedCommandPool &&
+                    scheduler) {
+
+                    // Parallel secondary command buffer recording (Phase 4)
+                    executeWithSecondaryBuffers(context, passes_[id], scheduler);
+                } else {
+                    // Standard primary buffer execution
+                    config.execute(context);
+                }
             }
         }
     }
+}
+
+void FrameGraph::executeWithSecondaryBuffers(
+    RenderContext& context,
+    const Pass& pass,
+    TaskScheduler* scheduler) {
+
+    const auto& config = pass.config;
+    uint32_t numSlots = config.secondarySlots;
+    ThreadedCommandPool* pool = context.threadedCommandPool;
+
+    // Allocate secondary command buffers for each slot
+    std::vector<vk::CommandBuffer> secondaryBuffers(numSlots);
+
+    // Create a task group for parallel recording
+    TaskGroup group;
+
+    for (uint32_t slot = 0; slot < numSlots; ++slot) {
+        scheduler->submit([&, slot]() {
+            // Get thread ID for command pool allocation
+            uint32_t threadId = TaskScheduler::instance().getCurrentThreadId();
+
+            // Allocate secondary buffer from thread's pool
+            vk::CommandBuffer secondary = pool->allocateSecondary(context.frameIndex, threadId);
+
+            // Begin secondary command buffer with render pass inheritance
+            auto inheritance = vk::CommandBufferInheritanceInfo{}
+                .setRenderPass(context.renderPass)
+                .setSubpass(0)
+                .setFramebuffer(context.framebuffer);
+
+            secondary.begin(vk::CommandBufferBeginInfo{}
+                .setFlags(vk::CommandBufferUsageFlagBits::eRenderPassContinue |
+                          vk::CommandBufferUsageFlagBits::eOneTimeSubmit)
+                .setPInheritanceInfo(&inheritance));
+
+            // Create context for this secondary buffer
+            RenderContext secondaryCtx = context;
+            secondaryCtx.commandBuffer = secondary;
+
+            // Record commands for this slot
+            config.secondaryRecord(secondaryCtx, slot);
+
+            // End secondary buffer
+            secondary.end();
+
+            // Store for later execution
+            secondaryBuffers[slot] = secondary;
+        }, &group);
+    }
+
+    // Wait for all secondary buffers to be recorded
+    group.wait();
+
+    // Pass the secondary buffers to the execute function
+    // The execute function is responsible for:
+    // 1. Beginning the render pass with eSecondaryCommandBuffers
+    // 2. Calling commandBuffer.executeCommands(secondaryBuffers)
+    // 3. Ending the render pass
+    context.secondaryBuffers = &secondaryBuffers;
+    config.execute(context);
+    context.secondaryBuffers = nullptr;
 }
 
 FrameGraph::PassId FrameGraph::getPass(const std::string& name) const {

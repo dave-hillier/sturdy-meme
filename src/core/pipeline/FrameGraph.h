@@ -10,6 +10,7 @@
 
 class TaskScheduler;
 class TaskGroup;
+class ThreadedCommandPool;
 
 /**
  * FrameGraph - Dependency-driven render pass scheduling.
@@ -56,9 +57,28 @@ public:
 
         // Additional context can be added via user data
         void* userData = nullptr;
+
+        // Secondary command buffer support (Phase 4)
+        // Set these before executing passes that use secondary buffers
+        ThreadedCommandPool* threadedCommandPool = nullptr;
+        vk::RenderPass renderPass;       // For secondary buffer inheritance
+        vk::Framebuffer framebuffer;     // For secondary buffer inheritance
+
+        // Filled by executeWithSecondaryBuffers() - contains recorded secondary buffers
+        // The execute function should call commandBuffer.executeCommands(secondaryBuffers)
+        // inside the render pass
+        std::vector<vk::CommandBuffer>* secondaryBuffers = nullptr;
     };
 
     using PassFunction = std::function<void(RenderContext&)>;
+
+    /**
+     * Secondary recording function for parallel command buffer recording.
+     * Called for each secondary buffer slot with a thread-allocated command buffer.
+     * @param ctx The render context (commandBuffer field is the secondary buffer)
+     * @param slotIndex Which slot is being recorded (0 to numSlots-1)
+     */
+    using SecondaryRecordFunction = std::function<void(RenderContext& ctx, uint32_t slotIndex)>;
 
     /**
      * Pass configuration for parallel recording.
@@ -76,6 +96,15 @@ public:
 
         // Priority within the same dependency level (higher = earlier)
         int32_t priority = 0;
+
+        // Number of secondary buffers to allocate (for parallel recording)
+        // Only used when canUseSecondary = true
+        uint32_t secondarySlots = 0;
+
+        // Function to record secondary command buffers in parallel
+        // Called once per slot, potentially from different threads
+        // Only used when canUseSecondary = true and secondarySlots > 0
+        SecondaryRecordFunction secondaryRecord;
     };
 
     FrameGraph() = default;
@@ -172,6 +201,9 @@ private:
 
     // Topological sort helper
     bool topologicalSort(std::vector<std::vector<PassId>>& levels);
+
+    // Execute a pass using secondary command buffers for parallel recording
+    void executeWithSecondaryBuffers(RenderContext& context, const Pass& pass, TaskScheduler* scheduler);
 
     std::vector<Pass> passes_;
     std::unordered_map<std::string, PassId> nameToId_;
