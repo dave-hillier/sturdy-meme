@@ -24,10 +24,14 @@ export { Chaikin, PolygonSmoother } from './geometry/Chaikin.js';
 export { PoissonPattern, FillablePoly } from './geometry/PoissonPattern.js';
 export { Graph, Node } from './geometry/Graph.js';
 export { SkeletonBuilder, Rib } from './geometry/SkeletonBuilder.js';
+export { PolyBool } from './geometry/PolyBool.js';
 
 // Utilities
 export { Noise, Perlin } from './utils/Noise.js';
 export { Bisector } from './utils/Bisector.js';
+export { Bloater } from './utils/Bloater.js';
+export { Cutter } from './utils/Cutter.js';
+export { PathTracker } from './utils/PathTracker.js';
 
 // Model
 export { Cell } from './model/Cell.js';
@@ -39,6 +43,8 @@ export { Canal } from './model/Canal.js';
 export { District, DistrictBuilder, AlleyConfig } from './model/District.js';
 export { Forester } from './model/Forester.js';
 export { Topology } from './model/Topology.js';
+export { Grower, DocksGrower, ParkGrower, DistrictType, EdgeTypeIndex } from './model/Grower.js';
+export { Landmark } from './model/Landmark.js';
 
 // Wards
 export { Ward } from './wards/Ward.js';
@@ -55,6 +61,11 @@ export { Wilderness } from './wards/Wilderness.js';
 
 // Export
 export { GeoJSON, JsonExporter } from './export/JsonExporter.js';
+
+// Linguistics (name generation)
+export { Syllables, VOWELS, CONSONANTS } from './linguistics/Syllables.js';
+export { Markov } from './linguistics/Markov.js';
+export { Namer } from './linguistics/Namer.js';
 
 /**
  * Generate a city with the given parameters
