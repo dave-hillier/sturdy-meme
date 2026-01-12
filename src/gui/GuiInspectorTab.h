@@ -41,6 +41,10 @@ public:
         renderMovementSettingsComponent(registry, selectedEntity);
         renderPhysicsBodyComponent(registry, selectedEntity);
         renderRenderableRefComponent(registry, selectedEntity);
+        renderMeshRendererComponent(registry, selectedEntity);
+        renderCameraComponent(registry, selectedEntity);
+        renderAABBBoundsComponent(registry, selectedEntity);
+        renderLODGroupComponent(registry, selectedEntity);
         renderTagComponents(registry, selectedEntity);
 
         ImGui::Separator();
@@ -420,6 +424,125 @@ private:
         }
     }
 
+    void renderMeshRendererComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<MeshRenderer>(entity)) return;
+
+        if (renderComponentHeader("Mesh Renderer")) {
+            auto& mesh = registry.get<MeshRenderer>(entity);
+
+            // Display handles as IDs (would need resource registry to show names)
+            int meshId = static_cast<int>(mesh.mesh);
+            if (ImGui::InputInt("Mesh Handle", &meshId)) {
+                mesh.mesh = static_cast<MeshHandle>(std::max(0, meshId));
+            }
+
+            int matId = static_cast<int>(mesh.material);
+            if (ImGui::InputInt("Material Handle", &matId)) {
+                mesh.material = static_cast<MaterialHandle>(std::max(0, matId));
+            }
+
+            int submesh = static_cast<int>(mesh.submeshIndex);
+            if (ImGui::InputInt("Submesh Index", &submesh)) {
+                mesh.submeshIndex = static_cast<uint32_t>(std::max(0, submesh));
+            }
+
+            ImGui::Checkbox("Casts Shadow", &mesh.castsShadow);
+            ImGui::Checkbox("Receive Shadow", &mesh.receiveShadow);
+
+            // Render layer dropdown
+            const char* layerNames[] = {"Default", "Terrain", "Water", "Vegetation", "Character", "UI", "Debug"};
+            int currentLayer = 0;
+            uint32_t layerVal = static_cast<uint32_t>(mesh.layer);
+            for (int i = 0; i < 7; i++) {
+                if (layerVal == (1u << i)) {
+                    currentLayer = i;
+                    break;
+                }
+            }
+            if (ImGui::Combo("Render Layer", &currentLayer, layerNames, IM_ARRAYSIZE(layerNames))) {
+                mesh.layer = static_cast<RenderLayer>(1u << currentLayer);
+            }
+        }
+    }
+
+    void renderCameraComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<CameraComponent>(entity)) return;
+
+        if (renderComponentHeader("Camera")) {
+            auto& cam = registry.get<CameraComponent>(entity);
+
+            ImGui::DragFloat("FOV", &cam.fov, 0.5f, 1.0f, 179.0f, "%.1f deg");
+            ImGui::DragFloat("Near Plane", &cam.nearPlane, 0.01f, 0.001f, 100.0f, "%.3f");
+            ImGui::DragFloat("Far Plane", &cam.farPlane, 10.0f, 1.0f, 100000.0f, "%.0f");
+            ImGui::InputInt("Priority", &cam.priority);
+
+            // Main camera toggle
+            bool isMain = registry.all_of<MainCamera>(entity);
+            if (ImGui::Checkbox("Main Camera", &isMain)) {
+                if (isMain) {
+                    // Remove MainCamera from all other entities first
+                    auto view = registry.view<MainCamera>();
+                    for (auto other : view) {
+                        registry.remove<MainCamera>(other);
+                    }
+                    registry.emplace<MainCamera>(entity);
+                } else {
+                    registry.remove<MainCamera>(entity);
+                }
+            }
+        }
+    }
+
+    void renderAABBBoundsComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<AABBBounds>(entity)) return;
+
+        if (renderComponentHeader("AABB Bounds")) {
+            auto& bounds = registry.get<AABBBounds>(entity);
+
+            editVec3("Min", bounds.min);
+            editVec3("Max", bounds.max);
+
+            ImGui::Separator();
+            glm::vec3 center = bounds.center();
+            glm::vec3 extents = bounds.extents();
+            ImGui::TextDisabled("Center: (%.2f, %.2f, %.2f)", center.x, center.y, center.z);
+            ImGui::TextDisabled("Extents: (%.2f, %.2f, %.2f)", extents.x, extents.y, extents.z);
+        }
+    }
+
+    void renderLODGroupComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<LODGroup>(entity)) return;
+
+        if (renderComponentHeader("LOD Group")) {
+            auto& lod = registry.get<LODGroup>(entity);
+
+            ImGui::Text("Current LOD: %d", lod.currentLOD);
+            ImGui::Text("LOD Levels: %zu", lod.switchDistances.size());
+
+            if (ImGui::TreeNode("LOD Distances")) {
+                for (size_t i = 0; i < lod.switchDistances.size(); i++) {
+                    ImGui::PushID(static_cast<int>(i));
+                    ImGui::DragFloat(("##lod" + std::to_string(i)).c_str(),
+                                     &lod.switchDistances[i], 1.0f, 0.0f, 10000.0f, "%.0f m");
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("X") && lod.switchDistances.size() > 1) {
+                        lod.switchDistances.erase(lod.switchDistances.begin() + i);
+                        lod.lodMeshes.erase(lod.lodMeshes.begin() + i);
+                    }
+                    ImGui::PopID();
+                }
+
+                if (ImGui::Button("+ Add LOD Level")) {
+                    float lastDist = lod.switchDistances.empty() ? 50.0f : lod.switchDistances.back() * 2.0f;
+                    lod.switchDistances.push_back(lastDist);
+                    lod.lodMeshes.push_back(InvalidMesh);
+                }
+
+                ImGui::TreePop();
+            }
+        }
+    }
+
     void renderTagComponents(entt::registry& registry, entt::entity entity) {
         // Collect all tag components
         std::vector<std::string> tags;
@@ -431,6 +554,9 @@ private:
         if (registry.all_of<NPCTag>(entity)) tags.push_back("NPC");
         if (registry.all_of<LightEnabled>(entity)) tags.push_back("Light Enabled");
         if (registry.all_of<Selected>(entity)) tags.push_back("Selected");
+        if (registry.all_of<MainCamera>(entity)) tags.push_back("Main Camera");
+        if (registry.all_of<StaticObject>(entity)) tags.push_back("Static");
+        if (registry.all_of<WasVisible>(entity)) tags.push_back("Was Visible");
 
         if (!tags.empty()) {
             if (renderComponentHeader("Tags")) {
@@ -495,6 +621,43 @@ private:
             if (!registry.all_of<PatrolPath>(entity)) {
                 if (ImGui::MenuItem("Patrol Path")) {
                     registry.emplace<PatrolPath>(entity);
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Rendering");
+
+            if (!registry.all_of<MeshRenderer>(entity)) {
+                if (ImGui::MenuItem("Mesh Renderer")) {
+                    registry.emplace<MeshRenderer>(entity);
+                }
+            }
+            if (!registry.all_of<CameraComponent>(entity)) {
+                if (ImGui::MenuItem("Camera")) {
+                    registry.emplace<CameraComponent>(entity);
+                }
+            }
+            if (!registry.all_of<AABBBounds>(entity)) {
+                if (ImGui::MenuItem("AABB Bounds")) {
+                    registry.emplace<AABBBounds>(entity);
+                }
+            }
+            if (!registry.all_of<LODGroup>(entity)) {
+                if (ImGui::MenuItem("LOD Group")) {
+                    LODGroup lod;
+                    lod.switchDistances = {50.0f, 100.0f, 200.0f};
+                    lod.lodMeshes = {InvalidMesh, InvalidMesh, InvalidMesh};
+                    registry.emplace<LODGroup>(entity, std::move(lod));
+                }
+            }
+            if (!registry.all_of<Billboard>(entity)) {
+                if (ImGui::MenuItem("Billboard")) {
+                    registry.emplace<Billboard>(entity);
+                }
+            }
+            if (!registry.all_of<StaticObject>(entity)) {
+                if (ImGui::MenuItem("Static Object (Tag)")) {
+                    registry.emplace<StaticObject>(entity);
                 }
             }
 
