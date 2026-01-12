@@ -275,6 +275,7 @@ add_executable(town_generator
     town_generator/src/utils/Random.cpp
     town_generator/src/utils/MathUtils.cpp
     town_generator/src/utils/Forester.cpp
+    town_generator/src/utils/Bisector.cpp
     town_generator/src/building/Cell.cpp
     town_generator/src/building/Topology.cpp
     town_generator/src/building/CurtainWall.cpp

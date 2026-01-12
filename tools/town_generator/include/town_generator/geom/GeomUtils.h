@@ -183,6 +183,15 @@ public:
     static std::vector<Point> reverse(const std::vector<Point>& poly);
 
     /**
+     * Check if two line segments are collinear (converge on the same line)
+     * Based on mfcg.js GeomUtils.converge
+     *
+     * Returns true if points c and d both lie on the line through a and b
+     * within a small tolerance (1e-9)
+     */
+    static bool converge(const Point& a, const Point& b, const Point& c, const Point& d);
+
+    /**
      * Shrink polygon edges inward by varying amounts
      * Based on mfcg.js gd.shrink
      *

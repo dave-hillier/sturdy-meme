@@ -60,6 +60,9 @@ public:
     // Processing mode (e.g., "Shrink" for building setback variation)
     std::string processingMode;
 
+    // Alley paths (cuts from Bisector)
+    std::vector<std::vector<geom::Point>> alleyPaths;
+
     WardGroup() = default;
     explicit WardGroup(City* model);
 

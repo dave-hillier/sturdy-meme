@@ -3,6 +3,7 @@
 #include "town_generator/building/Building.h"
 #include "town_generator/geom/GeomUtils.h"
 #include "town_generator/utils/Random.h"
+#include "town_generator/utils/Bisector.h"
 #include <algorithm>
 #include <cmath>
 
@@ -21,8 +22,8 @@ geom::Point Block::getCenter() {
 }
 
 void Block::createLots() {
-    // Simplified lot subdivision - faithful to mfcg-clean Block.js subdivideLots
-    // Algorithm: Find longest edge (frontage), divide into equal lots
+    // Faithful to mfcg.js TwistedBlock.createLots (lines 158-177)
+    // Uses Bisector to subdivide the block shape into individual lots
 
     lots.clear();
 
@@ -30,67 +31,54 @@ void Block::createLots() {
         return;
     }
 
-    double area = std::abs(shape.square());
     double minSq = group ? group->alleys.minSq : 100.0;
-    double minFront = group ? group->alleys.minFront : 3.0;
+    double sizeChaos = group ? group->alleys.sizeChaos : 0.5;
 
-    // If block is too small, use as single lot
-    if (area < minSq) {
-        lots.push_back(shape);
-        return;
-    }
+    // Use Bisector to partition block into lots
+    // Faithful to: new Bisector(a.shape, b.minSq, Math.max(4 * b.sizeChaos, 1.2))
+    double variance = std::max(4.0 * sizeChaos, 1.2);
+    utils::Bisector bisector(shape.vertexValues(), minSq, variance);
+    bisector.minTurnOffset = 0.5;  // Faithful to original
 
-    // Find longest edge (frontage)
-    size_t frontIdx = 0;
-    double maxLen = 0.0;
-    size_t len = shape.length();
+    auto lotShapes = bisector.partition();
 
-    for (size_t i = 0; i < len; ++i) {
-        double edgeLen = geom::Point::distance(shape[i], shape[(i + 1) % len]);
-        if (edgeLen > maxLen) {
-            maxLen = edgeLen;
-            frontIdx = i;
+    // Filter inner lots (lots that don't touch the block perimeter)
+    // are moved to courtyard
+    for (const auto& lotShape : lotShapes) {
+        if (lotShape.size() < 3) continue;
+
+        geom::Polygon lot(lotShape);
+
+        // Check if lot touches block perimeter
+        bool touchesPerimeter = false;
+        size_t blockLen = shape.length();
+
+        for (size_t i = 0; i < lot.length() && !touchesPerimeter; ++i) {
+            const geom::Point& lotP1 = lot[i];
+            const geom::Point& lotP2 = lot[(i + 1) % lot.length()];
+
+            for (size_t j = 0; j < blockLen; ++j) {
+                const geom::Point& blockP1 = shape[j];
+                const geom::Point& blockP2 = shape[(j + 1) % blockLen];
+
+                // Check if lot edge converges with block edge
+                if (geom::GeomUtils::converge(lotP1, lotP2, blockP1, blockP2)) {
+                    touchesPerimeter = true;
+                    break;
+                }
+            }
+        }
+
+        if (touchesPerimeter) {
+            lots.push_back(lot);
+        } else {
+            courtyard.push_back(lot);
         }
     }
 
-    const geom::Point& frontP1 = shape[frontIdx];
-    const geom::Point& frontP2 = shape[(frontIdx + 1) % len];
-    double frontLen = geom::Point::distance(frontP1, frontP2);
-
-    // If frontage too short, use as single lot
-    if (frontLen < minFront * 2.0) {
+    // If no lots created, use the whole block as one lot
+    if (lots.empty()) {
         lots.push_back(shape);
-        return;
-    }
-
-    // Calculate number of lots along frontage
-    int numLots = std::max(2, static_cast<int>(std::floor(frontLen / minFront)));
-
-    // Handle non-quadrilateral blocks: just use as single lot
-    if (len != 4) {
-        lots.push_back(shape);
-        return;
-    }
-
-    // Find back edge (opposite to front) - for quad, it's frontIdx + 2
-    size_t backIdx = (frontIdx + 2) % len;
-    const geom::Point& backP1 = shape[backIdx];
-    const geom::Point& backP2 = shape[(backIdx + 1) % len];
-
-    // Create lots by subdividing along front edge
-    for (int i = 0; i < numLots; ++i) {
-        double t1 = static_cast<double>(i) / numLots;
-        double t2 = static_cast<double>(i + 1) / numLots;
-
-        // Interpolate front edge
-        geom::Point p1 = geom::GeomUtils::lerp(frontP1, frontP2, t1);
-        geom::Point p2 = geom::GeomUtils::lerp(frontP1, frontP2, t2);
-
-        // Interpolate back edge (reversed direction)
-        geom::Point p3 = geom::GeomUtils::lerp(backP2, backP1, t2);
-        geom::Point p4 = geom::GeomUtils::lerp(backP2, backP1, t1);
-
-        lots.push_back(geom::Polygon({p1, p2, p3, p4}));
     }
 }
 
@@ -151,14 +139,18 @@ void Block::createRects() {
 }
 
 void Block::createBuildings() {
-    // Faithful to mfcg-clean Block.js generateBuildings
+    // Faithful to mfcg.js Block.createBuildings (lines 4031-4053)
     if (rects.empty()) {
         createRects();
     }
 
     buildings.clear();
-    double minSq = group ? group->alleys.minSq : 15.0;
-    double threshold = minSq / 4.0;
+
+    // Use minSq/4 * shapeFactor as threshold
+    // Faithful to: var c = b.minSq / 4 * b.shapeFactor;
+    double minSq = group ? group->alleys.minSq : 100.0;
+    double shapeFactor = group ? group->alleys.shapeFactor : 1.0;
+    double threshold = minSq / 4.0 * shapeFactor;
 
     for (const auto& rect : rects) {
         if (rect.length() < 3) {
@@ -166,7 +158,9 @@ void Block::createBuildings() {
         }
 
         // Try to create complex building using Building.create
-        geom::Polygon building = Building::create(rect, threshold, false, false, 0.0);
+        // Faithful to: Building.create(d, c, !0, null, .6)
+        // hasFront=true, symmetric=null(false), gap=0.6
+        geom::Polygon building = Building::create(rect, threshold, true, false, 0.6);
 
         if (building.length() >= 3) {
             buildings.push_back(building);

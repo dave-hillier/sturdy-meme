@@ -3,6 +3,7 @@
 #include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/utils/Random.h"
+#include "town_generator/utils/Bisector.h"
 #include "town_generator/wards/Ward.h"
 #include <algorithm>
 #include <cmath>
@@ -107,7 +108,6 @@ void WardGroup::createGeometry() {
     // Get available area after street/wall insets
     // Calculate per-edge insets based on what's adjacent (roads, walls, etc.)
     std::vector<double> insets = getAvailable();
-    double borderArea = std::abs(border.square());
 
     // Faithful to MFCG: use shrink() for convex polygons, buffer() for concave
     // Reference: Ward.hx getCityBlock() - patch.shape.isConvex() ? shrink() : buffer()
@@ -123,19 +123,59 @@ void WardGroup::createGeometry() {
         return;
     }
 
-    // Simplified block creation - faithful to mfcg-clean WardGroup.js
-    // The reference just uses the available shape as a single block
-    std::vector<geom::Polygon> blockShapes;
-    blockShapes.push_back(available);
+    // Faithful to mfcg.js WardGroup.createGeometry (lines 762-777)
+    // Check if area is large enough to need subdivision
+    double threshold = alleys.minSq *
+        std::pow(2.0, alleys.sizeChaos * (2.0 * utils::Random::floatVal() - 1.0)) *
+        alleys.blockSize;
+
+    std::vector<std::vector<geom::Point>> blockShapes;
+
+    if (availableArea > threshold) {
+        // Use Bisector to subdivide into blocks
+        // Faithful to mfcg.js createAlleys (lines 823-844)
+        double bisectorMinArea = alleys.minSq * alleys.blockSize;
+        double bisectorVariance = 16.0 * alleys.gridChaos;
+
+        utils::Bisector bisector(available.vertexValues(), bisectorMinArea, bisectorVariance);
+
+        // Set gap callback to create alleys between blocks
+        bisector.getGap = [](const std::vector<geom::Point>&) {
+            return 1.2;  // Alley width
+        };
+
+        // Partition into blocks
+        blockShapes = bisector.partition();
+
+        // Store cuts as alleys
+        alleyPaths = bisector.cuts;
+    } else {
+        // Small area - single block
+        blockShapes.push_back(available.vertexValues());
+    }
 
     // Create Block objects from shapes
     blocks.clear();
     for (const auto& shape : blockShapes) {
-        auto block = std::make_unique<Block>(shape, this);
+        if (shape.size() < 3) continue;
+
+        double blockArea = std::abs(geom::GeomUtils::polygonArea(shape));
+
+        // Determine if this is a small block
+        // Faithful to mfcg.js: blocks smaller than threshold are "small"
+        double smallThreshold = alleys.minSq *
+            std::pow(2.0, alleys.sizeChaos * (2.0 * utils::Random::floatVal() - 1.0));
+        bool isSmall = blockArea < smallThreshold;
+
+        geom::Polygon blockPoly(shape);
+        auto block = std::make_unique<Block>(blockPoly, this);
         block->createLots();
         block->createRects();
         block->createBuildings();
-        blocks.push_back(std::move(block));
+
+        if (!block->buildings.empty()) {
+            blocks.push_back(std::move(block));
+        }
     }
 }
 

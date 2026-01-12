@@ -442,6 +442,28 @@ std::vector<Point> GeomUtils::reverse(const std::vector<Point>& poly) {
     return result;
 }
 
+bool GeomUtils::converge(const Point& a, const Point& b, const Point& c, const Point& d) {
+    // Faithful to mfcg.js GeomUtils.converge
+    // Checks if points c and d both lie on the line through a and b
+
+    double dx = b.x - a.x;
+    double dy = b.y - a.y;
+
+    // Calculate signed distance from point to line (ax + by + c = 0 form)
+    // Line through a,b: dy*x - dx*y + (dx*a.y - dy*a.x) = 0
+    double lineConst = dx * a.y - dy * a.x;
+
+    // Check if c is on the line
+    double distC = std::abs(dy * c.x - dx * c.y + lineConst);
+    if (distC > 1e-9) {
+        return false;
+    }
+
+    // Check if d is on the line
+    double distD = std::abs(dy * d.x - dx * d.y + lineConst);
+    return distD <= 1e-9;
+}
+
 std::vector<Point> GeomUtils::shrink(const std::vector<Point>& poly, const std::vector<double>& amounts) {
     // Faithful to mfcg.js gd.shrink
     // Shrinks each edge inward by the specified amount

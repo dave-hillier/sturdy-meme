@@ -20,6 +20,7 @@ set(UTILS_SOURCES
     src/utils/Random.cpp
     src/utils/MathUtils.cpp
     src/utils/Forester.cpp
+    src/utils/Bisector.cpp
 )
 
 set(BUILDING_SOURCES
