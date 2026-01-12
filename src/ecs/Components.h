@@ -991,3 +991,188 @@ struct PortalSurface {
     bool twoSided{false};
     float clipPlaneOffset{0.01f};          // Oblique near plane offset
 };
+
+// ============================================================================
+// Audio Components (Phase 8)
+// ============================================================================
+
+// Handle for audio clips/samples
+using AudioClipHandle = uint32_t;
+constexpr AudioClipHandle InvalidAudioClip = ~0u;
+
+// Handle for audio sources (backend-specific)
+using AudioSourceHandle = uint32_t;
+constexpr AudioSourceHandle InvalidAudioSource = ~0u;
+
+// Audio clip metadata (cached from audio backend)
+struct AudioClipInfo {
+    AudioClipHandle handle{InvalidAudioClip};
+    float duration{0.0f};                  // Duration in seconds
+    uint32_t sampleRate{44100};
+    uint8_t channels{2};
+    bool streaming{false};                 // Large files stream from disk
+};
+
+// 3D spatial audio source
+struct AudioSource {
+    AudioClipHandle clip{InvalidAudioClip};
+    AudioSourceHandle sourceHandle{InvalidAudioSource};  // Backend handle
+
+    // Playback state
+    bool playing{false};
+    bool looping{false};
+    bool paused{false};
+    float playbackPosition{0.0f};          // Current position in seconds
+
+    // Volume and pitch
+    float volume{1.0f};                    // 0.0 - 1.0
+    float pitch{1.0f};                     // 0.5 - 2.0 typical range
+    float pan{0.0f};                       // -1.0 (left) to 1.0 (right), 2D only
+
+    // 3D spatialization
+    bool spatialize{true};                 // Enable 3D positioning
+    float minDistance{1.0f};               // Distance at which volume starts to attenuate
+    float maxDistance{50.0f};              // Distance at which sound is inaudible
+
+    // Attenuation model
+    enum class Rolloff : uint8_t {
+        Linear,                            // Linear falloff
+        Logarithmic,                       // Realistic (inverse square law)
+        Custom                             // Use rolloffFactor
+    };
+    Rolloff rolloff{Rolloff::Logarithmic};
+    float rolloffFactor{1.0f};             // Multiplier for attenuation
+
+    // Doppler effect
+    bool dopplerEnabled{true};
+    float dopplerFactor{1.0f};             // Strength of doppler effect
+
+    // Cone attenuation (directional sounds)
+    float coneInnerAngle{360.0f};          // Full volume inside this angle (degrees)
+    float coneOuterAngle{360.0f};          // Attenuated beyond this angle
+    float coneOuterVolume{0.0f};           // Volume outside outer cone
+
+    // Priority for voice management
+    int priority{128};                     // 0 = highest, 255 = lowest
+
+    // Playback control flags
+    bool playOnAwake{false};               // Start playing when entity spawns
+    bool destroyOnComplete{false};         // Destroy entity when clip finishes
+};
+
+// Audio listener (receives spatial audio, typically attached to camera/player)
+// Only one listener should be active at a time
+struct AudioListener {
+    float volume{1.0f};                    // Master volume multiplier
+    bool active{true};                     // Is this the active listener
+
+    // Velocity for doppler calculations (set by physics/movement system)
+    glm::vec3 velocity{0.0f};
+};
+
+// Tag: entity is the active audio listener
+struct ActiveAudioListener {};
+
+// Audio mixer group for volume control
+struct AudioMixerGroup {
+    enum class Group : uint8_t {
+        Master,
+        Music,
+        SFX,
+        Voice,
+        Ambient,
+        UI,
+        Custom
+    };
+    Group group{Group::SFX};
+    float groupVolume{1.0f};               // Additional volume multiplier from group
+};
+
+// One-shot audio effect (plays once then removes itself)
+struct OneShotAudio {
+    AudioClipHandle clip{InvalidAudioClip};
+    float volume{1.0f};
+    float pitch{1.0f};
+    float delay{0.0f};                     // Delay before playing (seconds)
+    float elapsedDelay{0.0f};
+    bool started{false};
+};
+
+// Ambient sound zone (plays sounds when player enters)
+struct AmbientSoundZone {
+    AudioClipHandle clip{InvalidAudioClip};
+    glm::vec3 extents{10.0f};              // Half-extents of zone
+    float fadeDistance{5.0f};              // Distance to fade in/out
+    float volume{1.0f};
+    bool looping{true};
+    bool currentlyInside{false};           // Tracked by audio system
+    float currentVolume{0.0f};             // Faded volume
+};
+
+// Reverb zone for environmental audio effects
+struct ReverbZone {
+    glm::vec3 extents{10.0f};
+    float fadeDistance{5.0f};
+
+    // Reverb parameters (based on common audio APIs)
+    enum class Preset : uint8_t {
+        None,
+        Room,
+        Hallway,
+        Cave,
+        Arena,
+        Hangar,
+        Forest,
+        Underwater,
+        Custom
+    };
+    Preset preset{Preset::Room};
+
+    // Custom reverb parameters (used when preset = Custom)
+    float decayTime{1.0f};                 // Reverb decay time (seconds)
+    float earlyReflections{0.5f};          // Early reflection level
+    float lateReverb{0.5f};                // Late reverb level
+    float diffusion{1.0f};                 // Echo density
+    float density{1.0f};                   // Modal density
+    float hfDecayRatio{0.5f};              // High frequency decay ratio
+
+    float blendWeight{0.0f};               // Current blend (set by audio system)
+};
+
+// Audio occlusion for sounds blocked by geometry
+struct AudioOcclusion {
+    float occlusionFactor{0.0f};           // 0 = no occlusion, 1 = fully blocked
+    float lowPassFilter{1.0f};             // Low-pass filter cutoff (0-1)
+    bool autoCalculate{true};              // Calculate from raycasts
+    float updateInterval{0.1f};            // How often to recalculate (seconds)
+    float timeSinceUpdate{0.0f};
+};
+
+// Music track controller
+struct MusicTrack {
+    AudioClipHandle clip{InvalidAudioClip};
+    AudioClipHandle nextClip{InvalidAudioClip};  // For crossfading
+    float volume{1.0f};
+    float fadeInDuration{2.0f};
+    float fadeOutDuration{2.0f};
+    float crossfadeProgress{0.0f};         // 0 = current, 1 = next
+    bool playing{false};
+    bool looping{true};
+
+    enum class State : uint8_t {
+        Stopped,
+        FadingIn,
+        Playing,
+        FadingOut,
+        Crossfading
+    };
+    State state{State::Stopped};
+};
+
+// Tag: entity is an audio emitter (for queries)
+struct IsAudioSource {};
+
+// Tag: entity is in an ambient zone
+struct InAmbientZone {
+    entt::entity zone{entt::null};
+};
