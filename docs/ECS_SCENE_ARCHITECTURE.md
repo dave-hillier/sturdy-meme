@@ -628,17 +628,54 @@ public:
 };
 ```
 
-#### Affected Systems (by line count)
+#### Systems Managing Their Own Entity Lists (Anti-Pattern)
 
-| System | Lines | Simplification Opportunity |
-|--------|-------|---------------------------|
-| Renderer.cpp | 2285 | Extract subsystem coordination |
-| TerrainTileCache.cpp | 1655 | Share tile caching with grass/water |
-| OceanFFT.cpp | 1284 | FFT could be reusable component |
-| TreeLODSystem.cpp | 1257 | Use generic LODEvaluator |
-| GrassSystem.cpp | 1126 | Share billboard/culling |
-| TreeRenderer.cpp | 936 | Use BillboardRenderer for impostors |
-| TreeImpostorAtlas.cpp | 570 | Share atlas generation |
+These systems maintain `std::vector` of instances instead of using ECS:
+
+| System | Current | Should Be |
+|--------|---------|-----------|
+| `TreeSystem::treeInstances_` | `vector<TreeInstanceData>` | ECS entities with `TreeInstance` component |
+| `RockSystem::rockInstances` | `vector<RockInstance>` | ECS entities with `RockInstance` component |
+| `DetritusSystem::instances_` | `vector<DetritusInstance>` | ECS entities with `DetritusInstance` component |
+| `TreeLODSystem::visibleImpostors_` | `vector<ImpostorInstanceGPU>` | Query ECS + `TreeLODState` component |
+
+**Current anti-pattern:**
+```cpp
+// TreeSystem owns instance data separately from ECS
+class TreeSystem {
+    std::vector<TreeInstanceData> treeInstances_;  // NOT in ECS
+    void addTree(...) { treeInstances_.push_back(...); }
+};
+```
+
+**Refactored to use ECS:**
+```cpp
+// Trees ARE entities - no separate vector needed
+entt::entity createTree(entt::registry& reg, glm::vec3 pos, TreeArchetype type) {
+    auto e = reg.create();
+    reg.emplace<Transform>(e, pos);
+    reg.emplace<TreeInstance>(e, type);
+    reg.emplace<MeshVariant>(e, getMeshForArchetype(type));
+    reg.emplace<RenderFlags>(e);
+    return e;
+}
+
+// TreeRenderer queries ECS directly
+void TreeRenderer::render(entt::registry& reg, vk::CommandBuffer cmd) {
+    auto view = reg.view<Transform, TreeInstance, TreeLODState>();
+    for (auto [entity, transform, tree, lod] : view.each()) {
+        if (lod.level == LODLevel::FullDetail) {
+            drawTreeMesh(transform, tree);
+        }
+    }
+}
+```
+
+**Benefits:**
+- Single source of truth (ECS registry)
+- Trees selectable/editable via scene graph UI
+- Consistent with other entities (lights, physics objects)
+- Systems become stateless renderers
 
 ## Resource Management
 
