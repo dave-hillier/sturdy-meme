@@ -272,3 +272,45 @@ struct Health {
 struct NameTag {
     std::string name;
 };
+
+// ============================================================================
+// Scene Graph Hierarchy Components
+// ============================================================================
+
+// Hierarchy component - tracks parent/child relationships for scene graph
+struct Hierarchy {
+    entt::entity parent{entt::null};
+    std::vector<entt::entity> children;
+
+    // Local transform (relative to parent)
+    glm::vec3 localPosition{0.0f};
+    glm::vec3 localScale{1.0f};
+    float localYaw{0.0f};  // Local rotation around Y axis
+
+    bool isRoot() const { return parent == entt::null; }
+    bool hasChildren() const { return !children.empty(); }
+};
+
+// World transform cache - computed from hierarchy
+struct WorldTransform {
+    glm::mat4 matrix{1.0f};
+    glm::vec3 position{0.0f};
+    glm::vec3 scale{1.0f};
+    float yaw{0.0f};
+    bool dirty{true};  // Needs recalculation
+};
+
+// Entity metadata for scene graph display
+struct EntityInfo {
+    std::string name{"Entity"};
+    std::string icon{"?"};  // Single char icon for tree view
+    bool visible{true};
+    bool locked{false};  // Prevent selection/modification
+    uint32_t layer{0};   // Layer mask for filtering
+};
+
+// Tag for selected entities in the scene graph
+struct Selected {};
+
+// Tag for entities that should be expanded in tree view
+struct TreeExpanded {};
