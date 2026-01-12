@@ -1,5 +1,7 @@
 #pragma once
 
+#include <entt/fwd.hpp>
+
 // Forward declarations for all GUI control interfaces
 class ITimeSystem;
 class ILocationControl;
@@ -42,4 +44,5 @@ struct GuiInterfaces {
     IPlayerControl& player;
     EnvironmentSettings& environmentSettings;
     PhysicsTerrainTileManager* physicsTerrainTiles = nullptr;  // Optional, may be null
+    entt::registry* ecsRegistry = nullptr;  // Optional, for scene graph UI
 };

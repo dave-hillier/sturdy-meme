@@ -337,6 +337,12 @@ void GuiSystem::render(GuiInterfaces& ui, const Camera& camera, float deltaTime,
     if (windowStates.showTileLoader) {
         renderTileLoaderWindow(ui, camera);
     }
+    if (windowStates.showSceneGraph) {
+        renderSceneGraphWindow(ui);
+    }
+    if (windowStates.showInspector) {
+        renderInspectorWindow(ui);
+    }
 
     // Skeleton/IK debug overlay
     if (ikDebugSettings.showSkeleton || ikDebugSettings.showIKTargets) {
@@ -386,6 +392,12 @@ void GuiSystem::renderMainMenuBar() {
         if (ImGui::BeginMenu("Character")) {
             ImGui::MenuItem("Player", nullptr, &windowStates.showPlayer);
             ImGui::MenuItem("IK / Animation", nullptr, &windowStates.showIK);
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Scene")) {
+            ImGui::MenuItem("Scene Graph", nullptr, &windowStates.showSceneGraph);
+            ImGui::MenuItem("Inspector", nullptr, &windowStates.showInspector);
             ImGui::EndMenu();
         }
 
@@ -969,6 +981,36 @@ void GuiSystem::renderTileLoaderWindow(GuiInterfaces& ui, const Camera& camera) 
 
         // Reserve space for the grid
         ImGui::Dummy(ImVec2(GRID_SIZE * CELL_SIZE, GRID_SIZE * CELL_SIZE));
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderSceneGraphWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(20, 480), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(300, 400), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Scene Graph", &windowStates.showSceneGraph)) {
+        if (ui.ecsRegistry) {
+            sceneGraphTab_.render(*ui.ecsRegistry);
+        } else {
+            ImGui::TextDisabled("ECS Registry not available");
+            ImGui::TextDisabled("Connect registry via GuiInterfaces");
+        }
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderInspectorWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(340, 480), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(320, 400), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Inspector", &windowStates.showInspector)) {
+        if (ui.ecsRegistry) {
+            entt::entity selected = sceneGraphTab_.getSelectedEntity();
+            inspectorTab_.render(*ui.ecsRegistry, selected);
+        } else {
+            ImGui::TextDisabled("ECS Registry not available");
+        }
     }
     ImGui::End();
 }
