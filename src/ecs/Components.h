@@ -228,3 +228,87 @@ struct Selected {};
 
 // Tag for entities that should be expanded in tree view
 struct TreeExpanded {};
+
+// ============================================================================
+// Renderer Components (for future ECS-based rendering)
+// ============================================================================
+
+// Resource handles - typed indices into resource registries
+using MeshHandle = uint32_t;
+using MaterialHandle = uint32_t;
+using TextureHandle = uint32_t;
+using SkeletonHandle = uint32_t;
+
+constexpr MeshHandle InvalidMesh = ~0u;
+constexpr MaterialHandle InvalidMaterial = ~0u;
+constexpr TextureHandle InvalidTexture = ~0u;
+
+// Render layer flags for culling
+enum class RenderLayer : uint32_t {
+    Default     = 1 << 0,
+    Terrain     = 1 << 1,
+    Water       = 1 << 2,
+    Vegetation  = 1 << 3,
+    Character   = 1 << 4,
+    UI          = 1 << 5,
+    Debug       = 1 << 6,
+    All         = ~0u
+};
+
+// Mesh renderer - links entity to GPU mesh and material
+struct MeshRenderer {
+    MeshHandle mesh{InvalidMesh};
+    MaterialHandle material{InvalidMaterial};
+    uint32_t submeshIndex{0};
+    bool castsShadow{true};
+    bool receiveShadow{true};
+    RenderLayer layer{RenderLayer::Default};
+};
+
+// Skinned mesh for animated characters
+struct SkinnedMeshRenderer {
+    MeshHandle mesh{InvalidMesh};
+    MaterialHandle material{InvalidMaterial};
+    SkeletonHandle skeleton{~0u};
+    float animationTime{0.0f};
+};
+
+// Camera component for rendering viewpoints
+struct CameraComponent {
+    float fov{60.0f};
+    float nearPlane{0.1f};
+    float farPlane{1000.0f};
+    int priority{0};  // Higher priority cameras render first/on top
+    uint32_t cullingMask{static_cast<uint32_t>(RenderLayer::All)};
+};
+
+// Tag for the main camera used for rendering
+struct MainCamera {};
+
+// Bounding box for frustum culling
+struct AABBBounds {
+    glm::vec3 min{-0.5f};
+    glm::vec3 max{0.5f};
+
+    glm::vec3 center() const { return (min + max) * 0.5f; }
+    glm::vec3 extents() const { return (max - min) * 0.5f; }
+};
+
+// LOD (Level of Detail) group
+struct LODGroup {
+    std::vector<float> switchDistances;  // Distance to switch LODs
+    std::vector<MeshHandle> lodMeshes;   // One mesh per LOD level
+    int currentLOD{0};
+};
+
+// Billboard that always faces camera
+enum class BillboardMode { None, FaceCamera, FaceCameraY };
+struct Billboard {
+    BillboardMode mode{BillboardMode::FaceCamera};
+};
+
+// Static flag - entity transform won't change (enables optimizations)
+struct StaticObject {};
+
+// Culling result tag - entity was visible last frame
+struct WasVisible {};
