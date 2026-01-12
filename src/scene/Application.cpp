@@ -196,6 +196,9 @@ bool Application::init(const std::string& title, int width, int height) {
         return false;
     }
 
+    // Connect ECS registry to renderer for ECS-based lighting
+    renderer_->setECSRegistry(&world_.registry());
+
     camera.setAspectRatio(static_cast<float>(width) / static_cast<float>(height));
 
     // Position camera at a settlement (Town 1: market town with coastal/agricultural features)

@@ -208,6 +208,75 @@ public:
     }
 
     // ========================================================================
+    // Camera Entity Creation
+    // ========================================================================
+
+    // Create a camera entity
+    entt::entity createCamera(const glm::vec3& position,
+                               float yaw = 0.0f,
+                               float fov = 60.0f,
+                               bool isMain = false) {
+        auto entity = registry_.create();
+
+        registry_.emplace<Transform>(entity, Transform{position, yaw});
+        registry_.emplace<CameraComponent>(entity, CameraComponent{fov, 0.1f, 1000.0f, isMain ? 100 : 0});
+
+        if (isMain) {
+            // Remove MainCamera from any other entity first
+            auto view = registry_.view<MainCamera>();
+            for (auto other : view) {
+                registry_.remove<MainCamera>(other);
+            }
+            registry_.emplace<MainCamera>(entity);
+        }
+
+        return entity;
+    }
+
+    // Find the main camera entity
+    entt::entity findMainCamera() const {
+        auto view = registry_.view<MainCamera>();
+        return view.empty() ? entt::null : view.front();
+    }
+
+    // Set an entity as the main camera
+    void setMainCamera(entt::entity camera) {
+        if (!registry_.valid(camera)) return;
+
+        // Remove MainCamera from all entities first
+        auto view = registry_.view<MainCamera>();
+        for (auto other : view) {
+            registry_.remove<MainCamera>(other);
+        }
+
+        // Add to specified entity
+        if (!registry_.all_of<MainCamera>(camera)) {
+            registry_.emplace<MainCamera>(camera);
+        }
+    }
+
+    // ========================================================================
+    // Mesh Renderable Entity Creation
+    // ========================================================================
+
+    // Create a mesh renderable entity
+    entt::entity createMeshEntity(const std::string& name,
+                                   const glm::vec3& position,
+                                   MeshHandle mesh = InvalidMesh,
+                                   MaterialHandle material = InvalidMaterial) {
+        auto entity = registry_.create();
+
+        registry_.emplace<EntityInfo>(entity, EntityInfo{name, "M", true, false, 0});
+        registry_.emplace<Transform>(entity, Transform{position, 0.0f});
+        registry_.emplace<Hierarchy>(entity);
+        registry_.emplace<WorldTransform>(entity);
+        registry_.emplace<MeshRenderer>(entity, MeshRenderer{mesh, material});
+        registry_.emplace<AABBBounds>(entity);
+
+        return entity;
+    }
+
+    // ========================================================================
     // Extended Update
     // ========================================================================
 

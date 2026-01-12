@@ -48,6 +48,8 @@
 #include "RockSystem.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
+// ECS integration
+#include "../ecs/ECSRenderSystem.h"
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
 #include "DetritusSystem.h"
@@ -799,7 +801,22 @@ bool Renderer::createGraphicsPipeline() {
 void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
     LightBuffer buffer{};
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
-    systems_->scene().getLightManager().buildLightBuffer(buffer, camera.getPosition(), camera.getFront(), viewProj, lightCullRadius);
+
+    // Use ECS lights if registry is available, otherwise fall back to LightManager
+    if (ecsRegistry_) {
+        // Build light buffer from ECS entities, optionally merging with LightManager lights
+        LightBufferBuilder::buildLightBuffer(
+            *ecsRegistry_, buffer,
+            camera.getPosition(), camera.getFront(), viewProj,
+            lightCullRadius,
+            &systems_->scene().getLightManager()  // Merge with existing lights
+        );
+    } else {
+        // Traditional LightManager-only path
+        systems_->scene().getLightManager().buildLightBuffer(
+            buffer, camera.getPosition(), camera.getFront(), viewProj, lightCullRadius);
+    }
+
     systems_->globalBuffers().updateLightBuffer(currentImage, buffer);
 }
 

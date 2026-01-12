@@ -11,6 +11,7 @@
 #include <optional>
 #include <memory>
 #include <unordered_map>
+#include <entt/fwd.hpp>
 
 #include "Camera.h"
 #include "DescriptorManager.h"
@@ -178,6 +179,11 @@ public:
     // Player state for grass/snow interaction (used in render loop)
     void setPlayerPosition(const glm::vec3& position, float radius);
     void setPlayerState(const glm::vec3& position, const glm::vec3& velocity, float radius);
+
+    // ECS integration - set registry for ECS-based lighting
+    // When set, lights from ECS take precedence over LightManager
+    void setECSRegistry(entt::registry* registry) { ecsRegistry_ = registry; }
+    entt::registry* getECSRegistry() const { return ecsRegistry_; }
 
     // Physics debug (local state)
     void setPhysicsDebugEnabled(bool enabled) { physicsDebugEnabled = enabled; }
@@ -351,6 +357,9 @@ private:
 
     // Dynamic lights
     float lightCullRadius = 100.0f;        // Radius from camera for light culling
+
+    // ECS integration for lights
+    entt::registry* ecsRegistry_ = nullptr;  // Optional ECS registry for ECS-based lighting
 
     // GUI rendering callback
     GuiRenderCallback guiRenderCallback;
