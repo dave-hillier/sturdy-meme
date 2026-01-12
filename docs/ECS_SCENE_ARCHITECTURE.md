@@ -506,6 +506,140 @@ namespace Presets {
 4. Update factory functions to use composition
 5. Deprecate redundant fields in monolithic components
 
+### System-Level Simplifications
+
+Beyond ECS components, the render systems themselves have significant duplication:
+
+#### InitInfo Consolidation
+
+Almost every system has its own `InitInfo` struct with the same fields:
+
+```cpp
+// Current: Each system duplicates ~10 common fields
+struct TreeRenderer::InitInfo {
+    const vk::raii::Device* raiiDevice;
+    vk::Device device;
+    VmaAllocator allocator;
+    DescriptorManager::Pool* descriptorPool;
+    vk::RenderPass renderPass;
+    std::string shaderPath;
+    uint32_t framesInFlight;
+    // ... plus system-specific fields
+};
+```
+
+**Solution**: Already have `InitContext` - systems should use it plus system-specific extras:
+
+```cpp
+// Refactored: Use InitContext + system-specific
+struct TreeRenderer::InitInfo {
+    const InitContext& ctx;            // All common fields
+    vk::RenderPass shadowRenderPass;   // System-specific only
+    uint32_t shadowMapSize;
+};
+```
+
+**Impact**: ~20+ systems with duplicate InitInfo fields could be simplified.
+
+#### Billboard/Sprite Unification
+
+Multiple systems implement billboard rendering independently:
+
+| System | Billboard Use |
+|--------|---------------|
+| TreeImpostorAtlas | Octahedral impostor billboards |
+| LeafSystem | Falling leaf quads |
+| SpriteRenderer (ECS) | Generic billboards |
+| GrassSystem | Grass blade quads |
+| Particle systems | Point/quad particles |
+
+**Solution**: Extract shared `BillboardRenderer`:
+
+```cpp
+// Shared billboard infrastructure
+class BillboardRenderer {
+public:
+    struct Config {
+        BillboardMode mode;       // FaceCamera, FaceCameraY, Fixed
+        bool useAtlas;            // Atlas vs single texture
+        bool castsShadow;
+    };
+
+    // Used by all billboard systems
+    void renderBillboards(cmd, instances, texture, config);
+    void renderShadows(cmd, instances, cascadeIndex);
+};
+
+// Systems compose with BillboardRenderer
+class TreeImpostorSystem {
+    BillboardRenderer billboardRenderer;  // Composition
+    OctahedralAtlas atlas;               // System-specific
+};
+```
+
+#### Culling Pattern Extraction
+
+Similar GPU culling code exists in:
+- `TreeLeafCulling` - Per-leaf frustum/occlusion culling
+- `TreeBranchCulling` - Per-branch shadow culling
+- `ImpostorCullSystem` - Per-impostor culling
+- `WaterTileCull` - Water tile visibility
+- `GrassTileManager` - Grass tile culling
+
+**Solution**: Extract `GPUCullPass`:
+
+```cpp
+// Reusable GPU culling infrastructure
+class GPUCullPass {
+public:
+    struct CullConfig {
+        bool useFrustumCulling;
+        bool useOcclusionCulling;
+        bool useDistanceCulling;
+        float maxDistance;
+    };
+
+    // Generic culling compute pass
+    void dispatch(cmd, inputBuffer, outputBuffer, count, frustumPlanes, config);
+    uint32_t getVisibleCount() const;
+};
+```
+
+#### LOD System Generalization
+
+LOD logic duplicated across:
+- `TreeLODSystem` - Tree mesh/impostor switching
+- `TerrainSystem` - Terrain tile LOD
+- `GrassSystem` - Grass density LOD
+
+**Solution**: Generic `LODEvaluator`:
+
+```cpp
+struct LODConfig {
+    std::vector<float> distances;  // Or screen-space error thresholds
+    float hysteresis;
+    bool useScreenSpaceError;
+};
+
+class LODEvaluator {
+public:
+    int evaluate(float distance, float screenSize, LODConfig& config);
+    float getBlendFactor() const;  // For smooth transitions
+};
+```
+
+#### Affected Systems (by line count)
+
+| System | Lines | Simplification Opportunity |
+|--------|-------|---------------------------|
+| Renderer.cpp | 2285 | Extract subsystem coordination |
+| TerrainTileCache.cpp | 1655 | Share tile caching with grass/water |
+| OceanFFT.cpp | 1284 | FFT could be reusable component |
+| TreeLODSystem.cpp | 1257 | Use generic LODEvaluator |
+| GrassSystem.cpp | 1126 | Share billboard/culling |
+| TreeRenderer.cpp | 936 | Use BillboardRenderer for impostors |
+| TreeImpostorAtlas.cpp | 570 | Share atlas generation |
+
 ## Resource Management
 
 ### Handle System
