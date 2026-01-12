@@ -47,6 +47,7 @@
     "miniz",
     "libarchive",
     "entt",
-    "doctest"
+    "doctest",
+    "openal-soft"
   ]
 }
