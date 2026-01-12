@@ -288,16 +288,18 @@ void LightSystem::gatherLights(entt::registry& registry, LightBuffer& buffer) {
 - [x] Particle emitters as entities (ParticleEmitter, ParticleParams)
 
 ### Phase 5: Environment
-- [ ] Terrain as ECS (TerrainPatch entities)
-- [ ] Grass volumes as entities
-- [ ] Water bodies as entities
-- [ ] Tree instances as entities (or instanced rendering)
+- [x] Terrain as ECS (TerrainPatch, TerrainConfig components)
+- [x] Grass volumes as entities (GrassVolume, GrassTile components)
+- [x] Water bodies as entities (WaterSurface, RiverSpline, LakeBody components)
+- [x] Tree instances as entities (TreeInstance, TreeLODState, VegetationZone)
+- [x] Wind/Weather zones (WindZone, WeatherZone, FogVolume)
+- [x] EnvironmentIntegration.h with factory functions and utilities
 
 ### Phase 6: Advanced
-- [ ] LOD groups
+- [x] LOD groups (LODGroup component, TreeLODState for trees)
 - [ ] Occlusion culling
-- [ ] Render layers/masks
-- [ ] Multi-camera support
+- [x] Render layers/masks (RenderLayer enum, cullingMask in CameraComponent)
+- [x] Multi-camera support (CameraComponent with priority)
 
 ## Resource Management
 

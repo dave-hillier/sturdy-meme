@@ -458,3 +458,212 @@ struct PhysicsMaterial {
     float restitution{0.3f};  // Bounciness
     float density{1.0f};
 };
+
+// ============================================================================
+// Environment Components (Phase 5)
+// ============================================================================
+
+// Terrain patch/tile component - represents a terrain tile in the LOD system
+struct TerrainPatch {
+    int32_t tileX{0};
+    int32_t tileZ{0};
+    uint32_t lod{0};                      // Level of detail (0 = highest)
+    float worldSize{64.0f};               // Tile size in world units
+    float heightScale{1.0f};
+    bool hasHoles{false};                 // Cave/well holes
+    bool visible{true};
+    int32_t arrayLayerIndex{-1};          // GPU tile array index
+};
+
+// Terrain configuration entity component (singleton-like)
+struct TerrainConfig {
+    float totalSize{16384.0f};            // World terrain size
+    uint32_t maxDepth{20};                // Max LOD depth
+    uint32_t minDepth{6};
+    float heightScale{500.0f};            // Height multiplier
+    bool useMeshlets{true};
+    bool causticsEnabled{true};
+};
+
+// Grass volume/region component
+struct GrassVolume {
+    glm::vec3 center{0.0f};
+    glm::vec3 extents{32.0f};             // Half-extents of grass region
+    float density{1.0f};                  // Density multiplier
+    float heightMin{0.03f};
+    float heightMax{0.15f};
+    float spacing{0.35f};
+    uint32_t lod{0};                      // LOD level (affects tile size)
+    bool windEnabled{true};
+    bool snowMaskEnabled{true};
+};
+
+// Individual grass tile component (for tiled grass system)
+struct GrassTile {
+    int32_t tileX{0};
+    int32_t tileZ{0};
+    uint32_t lod{0};                      // 0=64m, 1=128m, 2=256m
+    uint32_t instanceCount{0};
+    bool active{true};
+    float fadeProgress{1.0f};             // For fade-in/out
+};
+
+// Water type enumeration
+enum class WaterType : uint8_t {
+    Ocean,
+    CoastalOcean,
+    River,
+    MuddyRiver,
+    ClearStream,
+    Lake,
+    Swamp,
+    Tropical,
+    Custom
+};
+
+// Water surface/body component
+struct WaterSurface {
+    WaterType type{WaterType::Lake};
+    float height{0.0f};                   // Water level Y position
+    float depth{10.0f};                   // Average depth
+    glm::vec4 color{0.02f, 0.08f, 0.15f, 0.8f};  // RGBA
+
+    // Wave parameters
+    float waveAmplitude{0.5f};
+    float waveLength{20.0f};
+    float waveSteepness{0.5f};
+    float waveSpeed{1.0f};
+
+    // Material properties
+    float specularRoughness{0.1f};
+    float absorptionScale{1.0f};
+    float scatteringScale{1.0f};
+    float fresnelPower{5.0f};
+
+    // Features
+    bool hasFFT{false};                   // FFT ocean simulation
+    bool hasCaustics{true};
+    bool hasFoam{true};
+    bool hasFlowMap{false};
+    float flowStrength{0.5f};
+    float flowSpeed{1.0f};
+
+    // Tidal (for oceans)
+    bool tidalEnabled{false};
+    float tidalRange{2.0f};
+};
+
+// River spline component (for flowing water)
+struct RiverSpline {
+    std::vector<glm::vec3> controlPoints;  // Spline path
+    std::vector<float> widths;             // Width at each control point
+    float flowSpeed{2.0f};
+    float depth{2.0f};
+    WaterType type{WaterType::River};
+};
+
+// Lake component (enclosed body of water)
+struct LakeBody {
+    glm::vec3 center{0.0f};
+    float radius{50.0f};
+    float depth{10.0f};
+    std::vector<glm::vec3> shoreline;      // Optional irregular shoreline
+    WaterType type{WaterType::Lake};
+};
+
+// Tree archetype enumeration
+enum class TreeArchetype : uint8_t {
+    Oak,
+    Pine,
+    Ash,
+    Aspen,
+    Birch,
+    Custom
+};
+
+// Tree instance component (for individual trees)
+struct TreeInstance {
+    TreeArchetype archetype{TreeArchetype::Oak};
+    float scale{1.0f};
+    float rotation{0.0f};                  // Y-axis rotation
+    uint32_t meshIndex{0};                 // Which mesh variant
+    uint32_t impostorIndex{0};             // Impostor atlas index
+    bool hasCollision{true};
+    bool castsShadow{true};
+};
+
+// Tree LOD state component
+struct TreeLODState {
+    enum class Level : uint8_t {
+        FullDetail,
+        Impostor,
+        Blending
+    };
+    Level level{Level::FullDetail};
+    float blendFactor{0.0f};               // 0=full detail, 1=impostor
+    float distanceToCamera{0.0f};
+};
+
+// Vegetation zone component (region with multiple vegetation types)
+struct VegetationZone {
+    glm::vec3 center{0.0f};
+    glm::vec3 extents{100.0f};
+    float treeDensity{0.1f};               // Trees per unit area
+    float bushDensity{0.2f};
+    float grassDensity{1.0f};
+    std::vector<TreeArchetype> allowedTrees;
+    bool autoPopulate{false};              // Generate vegetation on spawn
+};
+
+// Rock instance component
+struct RockInstance {
+    uint32_t meshVariant{0};
+    float scale{1.0f};
+    glm::vec3 rotation{0.0f};              // Euler angles
+    bool hasCollision{true};
+    bool castsShadow{true};
+};
+
+// Detritus (fallen branches, debris) component
+struct DetritusInstance {
+    uint32_t meshVariant{0};
+    float scale{1.0f};
+    glm::vec3 rotation{0.0f};
+    entt::entity sourceTree{entt::null};   // Which tree it came from
+};
+
+// Wind zone component (local wind effects)
+struct WindZone {
+    glm::vec3 direction{1.0f, 0.0f, 0.0f};
+    float strength{1.0f};
+    float turbulence{0.3f};
+    float gustFrequency{0.5f};
+    float gustStrength{2.0f};
+    glm::vec3 extents{50.0f};              // Half-extents of zone
+    bool isGlobal{false};                  // Affects entire scene
+};
+
+// Weather zone component (local weather effects)
+struct WeatherZone {
+    enum class Type : uint8_t {
+        Clear,
+        Cloudy,
+        Rain,
+        Snow,
+        Fog,
+        Storm
+    };
+    Type type{Type::Clear};
+    float intensity{1.0f};
+    float transitionRadius{20.0f};         // Blend distance at edges
+    glm::vec3 extents{100.0f};
+};
+
+// Fog volume component
+struct FogVolume {
+    glm::vec3 extents{50.0f};
+    float density{0.05f};
+    glm::vec3 color{0.5f, 0.6f, 0.7f};
+    float heightFalloff{0.01f};            // Fog density falloff with height
+    bool isGlobal{false};
+};

@@ -52,6 +52,14 @@ public:
         renderLookAtIKComponent(registry, selectedEntity);
         renderParticleEmitterComponent(registry, selectedEntity);
         renderPhysicsMaterialComponent(registry, selectedEntity);
+        renderTerrainPatchComponent(registry, selectedEntity);
+        renderGrassVolumeComponent(registry, selectedEntity);
+        renderWaterSurfaceComponent(registry, selectedEntity);
+        renderTreeInstanceComponent(registry, selectedEntity);
+        renderVegetationZoneComponent(registry, selectedEntity);
+        renderWindZoneComponent(registry, selectedEntity);
+        renderWeatherZoneComponent(registry, selectedEntity);
+        renderFogVolumeComponent(registry, selectedEntity);
         renderTagComponents(registry, selectedEntity);
 
         ImGui::Separator();
@@ -717,6 +725,226 @@ private:
         }
     }
 
+    // ========================================================================
+    // Environment Component Editors (Phase 5)
+    // ========================================================================
+
+    void renderTerrainPatchComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<TerrainPatch>(entity)) return;
+
+        if (renderComponentHeader("Terrain Patch")) {
+            auto& patch = registry.get<TerrainPatch>(entity);
+
+            ImGui::InputInt("Tile X", &patch.tileX);
+            ImGui::InputInt("Tile Z", &patch.tileZ);
+
+            int lod = static_cast<int>(patch.lod);
+            if (ImGui::InputInt("LOD", &lod)) {
+                patch.lod = static_cast<uint32_t>(std::max(0, lod));
+            }
+
+            ImGui::DragFloat("World Size", &patch.worldSize, 1.0f, 1.0f, 1024.0f, "%.0f m");
+            ImGui::DragFloat("Height Scale", &patch.heightScale, 1.0f, 0.1f, 1000.0f);
+            ImGui::Checkbox("Has Holes", &patch.hasHoles);
+            ImGui::Checkbox("Visible", &patch.visible);
+            ImGui::TextDisabled("Array Layer: %d", patch.arrayLayerIndex);
+        }
+    }
+
+    void renderGrassVolumeComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<GrassVolume>(entity)) return;
+
+        if (renderComponentHeader("Grass Volume")) {
+            auto& grass = registry.get<GrassVolume>(entity);
+
+            editVec3("Center", grass.center);
+            editVec3("Extents", grass.extents);
+            ImGui::DragFloat("Density", &grass.density, 0.1f, 0.0f, 10.0f);
+            ImGui::DragFloat("Height Min", &grass.heightMin, 0.01f, 0.01f, 1.0f, "%.2f m");
+            ImGui::DragFloat("Height Max", &grass.heightMax, 0.01f, 0.01f, 2.0f, "%.2f m");
+            ImGui::DragFloat("Spacing", &grass.spacing, 0.01f, 0.1f, 2.0f, "%.2f m");
+
+            int lod = static_cast<int>(grass.lod);
+            if (ImGui::InputInt("LOD", &lod)) {
+                grass.lod = static_cast<uint32_t>(std::clamp(lod, 0, 2));
+            }
+
+            ImGui::Checkbox("Wind Enabled", &grass.windEnabled);
+            ImGui::Checkbox("Snow Mask Enabled", &grass.snowMaskEnabled);
+        }
+    }
+
+    void renderWaterSurfaceComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<WaterSurface>(entity)) return;
+
+        if (renderComponentHeader("Water Surface")) {
+            auto& water = registry.get<WaterSurface>(entity);
+
+            const char* typeNames[] = {"Ocean", "Coastal Ocean", "River", "Muddy River",
+                                       "Clear Stream", "Lake", "Swamp", "Tropical", "Custom"};
+            int type = static_cast<int>(water.type);
+            if (ImGui::Combo("Type", &type, typeNames, IM_ARRAYSIZE(typeNames))) {
+                water.type = static_cast<WaterType>(type);
+            }
+
+            ImGui::DragFloat("Height", &water.height, 0.1f, -100.0f, 1000.0f, "%.1f m");
+            ImGui::DragFloat("Depth", &water.depth, 0.5f, 0.1f, 500.0f, "%.1f m");
+
+            float color[4] = {water.color.r, water.color.g, water.color.b, water.color.a};
+            if (ImGui::ColorEdit4("Color", color)) {
+                water.color = glm::vec4(color[0], color[1], color[2], color[3]);
+            }
+
+            if (ImGui::TreeNode("Wave Parameters")) {
+                ImGui::DragFloat("Amplitude", &water.waveAmplitude, 0.1f, 0.0f, 10.0f);
+                ImGui::DragFloat("Wavelength", &water.waveLength, 1.0f, 1.0f, 200.0f);
+                ImGui::DragFloat("Steepness", &water.waveSteepness, 0.01f, 0.0f, 1.0f);
+                ImGui::DragFloat("Speed", &water.waveSpeed, 0.1f, 0.0f, 10.0f);
+                ImGui::TreePop();
+            }
+
+            if (ImGui::TreeNode("Material")) {
+                ImGui::DragFloat("Specular Roughness", &water.specularRoughness, 0.01f, 0.0f, 1.0f);
+                ImGui::DragFloat("Absorption", &water.absorptionScale, 0.1f, 0.0f, 10.0f);
+                ImGui::DragFloat("Scattering", &water.scatteringScale, 0.1f, 0.0f, 10.0f);
+                ImGui::DragFloat("Fresnel Power", &water.fresnelPower, 0.1f, 0.1f, 20.0f);
+                ImGui::TreePop();
+            }
+
+            if (ImGui::TreeNode("Features")) {
+                ImGui::Checkbox("FFT Ocean", &water.hasFFT);
+                ImGui::Checkbox("Caustics", &water.hasCaustics);
+                ImGui::Checkbox("Foam", &water.hasFoam);
+                ImGui::Checkbox("Flow Map", &water.hasFlowMap);
+                if (water.hasFlowMap) {
+                    ImGui::DragFloat("Flow Strength", &water.flowStrength, 0.1f, 0.0f, 5.0f);
+                    ImGui::DragFloat("Flow Speed", &water.flowSpeed, 0.1f, 0.0f, 5.0f);
+                }
+                ImGui::Checkbox("Tidal", &water.tidalEnabled);
+                if (water.tidalEnabled) {
+                    ImGui::DragFloat("Tidal Range", &water.tidalRange, 0.1f, 0.0f, 10.0f, "%.1f m");
+                }
+                ImGui::TreePop();
+            }
+        }
+    }
+
+    void renderTreeInstanceComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<TreeInstance>(entity)) return;
+
+        if (renderComponentHeader("Tree Instance")) {
+            auto& tree = registry.get<TreeInstance>(entity);
+
+            const char* archetypes[] = {"Oak", "Pine", "Ash", "Aspen", "Birch", "Custom"};
+            int arch = static_cast<int>(tree.archetype);
+            if (ImGui::Combo("Archetype", &arch, archetypes, IM_ARRAYSIZE(archetypes))) {
+                tree.archetype = static_cast<TreeArchetype>(arch);
+            }
+
+            ImGui::DragFloat("Scale", &tree.scale, 0.1f, 0.1f, 10.0f);
+            ImGui::DragFloat("Rotation", &tree.rotation, 1.0f, 0.0f, 360.0f, "%.0f deg");
+
+            int mesh = static_cast<int>(tree.meshIndex);
+            if (ImGui::InputInt("Mesh Index", &mesh)) {
+                tree.meshIndex = static_cast<uint32_t>(std::max(0, mesh));
+            }
+
+            int imp = static_cast<int>(tree.impostorIndex);
+            if (ImGui::InputInt("Impostor Index", &imp)) {
+                tree.impostorIndex = static_cast<uint32_t>(std::max(0, imp));
+            }
+
+            ImGui::Checkbox("Has Collision", &tree.hasCollision);
+            ImGui::Checkbox("Casts Shadow", &tree.castsShadow);
+
+            // Show LOD state if present
+            if (registry.all_of<TreeLODState>(entity)) {
+                auto& lod = registry.get<TreeLODState>(entity);
+                ImGui::Separator();
+                const char* lodLevels[] = {"Full Detail", "Impostor", "Blending"};
+                ImGui::TextDisabled("LOD: %s", lodLevels[static_cast<int>(lod.level)]);
+                ImGui::TextDisabled("Blend: %.2f", lod.blendFactor);
+                ImGui::TextDisabled("Distance: %.1f m", lod.distanceToCamera);
+            }
+        }
+    }
+
+    void renderVegetationZoneComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<VegetationZone>(entity)) return;
+
+        if (renderComponentHeader("Vegetation Zone")) {
+            auto& zone = registry.get<VegetationZone>(entity);
+
+            editVec3("Center", zone.center);
+            editVec3("Extents", zone.extents);
+            ImGui::DragFloat("Tree Density", &zone.treeDensity, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Bush Density", &zone.bushDensity, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Grass Density", &zone.grassDensity, 0.1f, 0.0f, 5.0f);
+            ImGui::Checkbox("Auto Populate", &zone.autoPopulate);
+
+            if (ImGui::TreeNode("Allowed Trees")) {
+                ImGui::Text("%zu archetypes", zone.allowedTrees.size());
+                ImGui::TreePop();
+            }
+        }
+    }
+
+    void renderWindZoneComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<WindZone>(entity)) return;
+
+        if (renderComponentHeader("Wind Zone")) {
+            auto& wind = registry.get<WindZone>(entity);
+
+            editVec3("Direction", wind.direction, 0.01f);
+            // Normalize direction
+            if (glm::length(wind.direction) > 0.001f) {
+                wind.direction = glm::normalize(wind.direction);
+            }
+
+            ImGui::DragFloat("Strength", &wind.strength, 0.1f, 0.0f, 20.0f);
+            ImGui::DragFloat("Turbulence", &wind.turbulence, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Gust Frequency", &wind.gustFrequency, 0.1f, 0.0f, 5.0f, "%.1f Hz");
+            ImGui::DragFloat("Gust Strength", &wind.gustStrength, 0.1f, 0.0f, 10.0f);
+
+            if (!wind.isGlobal) {
+                editVec3("Extents", wind.extents);
+            }
+            ImGui::Checkbox("Global", &wind.isGlobal);
+        }
+    }
+
+    void renderWeatherZoneComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<WeatherZone>(entity)) return;
+
+        if (renderComponentHeader("Weather Zone")) {
+            auto& weather = registry.get<WeatherZone>(entity);
+
+            const char* types[] = {"Clear", "Cloudy", "Rain", "Snow", "Fog", "Storm"};
+            int type = static_cast<int>(weather.type);
+            if (ImGui::Combo("Type", &type, types, IM_ARRAYSIZE(types))) {
+                weather.type = static_cast<WeatherZone::Type>(type);
+            }
+
+            ImGui::DragFloat("Intensity", &weather.intensity, 0.1f, 0.0f, 2.0f);
+            ImGui::DragFloat("Transition Radius", &weather.transitionRadius, 1.0f, 0.0f, 100.0f, "%.0f m");
+            editVec3("Extents", weather.extents);
+        }
+    }
+
+    void renderFogVolumeComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<FogVolume>(entity)) return;
+
+        if (renderComponentHeader("Fog Volume")) {
+            auto& fog = registry.get<FogVolume>(entity);
+
+            editVec3("Extents", fog.extents);
+            ImGui::DragFloat("Density", &fog.density, 0.001f, 0.0f, 1.0f, "%.3f");
+            editColor3("Color", fog.color);
+            ImGui::DragFloat("Height Falloff", &fog.heightFalloff, 0.001f, 0.0f, 0.1f, "%.4f");
+            ImGui::Checkbox("Global", &fog.isGlobal);
+        }
+    }
+
     void renderTagComponents(entt::registry& registry, entt::entity entity) {
         // Collect all tag components
         std::vector<std::string> tags;
@@ -891,6 +1119,53 @@ private:
             if (!registry.all_of<ParticleEmitter>(entity)) {
                 if (ImGui::MenuItem("Particle Emitter")) {
                     registry.emplace<ParticleEmitter>(entity);
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Environment");
+
+            if (!registry.all_of<TerrainPatch>(entity)) {
+                if (ImGui::MenuItem("Terrain Patch")) {
+                    registry.emplace<TerrainPatch>(entity);
+                }
+            }
+            if (!registry.all_of<GrassVolume>(entity)) {
+                if (ImGui::MenuItem("Grass Volume")) {
+                    registry.emplace<GrassVolume>(entity);
+                }
+            }
+            if (!registry.all_of<WaterSurface>(entity)) {
+                if (ImGui::MenuItem("Water Surface")) {
+                    registry.emplace<WaterSurface>(entity);
+                }
+            }
+            if (!registry.all_of<TreeInstance>(entity)) {
+                if (ImGui::MenuItem("Tree Instance")) {
+                    registry.emplace<TreeInstance>(entity);
+                    registry.emplace_or_replace<TreeLODState>(entity);
+                }
+            }
+            if (!registry.all_of<VegetationZone>(entity)) {
+                if (ImGui::MenuItem("Vegetation Zone")) {
+                    VegetationZone zone;
+                    zone.allowedTrees = {TreeArchetype::Oak, TreeArchetype::Pine};
+                    registry.emplace<VegetationZone>(entity, std::move(zone));
+                }
+            }
+            if (!registry.all_of<WindZone>(entity)) {
+                if (ImGui::MenuItem("Wind Zone")) {
+                    registry.emplace<WindZone>(entity);
+                }
+            }
+            if (!registry.all_of<WeatherZone>(entity)) {
+                if (ImGui::MenuItem("Weather Zone")) {
+                    registry.emplace<WeatherZone>(entity);
+                }
+            }
+            if (!registry.all_of<FogVolume>(entity)) {
+                if (ImGui::MenuItem("Fog Volume")) {
+                    registry.emplace<FogVolume>(entity);
                 }
             }
 
