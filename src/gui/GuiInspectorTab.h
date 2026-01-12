@@ -93,6 +93,22 @@ public:
         renderDamageZoneComponent(registry, selectedEntity);
         renderDialogueTriggerComponent(registry, selectedEntity);
         renderQuestMarkerComponent(registry, selectedEntity);
+        renderTimerComponent(registry, selectedEntity);
+        renderCooldownComponent(registry, selectedEntity);
+        renderStatusEffectsComponent(registry, selectedEntity);
+        renderTeamComponent(registry, selectedEntity);
+        renderTargetComponent(registry, selectedEntity);
+        renderFollowTargetComponent(registry, selectedEntity);
+        renderOrbitTargetComponent(registry, selectedEntity);
+        renderLifetimeComponent(registry, selectedEntity);
+        renderDelayedActionComponent(registry, selectedEntity);
+        renderDamageDealerComponent(registry, selectedEntity);
+        renderDamageReceiverComponent(registry, selectedEntity);
+        renderHitReactionComponent(registry, selectedEntity);
+        renderProjectileComponent(registry, selectedEntity);
+        renderStateMachineComponent(registry, selectedEntity);
+        renderThreatTableComponent(registry, selectedEntity);
+        renderLootTableComponent(registry, selectedEntity);
         renderTagComponents(registry, selectedEntity);
 
         ImGui::Separator();
@@ -2097,6 +2113,549 @@ private:
         }
     }
 
+    // ========================================================================
+    // Composable Utility Component Editors (Phase 10)
+    // ========================================================================
+
+    void renderTimerComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<Timer>(entity)) return;
+
+        if (renderComponentHeader("Timer")) {
+            auto& timer = registry.get<Timer>(entity);
+
+            ImGui::DragFloat("Duration", &timer.duration, 0.1f, 0.1f, 300.0f, "%.1f s");
+
+            // Progress bar
+            float progress = timer.progress();
+            ImGui::ProgressBar(progress, ImVec2(-1, 0),
+                              (std::to_string(static_cast<int>(timer.elapsed)) + "/" +
+                               std::to_string(static_cast<int>(timer.duration)) + "s").c_str());
+
+            ImGui::Checkbox("Paused", &timer.paused);
+            ImGui::Checkbox("Looping", &timer.looping);
+            ImGui::Checkbox("Auto Remove", &timer.autoRemove);
+
+            char tagBuffer[64];
+            strcpy(tagBuffer, timer.tag.c_str());
+            if (ImGui::InputText("Tag", tagBuffer, sizeof(tagBuffer))) {
+                timer.tag = tagBuffer;
+            }
+
+            if (timer.finished) {
+                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "FINISHED");
+            }
+
+            if (ImGui::Button("Reset")) {
+                timer.elapsed = 0.0f;
+                timer.finished = false;
+            }
+        }
+    }
+
+    void renderCooldownComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<Cooldown>(entity)) return;
+
+        if (renderComponentHeader("Cooldown")) {
+            auto& cd = registry.get<Cooldown>(entity);
+
+            ImGui::DragFloat("Base Duration", &cd.baseDuration, 0.1f, 0.1f, 60.0f, "%.1f s");
+            ImGui::DragFloat("Reduction", &cd.reductionMultiplier, 0.01f, 0.0f, 2.0f, "%.2fx");
+
+            int charges = cd.charges;
+            if (ImGui::InputInt("Charges", &charges)) {
+                cd.charges = std::clamp(charges, 0, cd.maxCharges);
+            }
+            int maxCharges = cd.maxCharges;
+            if (ImGui::InputInt("Max Charges", &maxCharges)) {
+                cd.maxCharges = std::max(1, maxCharges);
+            }
+
+            ImGui::DragFloat("Charge Regen", &cd.chargeRegenRate, 0.1f, 0.0f, 10.0f, "%.1f/s");
+
+            // Status
+            ImGui::Separator();
+            if (cd.ready) {
+                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "READY");
+            } else {
+                float progress = 1.0f - (cd.currentCooldown / cd.effectiveDuration());
+                ImGui::ProgressBar(progress, ImVec2(-1, 0),
+                                  (std::to_string(static_cast<int>(cd.currentCooldown)) + "s remaining").c_str());
+            }
+        }
+    }
+
+    void renderStatusEffectsComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<StatusEffects>(entity)) return;
+
+        if (renderComponentHeader("Status Effects")) {
+            auto& effects = registry.get<StatusEffects>(entity);
+
+            ImGui::Text("Active Effects: %zu", effects.effects.size());
+
+            for (size_t i = 0; i < effects.effects.size(); i++) {
+                auto& effect = effects.effects[i];
+                ImGui::PushID(static_cast<int>(i));
+
+                const char* typeNames[] = {"Buff", "Debuff", "Neutral"};
+                ImVec4 typeColor = effect.type == StatusEffect::Type::Buff ?
+                    ImVec4(0.0f, 1.0f, 0.0f, 1.0f) :
+                    (effect.type == StatusEffect::Type::Debuff ?
+                        ImVec4(1.0f, 0.0f, 0.0f, 1.0f) : ImVec4(1.0f, 1.0f, 0.0f, 1.0f));
+
+                if (ImGui::TreeNode(effect.effectId.empty() ? "Effect" : effect.effectId.c_str())) {
+                    ImGui::TextColored(typeColor, "%s", typeNames[static_cast<int>(effect.type)]);
+
+                    if (effect.duration >= 0.0f) {
+                        float progress = 1.0f - (effect.elapsed / effect.duration);
+                        ImGui::ProgressBar(progress);
+                        ImGui::TextDisabled("%.1f / %.1f s", effect.elapsed, effect.duration);
+                    } else {
+                        ImGui::TextDisabled("Permanent");
+                    }
+
+                    ImGui::Text("Stacks: %d / %d", effect.stacks, effect.maxStacks);
+                    ImGui::Text("Magnitude: %.2f", effect.magnitude);
+
+                    if (ImGui::SmallButton("Remove")) {
+                        effects.effects.erase(effects.effects.begin() + i);
+                        i--;
+                    }
+                    ImGui::TreePop();
+                }
+                ImGui::PopID();
+            }
+        }
+    }
+
+    void renderTeamComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<Team>(entity)) return;
+
+        if (renderComponentHeader("Team")) {
+            auto& team = registry.get<Team>(entity);
+
+            int teamId = static_cast<int>(team.teamId);
+            if (ImGui::InputInt("Team ID", &teamId)) {
+                team.teamId = static_cast<uint32_t>(std::max(0, teamId));
+            }
+
+            if (ImGui::TreeNode("Masks")) {
+                int hostile = static_cast<int>(team.hostileMask);
+                if (ImGui::InputInt("Hostile Mask", &hostile)) {
+                    team.hostileMask = static_cast<uint32_t>(hostile);
+                }
+                int friendly = static_cast<int>(team.friendlyMask);
+                if (ImGui::InputInt("Friendly Mask", &friendly)) {
+                    team.friendlyMask = static_cast<uint32_t>(friendly);
+                }
+                int neutral = static_cast<int>(team.neutralMask);
+                if (ImGui::InputInt("Neutral Mask", &neutral)) {
+                    team.neutralMask = static_cast<uint32_t>(neutral);
+                }
+                ImGui::TreePop();
+            }
+        }
+    }
+
+    void renderTargetComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<Target>(entity)) return;
+
+        if (renderComponentHeader("Target")) {
+            auto& target = registry.get<Target>(entity);
+
+            ImGui::DragFloat("Max Range", &target.maxRange, 1.0f, 1.0f, 200.0f, "%.0f m");
+            ImGui::Checkbox("Auto Target", &target.autoTarget);
+            ImGui::Checkbox("Lock On", &target.lockOn);
+
+            const char* priorities[] = {"Nearest", "Lowest Health", "Highest Threat", "Last Attacker"};
+            int prio = static_cast<int>(target.priority);
+            if (ImGui::Combo("Priority", &prio, priorities, IM_ARRAYSIZE(priorities))) {
+                target.priority = static_cast<Target::Priority>(prio);
+            }
+
+            // Status
+            ImGui::Separator();
+            if (target.hasTarget() && registry.valid(target.current)) {
+                std::string name = "Unknown";
+                if (registry.all_of<EntityInfo>(target.current)) {
+                    name = registry.get<EntityInfo>(target.current).name;
+                }
+                ImGui::Text("Current: %s", name.c_str());
+                ImGui::TextDisabled("Time: %.1f s", target.timeSinceAcquired);
+            } else {
+                ImGui::TextDisabled("No Target");
+            }
+        }
+    }
+
+    void renderFollowTargetComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<FollowTarget>(entity)) return;
+
+        if (renderComponentHeader("Follow Target")) {
+            auto& follow = registry.get<FollowTarget>(entity);
+
+            // Target display
+            if (follow.target != entt::null && registry.valid(follow.target)) {
+                std::string name = "Unknown";
+                if (registry.all_of<EntityInfo>(follow.target)) {
+                    name = registry.get<EntityInfo>(follow.target).name;
+                }
+                ImGui::Text("Target: %s", name.c_str());
+            } else {
+                ImGui::TextDisabled("Target: None");
+            }
+
+            ImGui::Checkbox("Active", &follow.active);
+            ImGui::DragFloat("Follow Distance", &follow.followDistance, 0.1f, 0.1f, 20.0f, "%.1f m");
+            ImGui::DragFloat("Min Distance", &follow.minDistance, 0.1f, 0.1f, 20.0f, "%.1f m");
+            ImGui::DragFloat("Max Distance", &follow.maxDistance, 1.0f, 1.0f, 100.0f, "%.0f m");
+            ImGui::DragFloat("Speed", &follow.speed, 0.1f, 0.1f, 20.0f, "%.1f m/s");
+
+            ImGui::Checkbox("Maintain Offset", &follow.maintainOffset);
+            if (follow.maintainOffset) {
+                editVec3("Offset", follow.offset);
+            }
+
+            ImGui::DragFloat("Smooth Time", &follow.smoothTime, 0.01f, 0.01f, 1.0f, "%.2f s");
+        }
+    }
+
+    void renderOrbitTargetComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<OrbitTarget>(entity)) return;
+
+        if (renderComponentHeader("Orbit Target")) {
+            auto& orbit = registry.get<OrbitTarget>(entity);
+
+            // Target display
+            if (orbit.target != entt::null && registry.valid(orbit.target)) {
+                std::string name = "Unknown";
+                if (registry.all_of<EntityInfo>(orbit.target)) {
+                    name = registry.get<EntityInfo>(orbit.target).name;
+                }
+                ImGui::Text("Target: %s", name.c_str());
+            } else {
+                ImGui::TextDisabled("Target: None");
+            }
+
+            ImGui::DragFloat("Distance", &orbit.distance, 0.1f, 0.1f, 50.0f, "%.1f m");
+            ImGui::DragFloat("Speed", &orbit.speed, 1.0f, 0.0f, 360.0f, "%.0f deg/s");
+            ImGui::DragFloat("Height Offset", &orbit.heightOffset, 0.1f, -20.0f, 20.0f, "%.1f m");
+            ImGui::Checkbox("Clockwise", &orbit.clockwise);
+            ImGui::Checkbox("Face Target", &orbit.faceTarget);
+
+            ImGui::TextDisabled("Current Angle: %.1f deg", orbit.currentAngle);
+        }
+    }
+
+    void renderLifetimeComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<Lifetime>(entity)) return;
+
+        if (renderComponentHeader("Lifetime")) {
+            auto& lifetime = registry.get<Lifetime>(entity);
+
+            ImGui::DragFloat("Duration", &lifetime.duration, 0.1f, 0.1f, 300.0f, "%.1f s");
+            ImGui::Checkbox("Paused", &lifetime.paused);
+
+            // Progress
+            float progress = lifetime.progress();
+            ImGui::ProgressBar(progress);
+            ImGui::TextDisabled("%.1f / %.1f s (%.1f remaining)",
+                               lifetime.elapsed, lifetime.duration, lifetime.remaining());
+
+            ImGui::Checkbox("Fade Out", &lifetime.fadeOut);
+            if (lifetime.fadeOut) {
+                ImGui::DragFloat("Fade Time", &lifetime.fadeTime, 0.1f, 0.1f, 5.0f, "%.1f s");
+            }
+
+            if (lifetime.isExpired()) {
+                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "EXPIRED");
+            }
+        }
+    }
+
+    void renderDelayedActionComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<DelayedAction>(entity)) return;
+
+        if (renderComponentHeader("Delayed Action")) {
+            auto& action = registry.get<DelayedAction>(entity);
+
+            ImGui::DragFloat("Delay", &action.delay, 0.1f, 0.0f, 60.0f, "%.1f s");
+            ImGui::Checkbox("Auto Remove", &action.autoRemove);
+
+            char tagBuffer[64];
+            strcpy(tagBuffer, action.actionTag.c_str());
+            if (ImGui::InputText("Action Tag", tagBuffer, sizeof(tagBuffer))) {
+                action.actionTag = tagBuffer;
+            }
+
+            // Status
+            ImGui::Separator();
+            float progress = action.delay > 0.0f ? action.elapsed / action.delay : 1.0f;
+            ImGui::ProgressBar(progress, ImVec2(-1, 0),
+                              (std::to_string(static_cast<int>(action.elapsed)) + "/" +
+                               std::to_string(static_cast<int>(action.delay)) + "s").c_str());
+
+            if (action.triggered) {
+                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "TRIGGERED");
+            }
+        }
+    }
+
+    void renderDamageDealerComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<DamageDealer>(entity)) return;
+
+        if (renderComponentHeader("Damage Dealer")) {
+            auto& dealer = registry.get<DamageDealer>(entity);
+
+            ImGui::DragFloat("Base Damage", &dealer.baseDamage, 1.0f, 0.0f, 1000.0f, "%.0f");
+            ImGui::DragFloat("Multiplier", &dealer.damageMultiplier, 0.1f, 0.0f, 10.0f, "%.2fx");
+            ImGui::TextDisabled("Total: %.0f", dealer.totalDamage());
+
+            const char* types[] = {"Physical", "Fire", "Ice", "Electric", "Poison", "Holy", "Dark", "True"};
+            int type = static_cast<int>(dealer.damageType);
+            if (ImGui::Combo("Damage Type", &type, types, IM_ARRAYSIZE(types))) {
+                dealer.damageType = static_cast<DamageDealer::DamageType>(type);
+            }
+
+            ImGui::Checkbox("Can Damage", &dealer.canDamage);
+            ImGui::DragFloat("Hit Cooldown", &dealer.hitCooldown, 0.01f, 0.0f, 2.0f, "%.2f s");
+
+            ImGui::Separator();
+            ImGui::Text("Knockback");
+            ImGui::Checkbox("Applies Knockback", &dealer.appliesKnockback);
+            if (dealer.appliesKnockback) {
+                ImGui::DragFloat("Knockback Force", &dealer.knockbackForce, 0.5f, 0.0f, 50.0f, "%.1f");
+            }
+
+            ImGui::Separator();
+            ImGui::Text("Critical");
+            ImGui::DragFloat("Crit Chance", &dealer.critChance, 0.01f, 0.0f, 1.0f, "%.0f%%");
+            ImGui::DragFloat("Crit Multiplier", &dealer.critMultiplier, 0.1f, 1.0f, 10.0f, "%.1fx");
+
+            if (!dealer.appliesEffect.empty()) {
+                ImGui::Separator();
+                ImGui::Text("Effect: %s (%.0f%% chance)", dealer.appliesEffect.c_str(), dealer.effectChance * 100.0f);
+            }
+        }
+    }
+
+    void renderDamageReceiverComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<DamageReceiver>(entity)) return;
+
+        if (renderComponentHeader("Damage Receiver")) {
+            auto& receiver = registry.get<DamageReceiver>(entity);
+
+            ImGui::Checkbox("Can Receive Damage", &receiver.canReceiveDamage);
+            ImGui::DragFloat("Damage Multiplier", &receiver.damageMultiplier, 0.1f, 0.0f, 5.0f, "%.2fx");
+            ImGui::DragFloat("Armor", &receiver.armor, 1.0f, 0.0f, 1000.0f, "%.0f");
+
+            if (ImGui::TreeNode("Resistances")) {
+                ImGui::DragFloat("Physical", &receiver.resistPhysical, 0.01f, -1.0f, 1.0f, "%.0f%%");
+                ImGui::DragFloat("Fire", &receiver.resistFire, 0.01f, -1.0f, 1.0f, "%.0f%%");
+                ImGui::DragFloat("Ice", &receiver.resistIce, 0.01f, -1.0f, 1.0f, "%.0f%%");
+                ImGui::DragFloat("Electric", &receiver.resistElectric, 0.01f, -1.0f, 1.0f, "%.0f%%");
+                ImGui::DragFloat("Poison", &receiver.resistPoison, 0.01f, -1.0f, 1.0f, "%.0f%%");
+                ImGui::DragFloat("Holy", &receiver.resistHoly, 0.01f, -1.0f, 1.0f, "%.0f%%");
+                ImGui::DragFloat("Dark", &receiver.resistDark, 0.01f, -1.0f, 1.0f, "%.0f%%");
+                ImGui::TreePop();
+            }
+
+            ImGui::Separator();
+            ImGui::Text("I-Frames");
+            ImGui::DragFloat("I-Frame Duration", &receiver.iFrameDuration, 0.1f, 0.0f, 5.0f, "%.1f s");
+            if (receiver.iFrameTimer > 0.0f) {
+                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "INVULNERABLE (%.1f s)", receiver.iFrameTimer);
+            }
+
+            // Last damage info
+            if (receiver.lastDamageAmount > 0.0f) {
+                ImGui::Separator();
+                ImGui::TextDisabled("Last Damage: %.0f", receiver.lastDamageAmount);
+            }
+        }
+    }
+
+    void renderHitReactionComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<HitReaction>(entity)) return;
+
+        if (renderComponentHeader("Hit Reaction")) {
+            auto& reaction = registry.get<HitReaction>(entity);
+
+            editVec3("Knockback Velocity", reaction.knockbackVelocity);
+            ImGui::DragFloat("Stun Duration", &reaction.stunDuration, 0.1f, 0.0f, 10.0f, "%.1f s");
+            ImGui::DragFloat("Hit Stop Duration", &reaction.hitStopDuration, 0.01f, 0.0f, 0.5f, "%.2f s");
+
+            // Status
+            ImGui::Separator();
+            if (reaction.isStunned()) {
+                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "STUNNED (%.1f s)", reaction.stunTimer);
+            }
+            if (reaction.inHitStop()) {
+                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "HIT STOP");
+            }
+        }
+    }
+
+    void renderProjectileComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<Projectile>(entity)) return;
+
+        if (renderComponentHeader("Projectile")) {
+            auto& proj = registry.get<Projectile>(entity);
+
+            // Owner display
+            if (proj.owner != entt::null && registry.valid(proj.owner)) {
+                std::string name = "Unknown";
+                if (registry.all_of<EntityInfo>(proj.owner)) {
+                    name = registry.get<EntityInfo>(proj.owner).name;
+                }
+                ImGui::Text("Owner: %s", name.c_str());
+            } else {
+                ImGui::TextDisabled("Owner: None");
+            }
+
+            ImGui::DragFloat("Speed", &proj.speed, 1.0f, 0.0f, 100.0f, "%.0f m/s");
+            ImGui::DragFloat("Lifetime", &proj.lifetime, 0.5f, 0.0f, 30.0f, "%.1f s");
+            ImGui::DragFloat("Gravity", &proj.gravity, 0.5f, 0.0f, 50.0f, "%.1f");
+
+            ImGui::Checkbox("Destroy On Hit", &proj.destroyOnHit);
+            ImGui::Checkbox("Piercing", &proj.piercing);
+            if (proj.piercing) {
+                ImGui::InputInt("Max Pierce", &proj.maxPierceCount);
+                ImGui::TextDisabled("Pierce Count: %d", proj.pierceCount);
+            }
+
+            ImGui::Separator();
+            ImGui::Text("Homing");
+            ImGui::Checkbox("Homing", &proj.homing);
+            if (proj.homing) {
+                ImGui::DragFloat("Homing Strength", &proj.homingStrength, 0.1f, 0.0f, 20.0f, "%.1f");
+            }
+
+            ImGui::Checkbox("Has Trail", &proj.hasTrail);
+            if (proj.hasTrail) {
+                editColor4("Trail Color", proj.trailColor);
+            }
+
+            // Status
+            ImGui::Separator();
+            ImGui::TextDisabled("Elapsed: %.1f / %.1f s", proj.elapsed, proj.lifetime);
+        }
+    }
+
+    void renderStateMachineComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<StateMachine>(entity)) return;
+
+        if (renderComponentHeader("State Machine")) {
+            auto& sm = registry.get<StateMachine>(entity);
+
+            std::string currentName = "State " + std::to_string(sm.currentState);
+            if (sm.currentState < sm.stateNames.size()) {
+                currentName = sm.stateNames[sm.currentState];
+            }
+            ImGui::Text("Current: %s", currentName.c_str());
+            ImGui::TextDisabled("State Time: %.1f s", sm.stateTime);
+
+            if (sm.transitioning) {
+                float progress = sm.transitionDuration > 0.0f ?
+                    sm.transitionTime / sm.transitionDuration : 1.0f;
+                ImGui::ProgressBar(progress, ImVec2(-1, 0), "Transitioning...");
+            }
+
+            // State list
+            if (!sm.stateNames.empty() && ImGui::TreeNode("States")) {
+                for (size_t i = 0; i < sm.stateNames.size(); i++) {
+                    bool isCurrent = (i == sm.currentState);
+                    if (isCurrent) {
+                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%zu: %s (current)",
+                                          i, sm.stateNames[i].c_str());
+                    } else {
+                        if (ImGui::Selectable((std::to_string(i) + ": " + sm.stateNames[i]).c_str())) {
+                            sm.setState(static_cast<uint32_t>(i));
+                        }
+                    }
+                }
+                ImGui::TreePop();
+            }
+        }
+    }
+
+    void renderThreatTableComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<ThreatTable>(entity)) return;
+
+        if (renderComponentHeader("Threat Table")) {
+            auto& table = registry.get<ThreatTable>(entity);
+
+            ImGui::DragFloat("Decay Rate", &table.threatDecayRate, 0.1f, 0.0f, 10.0f, "%.1f/s");
+            ImGui::DragFloat("Max Range", &table.maxRange, 1.0f, 1.0f, 200.0f, "%.0f m");
+
+            ImGui::Text("Entries: %zu", table.entries.size());
+
+            if (!table.entries.empty() && ImGui::TreeNode("Threats")) {
+                for (size_t i = 0; i < table.entries.size(); i++) {
+                    auto& entry = table.entries[i];
+                    std::string name = "Unknown";
+                    if (registry.valid(entry.entity) && registry.all_of<EntityInfo>(entry.entity)) {
+                        name = registry.get<EntityInfo>(entry.entity).name;
+                    }
+                    ImGui::Text("%s: %.0f threat", name.c_str(), entry.threat);
+                }
+                ImGui::TreePop();
+            }
+
+            // Highest threat
+            entt::entity highest = table.getHighestThreat();
+            if (highest != entt::null && registry.valid(highest)) {
+                std::string name = "Unknown";
+                if (registry.all_of<EntityInfo>(highest)) {
+                    name = registry.get<EntityInfo>(highest).name;
+                }
+                ImGui::Separator();
+                ImGui::Text("Target: %s", name.c_str());
+            }
+        }
+    }
+
+    void renderLootTableComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<LootTable>(entity)) return;
+
+        if (renderComponentHeader("Loot Table")) {
+            auto& loot = registry.get<LootTable>(entity);
+
+            ImGui::Checkbox("Guaranteed Drop", &loot.guaranteedDrop);
+            ImGui::InputInt("Max Drops", &loot.maxDrops);
+
+            ImGui::Text("Drops: %zu", loot.drops.size());
+
+            if (ImGui::TreeNode("Drop List")) {
+                for (size_t i = 0; i < loot.drops.size(); i++) {
+                    auto& drop = loot.drops[i];
+                    ImGui::PushID(static_cast<int>(i));
+
+                    char itemBuffer[64];
+                    strcpy(itemBuffer, drop.itemId.c_str());
+                    if (ImGui::InputText("Item", itemBuffer, sizeof(itemBuffer))) {
+                        drop.itemId = itemBuffer;
+                    }
+
+                    ImGui::DragFloat("Chance", &drop.chance, 0.01f, 0.0f, 1.0f, "%.0f%%");
+                    ImGui::InputInt("Min Qty", &drop.minQuantity);
+                    ImGui::InputInt("Max Qty", &drop.maxQuantity);
+
+                    if (ImGui::SmallButton("Remove")) {
+                        loot.drops.erase(loot.drops.begin() + i);
+                        i--;
+                    }
+                    ImGui::Separator();
+                    ImGui::PopID();
+                }
+
+                if (ImGui::Button("+ Add Drop")) {
+                    loot.drops.push_back({"item", 1.0f, 1, 1});
+                }
+                ImGui::TreePop();
+            }
+        }
+    }
+
     void renderTagComponents(entt::registry& registry, entt::entity entity) {
         // Collect all tag components
         std::vector<std::string> tags;
@@ -2125,6 +2684,15 @@ private:
         if (registry.all_of<IsSpawnPoint>(entity)) tags.push_back("Spawn Point");
         if (registry.all_of<IsDialogueNPC>(entity)) tags.push_back("Dialogue NPC");
         if (registry.all_of<OnNavMesh>(entity)) tags.push_back("On NavMesh");
+        if (registry.all_of<IsProjectile>(entity)) tags.push_back("Projectile");
+        if (registry.all_of<HasStatusEffects>(entity)) tags.push_back("Has Effects");
+        if (registry.all_of<Invulnerable>(entity)) tags.push_back("Invulnerable");
+        if (registry.all_of<Stunned>(entity)) tags.push_back("Stunned");
+        if (registry.all_of<Dead>(entity)) tags.push_back("Dead");
+        if (registry.all_of<IsTeamMember>(entity)) tags.push_back("Team Member");
+        if (registry.all_of<Targetable>(entity)) tags.push_back("Targetable");
+        if (registry.all_of<NoGravity>(entity)) tags.push_back("No Gravity");
+        if (registry.all_of<CustomPhysics>(entity)) tags.push_back("Custom Physics");
 
         if (!tags.empty()) {
             if (renderComponentHeader("Tags")) {
@@ -2562,6 +3130,98 @@ private:
             if (!registry.all_of<QuestMarker>(entity)) {
                 if (ImGui::MenuItem("Quest Marker")) {
                     registry.emplace<QuestMarker>(entity);
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Utility");
+
+            if (!registry.all_of<Timer>(entity)) {
+                if (ImGui::MenuItem("Timer")) {
+                    registry.emplace<Timer>(entity);
+                }
+            }
+            if (!registry.all_of<Cooldown>(entity)) {
+                if (ImGui::MenuItem("Cooldown")) {
+                    registry.emplace<Cooldown>(entity);
+                }
+            }
+            if (!registry.all_of<StatusEffects>(entity)) {
+                if (ImGui::MenuItem("Status Effects")) {
+                    registry.emplace<StatusEffects>(entity);
+                    registry.emplace_or_replace<HasStatusEffects>(entity);
+                }
+            }
+            if (!registry.all_of<Team>(entity)) {
+                if (ImGui::MenuItem("Team")) {
+                    registry.emplace<Team>(entity);
+                    registry.emplace_or_replace<IsTeamMember>(entity);
+                }
+            }
+            if (!registry.all_of<Target>(entity)) {
+                if (ImGui::MenuItem("Target")) {
+                    registry.emplace<Target>(entity);
+                }
+            }
+            if (!registry.all_of<FollowTarget>(entity)) {
+                if (ImGui::MenuItem("Follow Target")) {
+                    registry.emplace<FollowTarget>(entity);
+                }
+            }
+            if (!registry.all_of<OrbitTarget>(entity)) {
+                if (ImGui::MenuItem("Orbit Target")) {
+                    registry.emplace<OrbitTarget>(entity);
+                }
+            }
+            if (!registry.all_of<Lifetime>(entity)) {
+                if (ImGui::MenuItem("Lifetime")) {
+                    registry.emplace<Lifetime>(entity);
+                }
+            }
+            if (!registry.all_of<DelayedAction>(entity)) {
+                if (ImGui::MenuItem("Delayed Action")) {
+                    registry.emplace<DelayedAction>(entity);
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Combat");
+
+            if (!registry.all_of<DamageDealer>(entity)) {
+                if (ImGui::MenuItem("Damage Dealer")) {
+                    registry.emplace<DamageDealer>(entity);
+                }
+            }
+            if (!registry.all_of<DamageReceiver>(entity)) {
+                if (ImGui::MenuItem("Damage Receiver")) {
+                    registry.emplace<DamageReceiver>(entity);
+                    registry.emplace_or_replace<Targetable>(entity);
+                }
+            }
+            if (!registry.all_of<HitReaction>(entity)) {
+                if (ImGui::MenuItem("Hit Reaction")) {
+                    registry.emplace<HitReaction>(entity);
+                }
+            }
+            if (!registry.all_of<Projectile>(entity)) {
+                if (ImGui::MenuItem("Projectile")) {
+                    registry.emplace<Projectile>(entity);
+                    registry.emplace_or_replace<IsProjectile>(entity);
+                }
+            }
+            if (!registry.all_of<StateMachine>(entity)) {
+                if (ImGui::MenuItem("State Machine")) {
+                    registry.emplace<StateMachine>(entity);
+                }
+            }
+            if (!registry.all_of<ThreatTable>(entity)) {
+                if (ImGui::MenuItem("Threat Table")) {
+                    registry.emplace<ThreatTable>(entity);
+                }
+            }
+            if (!registry.all_of<LootTable>(entity)) {
+                if (ImGui::MenuItem("Loot Table")) {
+                    registry.emplace<LootTable>(entity);
                 }
             }
 

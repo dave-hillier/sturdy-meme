@@ -338,6 +338,24 @@ void LightSystem::gatherLights(entt::registry& registry, LightBuffer& buffer) {
 - [x] QuestMarker (objective markers with map/compass display)
 - [x] GameplayIntegration.h (trigger callbacks, interaction system, door/pickup updates)
 
+### Phase 10: Composable Utility Components
+- [x] Timer (generic reusable timer with looping, auto-remove, events)
+- [x] Cooldown (charges, regeneration, cooldown reduction support)
+- [x] StatusEffect, StatusEffects (buff/debuff system with stacking, duration, ticks)
+- [x] Team (faction membership with hostile/friendly/neutral masks)
+- [x] Target (targeting system with auto-target, lock-on, priority modes)
+- [x] FollowTarget, OrbitTarget (movement behaviors for following/orbiting entities)
+- [x] Lifetime, DelayedAction (lifecycle management with auto-destroy, fade-out)
+- [x] SpawnOnDestroy (spawn entities when destroyed)
+- [x] DamageDealer (damage dealing with types, knockback, crits, status effects)
+- [x] DamageReceiver (damage receiving with resistances, armor, i-frames)
+- [x] HitReaction (knockback, stun, hit-stop for combat feedback)
+- [x] Projectile (speed, homing, gravity, piercing, trails)
+- [x] StateMachine (generic state machine with transition blending)
+- [x] ThreatTable (aggro/threat tracking for AI combat)
+- [x] LootTable (probabilistic loot drops)
+- [x] Tags: IsProjectile, HasStatusEffects, Invulnerable, Stunned, Dead, IsTeamMember, Targetable, NoGravity, CustomPhysics
+
 ## Resource Management
 
 ### Handle System

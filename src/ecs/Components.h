@@ -1143,7 +1143,9 @@ struct Triggerable {
 
 // Tag: entity is currently inside a trigger
 struct InsideTrigger {
-    std::vector<entt::entity> triggers;    // List of triggers entity is inside
+    entt::entity currentTrigger{entt::null};  // Primary trigger (most recent)
+    std::vector<entt::entity> triggers;        // All triggers entity is inside
+    float timeInside{0.0f};                    // Time inside current trigger
 };
 
 // Navigation mesh agent for AI pathfinding
@@ -1212,12 +1214,14 @@ struct Waypoint {
 
 // Waypoint path component
 struct WaypointPath {
-    std::vector<glm::vec3> points;
+    std::vector<entt::entity> waypoints;   // Waypoint entities
     std::vector<Waypoint> waypointData;    // Optional per-point data
     uint32_t currentIndex{0};
-    bool looping{true};
-    bool pingPong{false};                  // Go back and forth
-    bool reversed{false};                  // Currently going backwards (for pingPong)
+    bool loop{true};
+    bool reverseAtEnd{false};              // Ping-pong movement
+    bool reversed{false};                  // Currently going backwards
+    float defaultSpeed{3.0f};              // Default movement speed
+    float defaultWaitTime{0.0f};           // Default wait time at waypoints
     float waitTimer{0.0f};                 // Current wait time
 };
 
@@ -1264,6 +1268,7 @@ struct Interactable {
 // Tag: entity can interact with Interactables
 struct CanInteract {
     float interactionRange{3.0f};          // Max interaction distance
+    bool interactionEnabled{true};          // Can currently interact
     entt::entity currentTarget{entt::null}; // Currently highlighted interactable
     entt::entity interactingWith{entt::null}; // Currently interacting with
 };
@@ -1300,7 +1305,7 @@ struct Door {
     float currentAngle{0.0f};
 
     bool locked{false};
-    std::string keyId;                     // Key item needed
+    std::string requiredKeyId;             // Key item needed to unlock
     bool autoClose{false};
     float autoCloseDelay{5.0f};
     float timeSinceOpened{0.0f};
@@ -1316,30 +1321,33 @@ struct Door {
 struct Switch {
     enum class Type : uint8_t {
         Toggle,                            // On/Off
-        Momentary,                         // Returns to off
-        Sequence                           // Multi-state
+        Hold,                              // Momentary (returns to off)
+        OneShot                            // Single use
     };
     Type type{Type::Toggle};
 
-    bool activated{false};
-    int currentState{0};                   // For sequence switches
-    int maxStates{2};
+    bool isOn{false};
+    float cooldown{0.0f};                  // Cooldown between uses
+    float cooldownTimer{0.0f};
 
     entt::entity targetEntity{entt::null}; // What this switch controls
     std::string targetAction;              // Action to perform on target
 
-    float momentaryDuration{0.5f};         // How long momentary stays on
-    float momentaryTimer{0.0f};
+    // Events
+    uint32_t onActivateEvent{~0u};
+    uint32_t onDeactivateEvent{~0u};
 };
 
 // Spawn point for entities
 struct SpawnPoint {
     std::string entityType;                // What to spawn
+    uint32_t maxEntities{1};               // Max alive at once
     float respawnDelay{10.0f};
-    int maxSpawned{1};                     // Max alive at once
-    int currentSpawned{0};
     float spawnRadius{0.5f};               // Random offset
-    bool enabled{true};
+    bool active{true};
+    bool initialSpawn{true};               // Spawn on initialization
+    bool spawnOnActivate{false};           // Spawn when activated
+    float nextSpawnTime{0.0f};             // Time until next spawn
     float timeSinceSpawn{0.0f};
 
     std::vector<entt::entity> spawnedEntities;
@@ -1377,36 +1385,39 @@ struct DamageZone {
 // Dialogue trigger/NPC conversation
 struct DialogueTrigger {
     DialogueHandle dialogue{InvalidDialogue};
-    bool canTalk{true};
-    bool inConversation{false};
-    float conversationRange{3.0f};
+    uint32_t startNode{0};                 // Starting dialogue node
 
-    // Conditions
-    std::string requiredQuest;             // Quest state required
-    std::string requiredFlag;              // Game flag required
-    int requiredReputation{0};             // Minimum reputation
+    bool automatic{false};                 // Trigger dialogue automatically
+    bool oneShot{false};                   // Only trigger once
+    bool triggered{false};                 // Has been triggered (for oneShot)
 
-    // State
-    uint32_t currentNodeId{0};             // Current dialogue node
-    bool hasBeenTalkedTo{false};
+    // Conditions (string-based for flexibility)
+    std::vector<std::string> conditions;   // Conditions that must be met
 };
 
 // Quest giver/objective marker
 struct QuestMarker {
     std::string questId;
-    enum class MarkerType : uint8_t {
-        QuestGiver,
-        Objective,
-        TurnIn,
-        PointOfInterest
+    std::string objectiveId;               // Specific objective this marks
+
+    enum class Type : uint8_t {
+        Destination,
+        Interact,
+        Kill,
+        Collect,
+        Escort,
+        Area,
+        Hidden
     };
-    MarkerType type{MarkerType::QuestGiver};
+    Type type{Type::Destination};
 
     bool showOnMap{true};
-    bool showInWorld{true};
+    bool showOnCompass{true};
+    bool showDistance{true};
     float visibilityDistance{100.0f};
+    bool active{true};
 
-    glm::vec3 markerColor{1.0f, 0.8f, 0.0f};  // Yellow by default
+    glm::vec3 color{1.0f, 0.8f, 0.0f};     // Yellow by default
 };
 
 // Tag: entity is a gameplay trigger (for queries)
@@ -1420,3 +1431,446 @@ struct IsSpawnPoint {};
 
 // Tag: entity is an NPC that can be talked to
 struct IsDialogueNPC {};
+
+// ============================================================================
+// Composable Utility Components (Phase 10)
+// ============================================================================
+
+// Generic timer for any timed behavior
+struct Timer {
+    float duration{1.0f};              // Total duration
+    float elapsed{0.0f};               // Time elapsed
+    bool paused{false};
+    bool looping{false};               // Restart automatically
+    bool finished{false};              // Set when complete (for non-looping)
+    bool autoRemove{false};            // Remove component when finished
+    std::string tag;                   // Optional identifier for multiple timers
+    uint32_t onCompleteEvent{~0u};     // Event to fire on completion
+
+    float progress() const { return duration > 0.0f ? elapsed / duration : 1.0f; }
+    float remaining() const { return duration - elapsed; }
+    bool isComplete() const { return elapsed >= duration; }
+};
+
+// Cooldown for abilities, attacks, interactions
+struct Cooldown {
+    float baseDuration{1.0f};          // Base cooldown time
+    float currentCooldown{0.0f};       // Time remaining
+    float reductionMultiplier{1.0f};   // For cooldown reduction effects
+    bool ready{true};                  // Can be used
+    int charges{1};                    // Number of uses before cooldown
+    int maxCharges{1};
+    float chargeRegenRate{0.0f};       // Charges regained per second (0 = only on cooldown end)
+
+    float effectiveDuration() const { return baseDuration * reductionMultiplier; }
+    bool canUse() const { return ready && charges > 0; }
+    void use() {
+        if (charges > 0) {
+            charges--;
+            if (charges == 0) {
+                ready = false;
+                currentCooldown = effectiveDuration();
+            }
+        }
+    }
+};
+
+// Status effect (buff/debuff)
+struct StatusEffect {
+    enum class Type : uint8_t {
+        Buff,
+        Debuff,
+        Neutral
+    };
+    Type type{Type::Buff};
+
+    std::string effectId;              // Identifier for this effect type
+    float duration{-1.0f};             // -1 = permanent until removed
+    float elapsed{0.0f};
+    float tickInterval{0.0f};          // For periodic effects (0 = no ticks)
+    float timeSinceTick{0.0f};
+
+    // Stacking behavior
+    enum class StackMode : uint8_t {
+        Unique,                        // Only one of this effect
+        Stack,                         // Multiple instances stack
+        Refresh,                       // Reset duration on reapply
+        StackRefresh                   // Stack and reset duration
+    };
+    StackMode stackMode{StackMode::Unique};
+    int stacks{1};
+    int maxStacks{1};
+
+    // Source tracking
+    entt::entity source{entt::null};   // Who applied this effect
+
+    // Modifier values (interpreted by game systems)
+    float magnitude{1.0f};             // Effect strength
+    float bonusFlat{0.0f};             // Flat bonus
+    float bonusPercent{0.0f};          // Percentage bonus (0.1 = 10%)
+
+    // Visual feedback
+    bool showIcon{true};
+    std::string iconName;
+    glm::vec4 tintColor{1.0f};
+
+    bool isExpired() const { return duration >= 0.0f && elapsed >= duration; }
+};
+
+// Container for multiple status effects on an entity
+struct StatusEffects {
+    std::vector<StatusEffect> effects;
+
+    void add(const StatusEffect& effect) {
+        // Handle stacking based on effect's stack mode
+        for (auto& existing : effects) {
+            if (existing.effectId == effect.effectId) {
+                switch (existing.stackMode) {
+                    case StatusEffect::StackMode::Unique:
+                        return; // Don't add
+                    case StatusEffect::StackMode::Refresh:
+                        existing.elapsed = 0.0f;
+                        return;
+                    case StatusEffect::StackMode::Stack:
+                        if (existing.stacks < existing.maxStacks) {
+                            existing.stacks++;
+                        }
+                        return;
+                    case StatusEffect::StackMode::StackRefresh:
+                        if (existing.stacks < existing.maxStacks) {
+                            existing.stacks++;
+                        }
+                        existing.elapsed = 0.0f;
+                        return;
+                }
+            }
+        }
+        effects.push_back(effect);
+    }
+
+    void removeByTag(const std::string& effectId) {
+        effects.erase(
+            std::remove_if(effects.begin(), effects.end(),
+                [&](const StatusEffect& e) { return e.effectId == effectId; }),
+            effects.end()
+        );
+    }
+
+    void clearExpired() {
+        effects.erase(
+            std::remove_if(effects.begin(), effects.end(),
+                [](const StatusEffect& e) { return e.isExpired(); }),
+            effects.end()
+        );
+    }
+};
+
+// Team/Faction membership for AI and combat
+struct Team {
+    uint32_t teamId{0};                // Team identifier
+    uint32_t hostileMask{~0u};         // Bitmask of hostile teams (all by default)
+    uint32_t friendlyMask{0};          // Bitmask of friendly teams
+    uint32_t neutralMask{0};           // Bitmask of neutral teams
+
+    bool isHostile(uint32_t otherTeam) const { return (hostileMask & (1u << otherTeam)) != 0; }
+    bool isFriendly(uint32_t otherTeam) const { return teamId == otherTeam || (friendlyMask & (1u << otherTeam)) != 0; }
+    bool isNeutral(uint32_t otherTeam) const { return (neutralMask & (1u << otherTeam)) != 0; }
+};
+
+// Targeting system - tracks what entity is focused on
+struct Target {
+    entt::entity current{entt::null};  // Current target
+    entt::entity previous{entt::null}; // Previous target
+    float timeSinceAcquired{0.0f};     // How long we've had this target
+    float maxRange{50.0f};             // Max targeting range
+    bool autoTarget{false};            // Automatically acquire targets
+    bool lockOn{false};                // Maintain target even if lost LOS
+
+    // Target priority settings
+    enum class Priority : uint8_t {
+        Nearest,
+        LowestHealth,
+        HighestThreat,
+        LastAttacker
+    };
+    Priority priority{Priority::Nearest};
+
+    bool hasTarget() const { return current != entt::null; }
+};
+
+// Following behavior - entity follows another
+struct FollowTarget {
+    entt::entity target{entt::null};
+    float followDistance{2.0f};        // Ideal distance to maintain
+    float minDistance{1.0f};           // Stop if closer than this
+    float maxDistance{20.0f};          // Stop following if further
+    float speed{3.0f};                 // Follow speed
+    bool active{true};
+    bool maintainOffset{false};        // Keep fixed offset instead of distance
+    glm::vec3 offset{0.0f};            // Offset from target (if maintainOffset)
+
+    // Smoothing
+    float smoothTime{0.2f};            // Position smoothing
+    glm::vec3 velocity{0.0f};          // Current velocity (for smoothing)
+};
+
+// Orbit around target
+struct OrbitTarget {
+    entt::entity target{entt::null};
+    float distance{5.0f};              // Orbit radius
+    float speed{45.0f};                // Degrees per second
+    float currentAngle{0.0f};
+    float heightOffset{0.0f};          // Vertical offset
+    bool clockwise{true};
+    bool faceTarget{true};             // Rotate to face target
+};
+
+// Entity lifetime - auto-destroy after time
+struct Lifetime {
+    float duration{5.0f};
+    float elapsed{0.0f};
+    bool paused{false};
+
+    // Optional callbacks
+    uint32_t onExpireEvent{~0u};
+    bool fadeOut{false};               // Fade alpha before destroy
+    float fadeTime{0.5f};
+
+    float remaining() const { return duration - elapsed; }
+    float progress() const { return duration > 0.0f ? elapsed / duration : 1.0f; }
+    bool isExpired() const { return elapsed >= duration; }
+};
+
+// Delayed action - execute something after delay
+struct DelayedAction {
+    float delay{1.0f};
+    float elapsed{0.0f};
+    bool triggered{false};
+    bool autoRemove{true};             // Remove component after triggering
+    uint32_t actionEvent{~0u};         // Event to fire
+    std::string actionTag;             // String identifier for handlers
+};
+
+// Spawn on destroy - create entities when this one dies
+struct SpawnOnDestroy {
+    std::string entityType;            // What to spawn
+    int count{1};                      // Number to spawn
+    float spreadRadius{1.0f};          // Random spawn spread
+    bool inheritVelocity{false};
+    float inheritVelocityMult{0.5f};
+};
+
+// Damage dealing component (weapons, projectiles, hazards)
+struct DamageDealer {
+    float baseDamage{10.0f};
+    float damageMultiplier{1.0f};
+
+    enum class DamageType : uint8_t {
+        Physical,
+        Fire,
+        Ice,
+        Electric,
+        Poison,
+        Holy,
+        Dark,
+        True                           // Ignores armor/resistance
+    };
+    DamageType damageType{DamageType::Physical};
+
+    // Timing
+    bool canDamage{true};
+    float hitCooldown{0.1f};           // Minimum time between hits to same target
+    std::vector<entt::entity> recentlyHit;  // For hit cooldown tracking
+    std::vector<float> hitTimers;
+
+    // Knockback
+    bool appliesKnockback{false};
+    float knockbackForce{5.0f};
+
+    // Critical hits
+    float critChance{0.0f};            // 0.0 - 1.0
+    float critMultiplier{2.0f};
+
+    // Status effects
+    std::string appliesEffect;         // StatusEffect ID to apply
+    float effectChance{1.0f};
+
+    float totalDamage() const { return baseDamage * damageMultiplier; }
+};
+
+// Damage receiving component (how entity responds to damage)
+struct DamageReceiver {
+    bool canReceiveDamage{true};
+    float damageMultiplier{1.0f};      // Global damage modifier
+
+    // Resistances per damage type (0.0 = no resistance, 1.0 = immune, negative = vulnerability)
+    float resistPhysical{0.0f};
+    float resistFire{0.0f};
+    float resistIce{0.0f};
+    float resistElectric{0.0f};
+    float resistPoison{0.0f};
+    float resistHoly{0.0f};
+    float resistDark{0.0f};
+
+    // Armor (flat damage reduction)
+    float armor{0.0f};
+
+    // Invulnerability frames
+    float iFrameDuration{0.0f};
+    float iFrameTimer{0.0f};
+
+    // Events
+    uint32_t onDamageEvent{~0u};
+    uint32_t onDeathEvent{~0u};
+
+    // Last damage info
+    entt::entity lastDamager{entt::null};
+    float lastDamageAmount{0.0f};
+    DamageDealer::DamageType lastDamageType{DamageDealer::DamageType::Physical};
+
+    float getResistance(DamageDealer::DamageType type) const {
+        switch (type) {
+            case DamageDealer::DamageType::Physical: return resistPhysical;
+            case DamageDealer::DamageType::Fire: return resistFire;
+            case DamageDealer::DamageType::Ice: return resistIce;
+            case DamageDealer::DamageType::Electric: return resistElectric;
+            case DamageDealer::DamageType::Poison: return resistPoison;
+            case DamageDealer::DamageType::Holy: return resistHoly;
+            case DamageDealer::DamageType::Dark: return resistDark;
+            case DamageDealer::DamageType::True: return 0.0f;
+        }
+        return 0.0f;
+    }
+
+    bool isInvulnerable() const { return iFrameTimer > 0.0f || !canReceiveDamage; }
+};
+
+// Hit reaction (knockback, stun, etc.)
+struct HitReaction {
+    glm::vec3 knockbackVelocity{0.0f};
+    float stunDuration{0.0f};
+    float stunTimer{0.0f};
+    float hitStopDuration{0.0f};       // Frame freeze
+    float hitStopTimer{0.0f};
+
+    bool isStunned() const { return stunTimer > 0.0f; }
+    bool inHitStop() const { return hitStopTimer > 0.0f; }
+};
+
+// Projectile component
+struct Projectile {
+    entt::entity owner{entt::null};    // Who fired this
+    float speed{20.0f};
+    float lifetime{5.0f};              // Auto-destroy after this time
+    float elapsed{0.0f};
+    bool homing{false};
+    entt::entity homingTarget{entt::null};
+    float homingStrength{5.0f};        // Turn rate for homing
+    float gravity{0.0f};               // Gravity effect (for arcing projectiles)
+    bool destroyOnHit{true};
+    bool piercing{false};              // Pass through targets
+    int maxPierceCount{0};
+    int pierceCount{0};
+
+    // Trail
+    bool hasTrail{false};
+    glm::vec4 trailColor{1.0f};
+};
+
+// Generic state machine for composable behaviors
+struct StateMachine {
+    uint32_t currentState{0};
+    uint32_t previousState{0};
+    float stateTime{0.0f};             // Time in current state
+    float transitionTime{0.0f};        // Time since transition started
+    bool transitioning{false};
+    float transitionDuration{0.0f};
+
+    // State names for debugging/editor
+    std::vector<std::string> stateNames;
+
+    void setState(uint32_t newState, float blendTime = 0.0f) {
+        if (newState == currentState) return;
+        previousState = currentState;
+        currentState = newState;
+        stateTime = 0.0f;
+        transitioning = blendTime > 0.0f;
+        transitionDuration = blendTime;
+        transitionTime = 0.0f;
+    }
+};
+
+// Aggro/Threat table for AI
+struct ThreatTable {
+    struct Entry {
+        entt::entity entity{entt::null};
+        float threat{0.0f};
+        float lastDamageTime{0.0f};
+    };
+    std::vector<Entry> entries;
+    float threatDecayRate{1.0f};       // Threat lost per second
+    float maxRange{50.0f};             // Drop threat if further
+
+    void addThreat(entt::entity entity, float amount) {
+        for (auto& e : entries) {
+            if (e.entity == entity) {
+                e.threat += amount;
+                e.lastDamageTime = 0.0f;
+                return;
+            }
+        }
+        entries.push_back({entity, amount, 0.0f});
+    }
+
+    entt::entity getHighestThreat() const {
+        entt::entity best = entt::null;
+        float highestThreat = 0.0f;
+        for (const auto& e : entries) {
+            if (e.threat > highestThreat) {
+                highestThreat = e.threat;
+                best = e.entity;
+            }
+        }
+        return best;
+    }
+};
+
+// Loot table for drops
+struct LootTable {
+    struct Drop {
+        std::string itemId;
+        float chance{1.0f};            // 0.0 - 1.0
+        int minQuantity{1};
+        int maxQuantity{1};
+    };
+    std::vector<Drop> drops;
+    bool guaranteedDrop{true};         // At least one item drops
+    int maxDrops{-1};                  // -1 = unlimited
+};
+
+// Tag: entity is a projectile
+struct IsProjectile {};
+
+// Tag: entity has active status effects
+struct HasStatusEffects {};
+
+// Tag: entity is invulnerable
+struct Invulnerable {};
+
+// Tag: entity is stunned
+struct Stunned {};
+
+// Tag: entity is dead (pending removal)
+struct Dead {};
+
+// Tag: entity is a team member (for team queries)
+struct IsTeamMember {};
+
+// Tag: entity is targetable by AI/player
+struct Targetable {};
+
+// Tag: entity ignores gravity
+struct NoGravity {};
+
+// Tag: entity has custom physics (handled by game code, not physics engine)
+struct CustomPhysics {};
