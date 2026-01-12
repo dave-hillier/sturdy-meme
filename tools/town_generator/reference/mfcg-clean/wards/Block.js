@@ -2,6 +2,7 @@
  * Block.js - City block with building lots
  *
  * Represents a single city block containing multiple building lots.
+ * Also includes TwistedBlock functionality for organic lot subdivision.
  */
 
 import { Point } from '../core/Point.js';
@@ -9,6 +10,7 @@ import { Random } from '../core/Random.js';
 import { PolygonUtils } from '../geometry/PolygonUtils.js';
 import { GeomUtils } from '../geometry/GeomUtils.js';
 import { Building } from '../model/Building.js';
+import { Bisector } from '../utils/Bisector.js';
 
 /**
  * City block with building lots
@@ -182,5 +184,88 @@ export class Block {
      */
     get area() {
         return Math.abs(PolygonUtils.area(this.shape));
+    }
+
+    /**
+     * Filter lots to remove inner/isolated ones
+     * @param {Point[][]} lots
+     * @returns {Point[][]}
+     */
+    filterInner(lots) {
+        const result = [];
+        const n = this.shape.length;
+
+        for (const lot of lots) {
+            // Check if lot touches the block boundary
+            let touchesBoundary = false;
+
+            for (const point of lot) {
+                for (let i = 0; i < n; i++) {
+                    const edgeStart = this.shape[i];
+                    const edgeEnd = this.shape[(i + 1) % n];
+
+                    if (GeomUtils.pointOnSegment(point, edgeStart, edgeEnd, 0.01)) {
+                        touchesBoundary = true;
+                        break;
+                    }
+                }
+                if (touchesBoundary) break;
+            }
+
+            if (touchesBoundary) {
+                result.push(lot);
+            }
+        }
+
+        return result;
+    }
+}
+
+/**
+ * TwistedBlock - creates organic/irregular lot subdivisions
+ */
+export class TwistedBlock {
+    /**
+     * Create lots using bisector subdivision
+     * @param {Block} block - The block to subdivide
+     * @param {import('../model/District.js').AlleyConfig} config - Alley configuration
+     * @returns {Point[][]}
+     */
+    static createLots(block, config) {
+        const bisector = new Bisector(
+            block.shape,
+            config.minSq,
+            Math.max(4 * config.sizeChaos, 1.2)
+        );
+        bisector.minTurnOffset = 0.5;
+
+        let lots = bisector.partition();
+
+        // Filter out inner lots that don't touch boundary
+        lots = block.filterInner(lots);
+
+        // Filter out lots that are too small or thin
+        const minArea = config.minSq / 4;
+        const result = [];
+
+        for (const lot of lots) {
+            if (lot.length < 4) continue;
+
+            const area = Math.abs(PolygonUtils.area(lot));
+            if (area < minArea) continue;
+
+            // Check aspect ratio using OBB
+            const obb = PolygonUtils.obb(lot);
+            const width = Point.distance(obb[0], obb[1]);
+            const height = Point.distance(obb[1], obb[2]);
+
+            // Reject if too thin or too irregular
+            if (width < 1.2 || height < 1.2) continue;
+            if (area / (width * height) < 0.5) continue;
+
+            result.push(lot);
+        }
+
+        return result;
     }
 }

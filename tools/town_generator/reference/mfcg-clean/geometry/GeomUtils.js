@@ -133,4 +133,92 @@ export class GeomUtils {
 
         return hull;
     }
+
+    /**
+     * Check if a point lies on a line segment
+     * @param {Point} point - Point to test
+     * @param {Point} segStart - Segment start
+     * @param {Point} segEnd - Segment end
+     * @param {number} [tolerance=0.001] - Distance tolerance
+     * @returns {boolean}
+     */
+    static pointOnSegment(point, segStart, segEnd, tolerance = 0.001) {
+        const segLen = Point.distance(segStart, segEnd);
+        if (segLen < tolerance) {
+            return Point.distance(point, segStart) < tolerance;
+        }
+
+        const d1 = Point.distance(point, segStart);
+        const d2 = Point.distance(point, segEnd);
+
+        // Check if point is between endpoints (within tolerance)
+        if (Math.abs(d1 + d2 - segLen) < tolerance) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Find intersection point of two line segments
+     * @param {Point} a1 - Start of segment 1
+     * @param {Point} a2 - End of segment 1
+     * @param {Point} b1 - Start of segment 2
+     * @param {Point} b2 - End of segment 2
+     * @returns {Point|null} - Intersection point or null
+     */
+    static lineSegmentIntersection(a1, a2, b1, b2) {
+        const d1 = a2.subtract(a1);
+        const d2 = b2.subtract(b1);
+
+        const cross = d1.x * d2.y - d1.y * d2.x;
+        if (Math.abs(cross) < 0.0001) {
+            return null; // Parallel
+        }
+
+        const d = b1.subtract(a1);
+        const t = (d.x * d2.y - d.y * d2.x) / cross;
+        const s = (d.x * d1.y - d.y * d1.x) / cross;
+
+        if (t >= 0 && t <= 1 && s >= 0 && s <= 1) {
+            return new Point(a1.x + d1.x * t, a1.y + d1.y * t);
+        }
+
+        return null;
+    }
+
+    /**
+     * Compute squared distance from point to line segment
+     * @param {Point} point
+     * @param {Point} segStart
+     * @param {Point} segEnd
+     * @returns {number}
+     */
+    static pointToSegmentDistSq(point, segStart, segEnd) {
+        const dx = segEnd.x - segStart.x;
+        const dy = segEnd.y - segStart.y;
+        const lenSq = dx * dx + dy * dy;
+
+        if (lenSq === 0) {
+            return Point.distanceSquared(point, segStart);
+        }
+
+        const t = Math.max(0, Math.min(1,
+            ((point.x - segStart.x) * dx + (point.y - segStart.y) * dy) / lenSq
+        ));
+
+        const proj = new Point(segStart.x + t * dx, segStart.y + t * dy);
+        return Point.distanceSquared(point, proj);
+    }
+
+    /**
+     * Compute distance from point to line segment
+     * @param {Point} point
+     * @param {Point} segStart
+     * @param {Point} segEnd
+     * @returns {number}
+     */
+    static pointToSegmentDist(point, segStart, segEnd) {
+        return Math.sqrt(GeomUtils.pointToSegmentDistSq(point, segStart, segEnd));
+    }
 }
