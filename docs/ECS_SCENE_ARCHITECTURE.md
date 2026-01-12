@@ -297,7 +297,7 @@ void LightSystem::gatherLights(entt::registry& registry, LightBuffer& buffer) {
 
 ### Phase 6: Advanced
 - [x] LOD groups (LODGroup component, TreeLODState for trees)
-- [ ] Occlusion culling
+- [x] Occlusion culling (OcclusionCullingIntegration.h, Hi-Z system integration)
 - [x] Render layers/masks (RenderLayer enum, cullingMask in CameraComponent)
 - [x] Multi-camera support (CameraComponent with priority)
 
