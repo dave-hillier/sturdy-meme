@@ -1,5 +1,5 @@
 /**
- * Test compilation of new geometry headers
+ * Test compilation of new geometry and building headers
  */
 
 #include "town_generator/geom/Chaikin.h"
@@ -7,12 +7,15 @@
 #include "town_generator/geom/DCEL.h"
 #include "town_generator/geom/PolyBool.h"
 #include "town_generator/geom/SkeletonBuilder.h"
+#include "town_generator/building/Blueprint.h"
+#include "town_generator/utils/Bloater.h"
 #include <iostream>
 #include <vector>
 #include <cassert>
 
 using namespace town_generator::geom;
 using namespace town_generator::utils;
+using namespace town_generator::building;
 
 void testChaikin() {
     std::vector<Point> square = {
@@ -131,8 +134,77 @@ void testSkeletonBuilder() {
     std::cout << "SkeletonBuilder: " << edges.size() << " skeleton edges\n";
 }
 
+void testBlueprint() {
+    // Test basic construction
+    Blueprint bp(50, 12345);
+    assert(bp.size == 50);
+    assert(bp.seed == 12345);
+    assert(bp.citadel == true);  // Default
+    assert(bp.walls == true);    // Default
+    std::cout << "Blueprint: Basic construction passed\n";
+
+    // Test randomized creation
+    Random::reset(12345);
+    Blueprint randomBp = Blueprint::create(50, 12345);
+    assert(randomBp.size == 50);
+    assert(randomBp.random == true);
+    std::cout << "Blueprint: Randomized creation passed\n";
+
+    // Test clone
+    Blueprint cloned = randomBp.clone();
+    assert(cloned.size == randomBp.size);
+    assert(cloned.seed == randomBp.seed);
+    assert(cloned.walls == randomBp.walls);
+    std::cout << "Blueprint: Clone passed\n";
+
+    // Test population estimate
+    int pop = bp.estimatePopulation();
+    assert(pop > 0);
+    std::cout << "Blueprint: Population estimate = " << pop << "\n";
+}
+
+void testBloater() {
+    // Create a simple square
+    std::vector<Point> square = {
+        Point(0, 0),
+        Point(10, 0),
+        Point(10, 10),
+        Point(0, 10)
+    };
+
+    // Test bloat - adds intermediate points
+    auto bloated = Bloater::bloat(square, 2.0);
+    assert(bloated.size() >= square.size());
+    std::cout << "Bloater: Bloated from " << square.size() << " to " << bloated.size() << " points\n";
+
+    // Test bloatSmooth
+    auto smoothBloated = Bloater::bloatSmooth(square, 1.0, 3);
+    assert(smoothBloated.size() > square.size());
+    std::cout << "Bloater: Smooth bloated to " << smoothBloated.size() << " points\n";
+
+    // Test offset (inflate)
+    auto inflated = Bloater::inflate(square, 1.0);
+    assert(inflated.size() == square.size());
+    // Verify points moved (either inward or outward depending on winding)
+    bool pointsMoved = false;
+    for (size_t i = 0; i < square.size(); ++i) {
+        double dist = Point::distance(square[i], inflated[i]);
+        if (dist > 0.5) {
+            pointsMoved = true;
+            break;
+        }
+    }
+    assert(pointsMoved);
+    std::cout << "Bloater: Inflate moved points\n";
+
+    // Test deflate
+    auto deflated = Bloater::deflate(square, 1.0);
+    assert(deflated.size() == square.size());
+    std::cout << "Bloater: Deflate passed\n";
+}
+
 int main() {
-    std::cout << "=== Testing New Geometry Classes ===\n\n";
+    std::cout << "=== Testing New Geometry and Building Classes ===\n\n";
 
     testChaikin();
     std::cout << "\n";
@@ -147,6 +219,12 @@ int main() {
     std::cout << "\n";
 
     testSkeletonBuilder();
+    std::cout << "\n";
+
+    testBlueprint();
+    std::cout << "\n";
+
+    testBloater();
     std::cout << "\n";
 
     std::cout << "=== All Tests Passed ===\n";
