@@ -398,3 +398,149 @@ struct StaticObject {};
 
 // Culling result tag - entity was visible last frame
 struct WasVisible {};
+
+// ============================================================================
+// Animation Components (Phase 4)
+// ============================================================================
+
+// Handle for animation clips
+using AnimationHandle = uint32_t;
+constexpr AnimationHandle InvalidAnimation = ~0u;
+
+// Animation playback state
+struct AnimationState {
+    AnimationHandle currentAnimation{InvalidAnimation};
+    AnimationHandle nextAnimation{InvalidAnimation};     // For crossfade
+    float time{0.0f};                // Current playback time
+    float speed{1.0f};               // Playback speed multiplier
+    float blendWeight{0.0f};         // Crossfade progress [0-1]
+    float blendDuration{0.2f};       // Crossfade duration
+    bool looping{true};
+    bool playing{true};
+};
+
+// Animator controller for state machine-driven animation
+struct Animator {
+    enum class State : uint8_t {
+        Idle,
+        Walk,
+        Run,
+        Jump,
+        Fall,
+        Land,
+        Custom
+    };
+    State currentState{State::Idle};
+    State previousState{State::Idle};
+    float stateTime{0.0f};           // Time in current state
+    float transitionTime{0.0f};      // Blend progress
+    float movementSpeed{0.0f};       // Input for blend space
+    bool grounded{true};
+    bool jumping{false};
+};
+
+// IK target for procedural animation
+struct IKTarget {
+    glm::vec3 position{0.0f};
+    glm::vec3 normal{0.0f, 1.0f, 0.0f};  // Surface normal for foot alignment
+    float weight{1.0f};                   // Blend weight
+    bool active{false};
+};
+
+// Foot IK data for ground adaptation
+struct FootIK {
+    IKTarget leftFoot;
+    IKTarget rightFoot;
+    float pelvisOffset{0.0f};  // Vertical adjustment for uneven terrain
+    bool enabled{true};
+};
+
+// Look-at IK for head/eye tracking
+struct LookAtIK {
+    entt::entity target{entt::null};     // Entity to look at (if set)
+    glm::vec3 targetPosition{0.0f};      // World position to look at
+    float weight{1.0f};
+    float maxYaw{60.0f};                 // Degrees
+    float maxPitch{30.0f};               // Degrees
+    bool enabled{false};
+};
+
+// ============================================================================
+// Particle System Components (Phase 4)
+// ============================================================================
+
+// Handle for particle system assets
+using ParticleSystemHandle = uint32_t;
+constexpr ParticleSystemHandle InvalidParticleSystem = ~0u;
+
+// Particle emitter component
+struct ParticleEmitter {
+    ParticleSystemHandle system{InvalidParticleSystem};
+    bool playing{true};
+    bool looping{true};
+    float playbackSpeed{1.0f};
+    float elapsedTime{0.0f};
+    uint32_t maxParticles{1000};
+
+    // Emission shape
+    enum class Shape : uint8_t { Point, Sphere, Box, Cone };
+    Shape emitShape{Shape::Point};
+    float emitRadius{1.0f};
+    glm::vec3 emitSize{1.0f};  // For box/cone
+
+    // Emission rate
+    float emitRate{10.0f};     // Particles per second
+    float burstCount{0.0f};    // Instant burst (triggers when > 0)
+};
+
+// Particle system parameters (can be shared or per-emitter)
+struct ParticleParams {
+    // Lifetime
+    float minLifetime{1.0f};
+    float maxLifetime{2.0f};
+
+    // Initial velocity
+    glm::vec3 minVelocity{-1.0f, 1.0f, -1.0f};
+    glm::vec3 maxVelocity{1.0f, 3.0f, 1.0f};
+
+    // Physics
+    glm::vec3 gravity{0.0f, -9.81f, 0.0f};
+    float drag{0.1f};
+
+    // Size over lifetime
+    float startSize{0.1f};
+    float endSize{0.0f};
+
+    // Color over lifetime
+    glm::vec4 startColor{1.0f};
+    glm::vec4 endColor{1.0f, 1.0f, 1.0f, 0.0f};
+
+    // Rendering
+    TextureHandle texture{InvalidTexture};
+    bool additive{false};  // Additive blending for fire/sparks
+};
+
+// ============================================================================
+// Physics Integration Tags (Phase 4)
+// ============================================================================
+
+// Tag: entity receives physics forces but doesn't sync position
+struct PhysicsKinematic {};
+
+// Tag: entity is a physics trigger (collision events only)
+struct PhysicsTrigger {};
+
+// Collision event data (added when collision occurs)
+struct CollisionEvent {
+    entt::entity other{entt::null};
+    glm::vec3 contactPoint{0.0f};
+    glm::vec3 contactNormal{0.0f};
+    float impulse{0.0f};
+};
+
+// Physics material properties
+struct PhysicsMaterial {
+    float friction{0.5f};
+    float restitution{0.3f};  // Bounciness
+    float density{1.0f};
+};

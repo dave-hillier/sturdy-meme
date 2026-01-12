@@ -272,20 +272,20 @@ void LightSystem::gatherLights(entt::registry& registry, LightBuffer& buffer) {
 - [x] Selection and entity creation in UI
 
 ### Phase 2: Camera & Lights
-- [ ] Camera component with priority system
-- [ ] Light system queries ECS instead of LightManager
-- [ ] Shadow caster selection via ECS
+- [x] Camera component with priority system
+- [x] Light system queries ECS instead of LightManager
+- [x] Shadow caster selection via ECS
 
 ### Phase 3: Static Geometry
-- [ ] MeshRenderer component
-- [ ] Resource handles (MeshHandle, MaterialHandle)
-- [ ] Convert SceneBuilder renderables to entities
-- [ ] Basic frustum culling via ECS
+- [x] MeshRenderer component
+- [x] Resource handles (MeshHandle, MaterialHandle)
+- [x] Convert SceneBuilder renderables to entities
+- [x] Basic frustum culling via ECS
 
 ### Phase 4: Dynamic Objects
-- [ ] Physics-driven entities use ECS transforms
-- [ ] Animated meshes as entities
-- [ ] Particle emitters as entities
+- [x] Physics-driven entities use ECS transforms (PhysicsIntegration.h)
+- [x] Animated meshes as entities (AnimationIntegration.h, Animator, AnimationState)
+- [x] Particle emitters as entities (ParticleEmitter, ParticleParams)
 
 ### Phase 5: Environment
 - [ ] Terrain as ECS (TerrainPatch entities)

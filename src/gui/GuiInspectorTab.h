@@ -42,9 +42,16 @@ public:
         renderPhysicsBodyComponent(registry, selectedEntity);
         renderRenderableRefComponent(registry, selectedEntity);
         renderMeshRendererComponent(registry, selectedEntity);
+        renderSkinnedMeshRendererComponent(registry, selectedEntity);
         renderCameraComponent(registry, selectedEntity);
         renderAABBBoundsComponent(registry, selectedEntity);
         renderLODGroupComponent(registry, selectedEntity);
+        renderAnimatorComponent(registry, selectedEntity);
+        renderAnimationStateComponent(registry, selectedEntity);
+        renderFootIKComponent(registry, selectedEntity);
+        renderLookAtIKComponent(registry, selectedEntity);
+        renderParticleEmitterComponent(registry, selectedEntity);
+        renderPhysicsMaterialComponent(registry, selectedEntity);
         renderTagComponents(registry, selectedEntity);
 
         ImGui::Separator();
@@ -543,6 +550,173 @@ private:
         }
     }
 
+    void renderSkinnedMeshRendererComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<SkinnedMeshRenderer>(entity)) return;
+
+        if (renderComponentHeader("Skinned Mesh Renderer")) {
+            auto& skinned = registry.get<SkinnedMeshRenderer>(entity);
+
+            int meshId = static_cast<int>(skinned.mesh);
+            if (ImGui::InputInt("Mesh Handle", &meshId)) {
+                skinned.mesh = static_cast<MeshHandle>(std::max(0, meshId));
+            }
+
+            int matId = static_cast<int>(skinned.material);
+            if (ImGui::InputInt("Material Handle", &matId)) {
+                skinned.material = static_cast<MaterialHandle>(std::max(0, matId));
+            }
+
+            int skelId = static_cast<int>(skinned.skeleton);
+            if (ImGui::InputInt("Skeleton Handle", &skelId)) {
+                skinned.skeleton = static_cast<SkeletonHandle>(std::max(0, skelId));
+            }
+
+            ImGui::DragFloat("Animation Time", &skinned.animationTime, 0.01f, 0.0f, 100.0f, "%.2f s");
+        }
+    }
+
+    void renderAnimatorComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<Animator>(entity)) return;
+
+        if (renderComponentHeader("Animator")) {
+            auto& animator = registry.get<Animator>(entity);
+
+            const char* stateNames[] = {"Idle", "Walk", "Run", "Jump", "Fall", "Land", "Custom"};
+            int currentState = static_cast<int>(animator.currentState);
+            if (ImGui::Combo("Current State", &currentState, stateNames, IM_ARRAYSIZE(stateNames))) {
+                animator.currentState = static_cast<Animator::State>(currentState);
+            }
+
+            ImGui::TextDisabled("Previous: %s", stateNames[static_cast<int>(animator.previousState)]);
+            ImGui::DragFloat("State Time", &animator.stateTime, 0.01f, 0.0f, 100.0f, "%.2f s");
+            ImGui::DragFloat("Transition Time", &animator.transitionTime, 0.01f, 0.0f, 1.0f, "%.2f");
+            ImGui::DragFloat("Movement Speed", &animator.movementSpeed, 0.1f, 0.0f, 20.0f, "%.1f m/s");
+            ImGui::Checkbox("Grounded", &animator.grounded);
+            ImGui::Checkbox("Jumping", &animator.jumping);
+        }
+    }
+
+    void renderAnimationStateComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<AnimationState>(entity)) return;
+
+        if (renderComponentHeader("Animation State")) {
+            auto& state = registry.get<AnimationState>(entity);
+
+            int animId = static_cast<int>(state.currentAnimation);
+            if (ImGui::InputInt("Current Animation", &animId)) {
+                state.currentAnimation = static_cast<AnimationHandle>(std::max(0, animId));
+            }
+
+            int nextAnimId = static_cast<int>(state.nextAnimation);
+            if (ImGui::InputInt("Next Animation", &nextAnimId)) {
+                state.nextAnimation = static_cast<AnimationHandle>(std::max(-1, nextAnimId));
+            }
+
+            ImGui::DragFloat("Time", &state.time, 0.01f, 0.0f, 100.0f, "%.2f s");
+            ImGui::DragFloat("Speed", &state.speed, 0.01f, 0.0f, 5.0f, "%.2f x");
+            ImGui::DragFloat("Blend Weight", &state.blendWeight, 0.01f, 0.0f, 1.0f, "%.2f");
+            ImGui::DragFloat("Blend Duration", &state.blendDuration, 0.01f, 0.01f, 2.0f, "%.2f s");
+            ImGui::Checkbox("Looping", &state.looping);
+            ImGui::Checkbox("Playing", &state.playing);
+        }
+    }
+
+    void renderFootIKComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<FootIK>(entity)) return;
+
+        if (renderComponentHeader("Foot IK")) {
+            auto& footIK = registry.get<FootIK>(entity);
+
+            ImGui::Checkbox("Enabled", &footIK.enabled);
+            ImGui::DragFloat("Pelvis Offset", &footIK.pelvisOffset, 0.01f, -1.0f, 1.0f, "%.2f m");
+
+            if (ImGui::TreeNode("Left Foot")) {
+                editVec3("Position", footIK.leftFoot.position);
+                editVec3("Normal", footIK.leftFoot.normal, 0.01f);
+                ImGui::DragFloat("Weight", &footIK.leftFoot.weight, 0.01f, 0.0f, 1.0f);
+                ImGui::Checkbox("Active", &footIK.leftFoot.active);
+                ImGui::TreePop();
+            }
+
+            if (ImGui::TreeNode("Right Foot")) {
+                editVec3("Position", footIK.rightFoot.position);
+                editVec3("Normal", footIK.rightFoot.normal, 0.01f);
+                ImGui::DragFloat("Weight", &footIK.rightFoot.weight, 0.01f, 0.0f, 1.0f);
+                ImGui::Checkbox("Active", &footIK.rightFoot.active);
+                ImGui::TreePop();
+            }
+        }
+    }
+
+    void renderLookAtIKComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<LookAtIK>(entity)) return;
+
+        if (renderComponentHeader("Look-At IK")) {
+            auto& lookAt = registry.get<LookAtIK>(entity);
+
+            ImGui::Checkbox("Enabled", &lookAt.enabled);
+
+            // Target entity selector
+            uint32_t targetId = (lookAt.target != entt::null) ? static_cast<uint32_t>(lookAt.target) : ~0u;
+            ImGui::TextDisabled("Target Entity: %s",
+                (lookAt.target != entt::null) ? std::to_string(targetId).c_str() : "None");
+
+            editVec3("Target Position", lookAt.targetPosition);
+            ImGui::DragFloat("Weight", &lookAt.weight, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Max Yaw", &lookAt.maxYaw, 1.0f, 0.0f, 180.0f, "%.0f deg");
+            ImGui::DragFloat("Max Pitch", &lookAt.maxPitch, 1.0f, 0.0f, 90.0f, "%.0f deg");
+        }
+    }
+
+    void renderParticleEmitterComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<ParticleEmitter>(entity)) return;
+
+        if (renderComponentHeader("Particle Emitter")) {
+            auto& emitter = registry.get<ParticleEmitter>(entity);
+
+            int sysId = static_cast<int>(emitter.system);
+            if (ImGui::InputInt("System Handle", &sysId)) {
+                emitter.system = static_cast<ParticleSystemHandle>(std::max(0, sysId));
+            }
+
+            ImGui::Checkbox("Playing", &emitter.playing);
+            ImGui::Checkbox("Looping", &emitter.looping);
+            ImGui::DragFloat("Playback Speed", &emitter.playbackSpeed, 0.01f, 0.0f, 5.0f, "%.2f x");
+            ImGui::DragFloat("Elapsed Time", &emitter.elapsedTime, 0.1f, 0.0f, 1000.0f, "%.1f s");
+
+            int maxP = static_cast<int>(emitter.maxParticles);
+            if (ImGui::InputInt("Max Particles", &maxP)) {
+                emitter.maxParticles = static_cast<uint32_t>(std::max(1, maxP));
+            }
+
+            ImGui::Separator();
+            ImGui::Text("Emission");
+
+            const char* shapeNames[] = {"Point", "Sphere", "Box", "Cone"};
+            int shape = static_cast<int>(emitter.emitShape);
+            if (ImGui::Combo("Shape", &shape, shapeNames, IM_ARRAYSIZE(shapeNames))) {
+                emitter.emitShape = static_cast<ParticleEmitter::Shape>(shape);
+            }
+
+            ImGui::DragFloat("Emit Radius", &emitter.emitRadius, 0.1f, 0.0f, 100.0f);
+            editVec3("Emit Size", emitter.emitSize);
+            ImGui::DragFloat("Emit Rate", &emitter.emitRate, 1.0f, 0.0f, 10000.0f, "%.0f /s");
+            ImGui::DragFloat("Burst Count", &emitter.burstCount, 1.0f, 0.0f, 1000.0f);
+        }
+    }
+
+    void renderPhysicsMaterialComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<PhysicsMaterial>(entity)) return;
+
+        if (renderComponentHeader("Physics Material")) {
+            auto& mat = registry.get<PhysicsMaterial>(entity);
+
+            ImGui::DragFloat("Friction", &mat.friction, 0.01f, 0.0f, 2.0f);
+            ImGui::DragFloat("Restitution", &mat.restitution, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Density", &mat.density, 0.1f, 0.01f, 100.0f, "%.2f kg/m3");
+        }
+    }
+
     void renderTagComponents(entt::registry& registry, entt::entity entity) {
         // Collect all tag components
         std::vector<std::string> tags;
@@ -551,6 +725,8 @@ private:
         if (registry.all_of<Grounded>(entity)) tags.push_back("Grounded");
         if (registry.all_of<DynamicObject>(entity)) tags.push_back("Dynamic Object");
         if (registry.all_of<PhysicsDriven>(entity)) tags.push_back("Physics Driven");
+        if (registry.all_of<PhysicsKinematic>(entity)) tags.push_back("Physics Kinematic");
+        if (registry.all_of<PhysicsTrigger>(entity)) tags.push_back("Physics Trigger");
         if (registry.all_of<NPCTag>(entity)) tags.push_back("NPC");
         if (registry.all_of<LightEnabled>(entity)) tags.push_back("Light Enabled");
         if (registry.all_of<Selected>(entity)) tags.push_back("Selected");
@@ -658,6 +834,63 @@ private:
             if (!registry.all_of<StaticObject>(entity)) {
                 if (ImGui::MenuItem("Static Object (Tag)")) {
                     registry.emplace<StaticObject>(entity);
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Animation");
+
+            if (!registry.all_of<SkinnedMeshRenderer>(entity)) {
+                if (ImGui::MenuItem("Skinned Mesh Renderer")) {
+                    registry.emplace<SkinnedMeshRenderer>(entity);
+                }
+            }
+            if (!registry.all_of<Animator>(entity)) {
+                if (ImGui::MenuItem("Animator")) {
+                    registry.emplace<Animator>(entity);
+                }
+            }
+            if (!registry.all_of<AnimationState>(entity)) {
+                if (ImGui::MenuItem("Animation State")) {
+                    registry.emplace<AnimationState>(entity);
+                }
+            }
+            if (!registry.all_of<FootIK>(entity)) {
+                if (ImGui::MenuItem("Foot IK")) {
+                    registry.emplace<FootIK>(entity);
+                }
+            }
+            if (!registry.all_of<LookAtIK>(entity)) {
+                if (ImGui::MenuItem("Look-At IK")) {
+                    registry.emplace<LookAtIK>(entity);
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Physics");
+
+            if (!registry.all_of<PhysicsMaterial>(entity)) {
+                if (ImGui::MenuItem("Physics Material")) {
+                    registry.emplace<PhysicsMaterial>(entity);
+                }
+            }
+            if (!registry.all_of<PhysicsKinematic>(entity)) {
+                if (ImGui::MenuItem("Physics Kinematic (Tag)")) {
+                    registry.emplace<PhysicsKinematic>(entity);
+                }
+            }
+            if (!registry.all_of<PhysicsTrigger>(entity)) {
+                if (ImGui::MenuItem("Physics Trigger (Tag)")) {
+                    registry.emplace<PhysicsTrigger>(entity);
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Effects");
+
+            if (!registry.all_of<ParticleEmitter>(entity)) {
+                if (ImGui::MenuItem("Particle Emitter")) {
+                    registry.emplace<ParticleEmitter>(entity);
                 }
             }
 
