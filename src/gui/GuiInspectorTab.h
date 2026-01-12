@@ -72,6 +72,13 @@ public:
         renderLightProbeComponent(registry, selectedEntity);
         renderLightProbeVolumeComponent(registry, selectedEntity);
         renderPortalSurfaceComponent(registry, selectedEntity);
+        renderAudioSourceComponent(registry, selectedEntity);
+        renderAudioListenerComponent(registry, selectedEntity);
+        renderAmbientSoundZoneComponent(registry, selectedEntity);
+        renderReverbZoneComponent(registry, selectedEntity);
+        renderMusicTrackComponent(registry, selectedEntity);
+        renderAudioMixerGroupComponent(registry, selectedEntity);
+        renderAudioOcclusionComponent(registry, selectedEntity);
         renderTagComponents(registry, selectedEntity);
 
         ImGui::Separator();
@@ -1300,6 +1307,225 @@ private:
         }
     }
 
+    // ========================================================================
+    // Audio Component Editors (Phase 8)
+    // ========================================================================
+
+    void renderAudioSourceComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<AudioSource>(entity)) return;
+
+        if (renderComponentHeader("Audio Source")) {
+            auto& source = registry.get<AudioSource>(entity);
+
+            int clipId = static_cast<int>(source.clip);
+            if (ImGui::InputInt("Clip Handle", &clipId)) {
+                source.clip = static_cast<AudioClipHandle>(std::max(0, clipId));
+            }
+
+            // Playback controls
+            ImGui::Separator();
+            ImGui::Text("Playback");
+            bool wasPlaying = source.playing;
+            ImGui::Checkbox("Playing", &source.playing);
+            ImGui::SameLine();
+            ImGui::Checkbox("Looping", &source.looping);
+            ImGui::SameLine();
+            ImGui::Checkbox("Paused", &source.paused);
+
+            ImGui::DragFloat("Position", &source.playbackPosition, 0.1f, 0.0f, 1000.0f, "%.1f s");
+
+            // Volume controls
+            ImGui::Separator();
+            ImGui::Text("Volume");
+            ImGui::DragFloat("Volume", &source.volume, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Pitch", &source.pitch, 0.01f, 0.5f, 2.0f);
+            if (!source.spatialize) {
+                ImGui::DragFloat("Pan", &source.pan, 0.01f, -1.0f, 1.0f);
+            }
+
+            // 3D settings
+            ImGui::Separator();
+            ImGui::Text("Spatialization");
+            ImGui::Checkbox("3D Spatial", &source.spatialize);
+            if (source.spatialize) {
+                ImGui::DragFloat("Min Distance", &source.minDistance, 0.5f, 0.0f, 100.0f, "%.1f m");
+                ImGui::DragFloat("Max Distance", &source.maxDistance, 1.0f, 1.0f, 500.0f, "%.0f m");
+
+                const char* rolloffs[] = {"Linear", "Logarithmic", "Custom"};
+                int rolloff = static_cast<int>(source.rolloff);
+                if (ImGui::Combo("Rolloff", &rolloff, rolloffs, IM_ARRAYSIZE(rolloffs))) {
+                    source.rolloff = static_cast<AudioSource::Rolloff>(rolloff);
+                }
+
+                if (source.rolloff == AudioSource::Rolloff::Custom) {
+                    ImGui::DragFloat("Rolloff Factor", &source.rolloffFactor, 0.1f, 0.1f, 10.0f);
+                }
+            }
+
+            // Doppler
+            if (ImGui::TreeNode("Doppler")) {
+                ImGui::Checkbox("Enabled", &source.dopplerEnabled);
+                if (source.dopplerEnabled) {
+                    ImGui::DragFloat("Factor", &source.dopplerFactor, 0.1f, 0.0f, 5.0f);
+                }
+                ImGui::TreePop();
+            }
+
+            // Cone attenuation
+            if (ImGui::TreeNode("Cone Attenuation")) {
+                ImGui::DragFloat("Inner Angle", &source.coneInnerAngle, 1.0f, 0.0f, 360.0f, "%.0f deg");
+                ImGui::DragFloat("Outer Angle", &source.coneOuterAngle, 1.0f, 0.0f, 360.0f, "%.0f deg");
+                ImGui::DragFloat("Outer Volume", &source.coneOuterVolume, 0.01f, 0.0f, 1.0f);
+                ImGui::TreePop();
+            }
+
+            // Flags
+            if (ImGui::TreeNode("Flags")) {
+                ImGui::InputInt("Priority", &source.priority);
+                ImGui::Checkbox("Play On Awake", &source.playOnAwake);
+                ImGui::Checkbox("Destroy On Complete", &source.destroyOnComplete);
+                ImGui::TreePop();
+            }
+        }
+    }
+
+    void renderAudioListenerComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<AudioListener>(entity)) return;
+
+        if (renderComponentHeader("Audio Listener")) {
+            auto& listener = registry.get<AudioListener>(entity);
+
+            ImGui::DragFloat("Volume", &listener.volume, 0.01f, 0.0f, 2.0f);
+            ImGui::Checkbox("Active", &listener.active);
+
+            // Show active status
+            bool isActive = registry.all_of<ActiveAudioListener>(entity);
+            if (isActive) {
+                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "ACTIVE LISTENER");
+            } else {
+                if (ImGui::Button("Make Active")) {
+                    // Remove from others
+                    auto view = registry.view<ActiveAudioListener>();
+                    for (auto e : view) {
+                        registry.remove<ActiveAudioListener>(e);
+                    }
+                    registry.emplace<ActiveAudioListener>(entity);
+                    listener.active = true;
+                }
+            }
+
+            editVec3("Velocity", listener.velocity);
+        }
+    }
+
+    void renderAmbientSoundZoneComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<AmbientSoundZone>(entity)) return;
+
+        if (renderComponentHeader("Ambient Sound Zone")) {
+            auto& zone = registry.get<AmbientSoundZone>(entity);
+
+            int clipId = static_cast<int>(zone.clip);
+            if (ImGui::InputInt("Clip Handle", &clipId)) {
+                zone.clip = static_cast<AudioClipHandle>(std::max(0, clipId));
+            }
+
+            editVec3("Extents", zone.extents);
+            ImGui::DragFloat("Fade Distance", &zone.fadeDistance, 0.5f, 0.0f, 50.0f, "%.1f m");
+            ImGui::DragFloat("Volume", &zone.volume, 0.01f, 0.0f, 1.0f);
+            ImGui::Checkbox("Looping", &zone.looping);
+
+            // Status
+            ImGui::Separator();
+            ImGui::TextDisabled("Inside: %s", zone.currentlyInside ? "Yes" : "No");
+            ImGui::TextDisabled("Current Volume: %.2f", zone.currentVolume);
+        }
+    }
+
+    void renderReverbZoneComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<ReverbZone>(entity)) return;
+
+        if (renderComponentHeader("Reverb Zone")) {
+            auto& reverb = registry.get<ReverbZone>(entity);
+
+            editVec3("Extents", reverb.extents);
+            ImGui::DragFloat("Fade Distance", &reverb.fadeDistance, 0.5f, 0.0f, 50.0f, "%.1f m");
+
+            const char* presets[] = {"None", "Room", "Hallway", "Cave", "Arena", "Hangar", "Forest", "Underwater", "Custom"};
+            int preset = static_cast<int>(reverb.preset);
+            if (ImGui::Combo("Preset", &preset, presets, IM_ARRAYSIZE(presets))) {
+                reverb.preset = static_cast<ReverbZone::Preset>(preset);
+            }
+
+            if (reverb.preset == ReverbZone::Preset::Custom) {
+                ImGui::DragFloat("Decay Time", &reverb.decayTime, 0.1f, 0.1f, 20.0f, "%.1f s");
+                ImGui::DragFloat("Early Reflections", &reverb.earlyReflections, 0.01f, 0.0f, 1.0f);
+                ImGui::DragFloat("Late Reverb", &reverb.lateReverb, 0.01f, 0.0f, 1.0f);
+                ImGui::DragFloat("Diffusion", &reverb.diffusion, 0.01f, 0.0f, 1.0f);
+                ImGui::DragFloat("Density", &reverb.density, 0.01f, 0.0f, 1.0f);
+                ImGui::DragFloat("HF Decay", &reverb.hfDecayRatio, 0.01f, 0.0f, 2.0f);
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Blend Weight: %.2f", reverb.blendWeight);
+        }
+    }
+
+    void renderMusicTrackComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<MusicTrack>(entity)) return;
+
+        if (renderComponentHeader("Music Track")) {
+            auto& music = registry.get<MusicTrack>(entity);
+
+            int clipId = static_cast<int>(music.clip);
+            if (ImGui::InputInt("Clip Handle", &clipId)) {
+                music.clip = static_cast<AudioClipHandle>(std::max(0, clipId));
+            }
+
+            ImGui::DragFloat("Volume", &music.volume, 0.01f, 0.0f, 1.0f);
+            ImGui::Checkbox("Playing", &music.playing);
+            ImGui::SameLine();
+            ImGui::Checkbox("Looping", &music.looping);
+
+            ImGui::DragFloat("Fade In", &music.fadeInDuration, 0.1f, 0.0f, 10.0f, "%.1f s");
+            ImGui::DragFloat("Fade Out", &music.fadeOutDuration, 0.1f, 0.0f, 10.0f, "%.1f s");
+
+            const char* states[] = {"Stopped", "Fading In", "Playing", "Fading Out", "Crossfading"};
+            ImGui::TextDisabled("State: %s", states[static_cast<int>(music.state)]);
+            ImGui::TextDisabled("Progress: %.2f", music.crossfadeProgress);
+        }
+    }
+
+    void renderAudioMixerGroupComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<AudioMixerGroup>(entity)) return;
+
+        if (renderComponentHeader("Audio Mixer Group")) {
+            auto& mixer = registry.get<AudioMixerGroup>(entity);
+
+            const char* groups[] = {"Master", "Music", "SFX", "Voice", "Ambient", "UI", "Custom"};
+            int group = static_cast<int>(mixer.group);
+            if (ImGui::Combo("Group", &group, groups, IM_ARRAYSIZE(groups))) {
+                mixer.group = static_cast<AudioMixerGroup::Group>(group);
+            }
+
+            ImGui::DragFloat("Group Volume", &mixer.groupVolume, 0.01f, 0.0f, 1.0f);
+        }
+    }
+
+    void renderAudioOcclusionComponent(entt::registry& registry, entt::entity entity) {
+        if (!registry.all_of<AudioOcclusion>(entity)) return;
+
+        if (renderComponentHeader("Audio Occlusion")) {
+            auto& occlusion = registry.get<AudioOcclusion>(entity);
+
+            ImGui::DragFloat("Occlusion", &occlusion.occlusionFactor, 0.01f, 0.0f, 1.0f);
+            ImGui::DragFloat("Low Pass", &occlusion.lowPassFilter, 0.01f, 0.0f, 1.0f);
+            ImGui::Checkbox("Auto Calculate", &occlusion.autoCalculate);
+            if (occlusion.autoCalculate) {
+                ImGui::DragFloat("Update Interval", &occlusion.updateInterval, 0.01f, 0.01f, 1.0f, "%.2f s");
+            }
+        }
+    }
+
     void renderTagComponents(entt::registry& registry, entt::entity entity) {
         // Collect all tag components
         std::vector<std::string> tags;
@@ -1321,6 +1547,8 @@ private:
         if (registry.all_of<IsOccluder>(entity)) tags.push_back("Is Occluder");
         if (registry.all_of<IsReflectionProbe>(entity)) tags.push_back("Reflection Probe");
         if (registry.all_of<IsLightProbe>(entity)) tags.push_back("Light Probe");
+        if (registry.all_of<IsAudioSource>(entity)) tags.push_back("Audio Source");
+        if (registry.all_of<ActiveAudioListener>(entity)) tags.push_back("Active Audio Listener");
 
         if (!tags.empty()) {
             if (renderComponentHeader("Tags")) {
@@ -1614,6 +1842,48 @@ private:
                     registry.emplace<PortalSurface>(entity);
                     registry.emplace_or_replace<RenderTarget>(entity);
                     registry.emplace_or_replace<MeshRenderer>(entity);
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Audio");
+
+            if (!registry.all_of<AudioSource>(entity)) {
+                if (ImGui::MenuItem("Audio Source")) {
+                    registry.emplace<AudioSource>(entity);
+                    registry.emplace_or_replace<IsAudioSource>(entity);
+                }
+            }
+            if (!registry.all_of<AudioListener>(entity)) {
+                if (ImGui::MenuItem("Audio Listener")) {
+                    registry.emplace<AudioListener>(entity);
+                }
+            }
+            if (!registry.all_of<AmbientSoundZone>(entity)) {
+                if (ImGui::MenuItem("Ambient Sound Zone")) {
+                    registry.emplace<AmbientSoundZone>(entity);
+                    registry.emplace_or_replace<AABBBounds>(entity);
+                }
+            }
+            if (!registry.all_of<ReverbZone>(entity)) {
+                if (ImGui::MenuItem("Reverb Zone")) {
+                    registry.emplace<ReverbZone>(entity);
+                    registry.emplace_or_replace<AABBBounds>(entity);
+                }
+            }
+            if (!registry.all_of<MusicTrack>(entity)) {
+                if (ImGui::MenuItem("Music Track")) {
+                    registry.emplace<MusicTrack>(entity);
+                }
+            }
+            if (!registry.all_of<AudioMixerGroup>(entity)) {
+                if (ImGui::MenuItem("Audio Mixer Group")) {
+                    registry.emplace<AudioMixerGroup>(entity);
+                }
+            }
+            if (!registry.all_of<AudioOcclusion>(entity)) {
+                if (ImGui::MenuItem("Audio Occlusion")) {
+                    registry.emplace<AudioOcclusion>(entity);
                 }
             }
 
