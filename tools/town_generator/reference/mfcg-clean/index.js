@@ -21,9 +21,13 @@ export { PolygonUtils } from './geometry/PolygonUtils.js';
 export { DCEL, Vertex, HalfEdge, Face, EdgeChain } from './geometry/DCEL.js';
 export { Voronoi, Triangulation } from './geometry/Voronoi.js';
 export { Chaikin, PolygonSmoother } from './geometry/Chaikin.js';
+export { PoissonPattern, FillablePoly } from './geometry/PoissonPattern.js';
+export { Graph, Node } from './geometry/Graph.js';
+export { SkeletonBuilder, Rib } from './geometry/SkeletonBuilder.js';
 
 // Utilities
 export { Noise, Perlin } from './utils/Noise.js';
+export { Bisector } from './utils/Bisector.js';
 
 // Model
 export { Cell } from './model/Cell.js';
@@ -33,11 +37,13 @@ export { City, EdgeType } from './model/City.js';
 export { CurtainWall } from './model/CurtainWall.js';
 export { Canal } from './model/Canal.js';
 export { District, DistrictBuilder, AlleyConfig } from './model/District.js';
+export { Forester } from './model/Forester.js';
+export { Topology } from './model/Topology.js';
 
 // Wards
 export { Ward } from './wards/Ward.js';
 export { Alleys } from './wards/Alleys.js';
-export { Block } from './wards/Block.js';
+export { Block, TwistedBlock } from './wards/Block.js';
 export { Castle } from './wards/Castle.js';
 export { Cathedral } from './wards/Cathedral.js';
 export { Farm } from './wards/Farm.js';
@@ -46,6 +52,9 @@ export { Market } from './wards/Market.js';
 export { Park } from './wards/Park.js';
 export { WardGroup } from './wards/WardGroup.js';
 export { Wilderness } from './wards/Wilderness.js';
+
+// Export
+export { GeoJSON, JsonExporter } from './export/JsonExporter.js';
 
 /**
  * Generate a city with the given parameters

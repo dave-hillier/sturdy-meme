@@ -21,7 +21,10 @@ mfcg-clean/
 │   ├── Voronoi.js  # Voronoi diagram
 │   ├── Chaikin.js  # Curve smoothing
 │   ├── GeomUtils.js
-│   └── PolygonUtils.js
+│   ├── PolygonUtils.js
+│   ├── PoissonPattern.js  # Poisson disk sampling
+│   ├── Graph.js    # Graph with A* pathfinding
+│   └── SkeletonBuilder.js # Straight skeleton for roofs
 ├── model/          # City model
 │   ├── City.js     # Main generator
 │   ├── Blueprint.js # Generation parameters
@@ -29,7 +32,9 @@ mfcg-clean/
 │   ├── Cell.js     # Voronoi cell
 │   ├── CurtainWall.js
 │   ├── Canal.js
-│   └── District.js
+│   ├── District.js
+│   ├── Forester.js # Tree placement
+│   └── Topology.js # Road network pathfinding
 ├── wards/          # Ward types
 │   ├── Ward.js     # Base class
 │   ├── Alleys.js   # Urban housing
@@ -41,7 +46,10 @@ mfcg-clean/
 │   ├── Park.js
 │   └── Wilderness.js
 ├── utils/
-│   └── Noise.js    # Perlin/fractal noise
+│   ├── Noise.js    # Perlin/fractal noise
+│   └── Bisector.js # Polygon subdivision
+├── export/
+│   └── JsonExporter.js # GeoJSON export
 └── index.js        # Main entry point
 ```
 
@@ -90,6 +98,9 @@ city2.build();
 - **Voronoi** - Voronoi diagram generator
 - **Chaikin** - Curve smoothing algorithm
 - **PolygonUtils** - Polygon operations (area, centroid, inset, etc.)
+- **PoissonPattern** - Poisson disk sampling for natural distribution
+- **Graph/Node** - Graph data structure with A* pathfinding
+- **SkeletonBuilder** - Straight skeleton algorithm for roof generation
 
 ### Model
 
@@ -99,6 +110,18 @@ city2.build();
 - **CurtainWall** - City/castle walls with towers and gates
 - **Canal** - Rivers and water features
 - **District** - Named city districts
+- **Forester** - Tree placement using Poisson sampling
+- **Topology** - Road network pathfinding
+
+### Utilities
+
+- **Noise/Perlin** - Fractal noise generation
+- **Bisector** - Polygon subdivision for lot generation
+
+### Export
+
+- **JsonExporter** - Export city to GeoJSON format
+- **GeoJSON** - GeoJSON geometry helpers
 
 ### Wards
 
