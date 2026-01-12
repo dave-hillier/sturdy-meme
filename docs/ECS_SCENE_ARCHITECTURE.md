@@ -301,6 +301,24 @@ void LightSystem::gatherLights(entt::registry& registry, LightBuffer& buffer) {
 - [x] Render layers/masks (RenderLayer enum, cullingMask in CameraComponent)
 - [x] Multi-camera support (CameraComponent with priority)
 
+### Phase 7: Extended Rendering
+- [ ] Decal component (projected textures on surfaces)
+- [ ] SpriteRenderer (billboard sprites with atlas support)
+- [ ] RenderTarget (render-to-texture for cameras, mirrors, portals)
+- [ ] ReflectionProbe (local cubemap reflections)
+- [ ] LightProbe (spherical harmonics for indirect lighting)
+
+### Phase 8: Audio
+- [ ] AudioSource (spatial 3D audio emitter)
+- [ ] AudioListener (active listener tag, typically on camera/player)
+- [ ] AudioIntegration.h (bridge to audio system)
+
+### Phase 9: Gameplay Systems
+- [ ] TriggerVolume (generic trigger zones for gameplay events)
+- [ ] NavMeshAgent (AI pathfinding with navigation mesh)
+- [ ] Interactable (player interaction targets)
+- [ ] GameplayIntegration.h (trigger callbacks, interaction system)
+
 ## Resource Management
 
 ### Handle System
