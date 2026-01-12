@@ -276,14 +276,12 @@ add_executable(town_generator
     town_generator/src/utils/MathUtils.cpp
     town_generator/src/utils/Forester.cpp
     town_generator/src/building/Cell.cpp
-    town_generator/src/building/Cutter.cpp
     town_generator/src/building/Topology.cpp
     town_generator/src/building/CurtainWall.cpp
     town_generator/src/building/District.cpp
     town_generator/src/building/Canal.cpp
     town_generator/src/building/WardGroup.cpp
     town_generator/src/building/Block.cpp
-    town_generator/src/building/Bisector.cpp
     town_generator/src/building/Building.cpp
     town_generator/src/building/Landmark.cpp
     town_generator/src/building/City.cpp

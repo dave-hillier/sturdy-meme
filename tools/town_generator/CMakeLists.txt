@@ -24,13 +24,11 @@ set(UTILS_SOURCES
 
 set(BUILDING_SOURCES
     src/building/Cell.cpp
-    src/building/Cutter.cpp
     src/building/Topology.cpp
     src/building/CurtainWall.cpp
     src/building/Canal.cpp
     src/building/WardGroup.cpp
     src/building/Block.cpp
-    src/building/Bisector.cpp
     src/building/Building.cpp
     src/building/District.cpp
     src/building/Landmark.cpp

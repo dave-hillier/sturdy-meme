@@ -37,11 +37,8 @@ public:
     // Combined border of all cells
     geom::Polygon border;
 
-    // City blocks after alley subdivision
+    // City blocks
     std::vector<std::unique_ptr<Block>> blocks;
-
-    // Alley cut lines (from Bisector) for SVG rendering
-    std::vector<std::vector<geom::Point>> alleyCuts;
 
     // Whether this is an urban (walled) district
     // Set to true if all border vertices are "inner" (within city or waterbody)

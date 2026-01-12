@@ -2,7 +2,6 @@
 #include "town_generator/building/Block.h"
 #include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
-#include "town_generator/building/Bisector.h"
 #include "town_generator/utils/Random.h"
 #include "town_generator/wards/Ward.h"
 #include <algorithm>
@@ -124,30 +123,10 @@ void WardGroup::createGeometry() {
         return;
     }
 
-    // Create blocks using Bisector (faithful to mfcg.js createAlleys)
-    // MFCG: new Bisector(shape, alleys.minSq * alleys.blockSize, 16 * alleys.gridChaos)
-    double minArea = alleys.minSq * alleys.blockSize;
-    double variance = 16.0 * alleys.gridChaos;
-    Bisector bisector(available, minArea, variance);
-
-    // Set gap callback (returns Ward::ALLEY = 1.2)
-    bisector.getGap = [](const std::vector<geom::Point>&) {
-        return wards::Ward::ALLEY;
-    };
-
-    // For non-urban areas, use isBlockSized as atomic check
-    if (!urban) {
-        double blockSizeThreshold = alleys.minSq * alleys.blockSize;
-        bisector.isAtomic = [blockSizeThreshold](const geom::Polygon& shape) {
-            return std::abs(shape.square()) < blockSizeThreshold;
-        };
-    }
-
-    // Partition the area into blocks
-    std::vector<geom::Polygon> blockShapes = bisector.partition();
-
-    // Store alley cuts for SVG rendering
-    alleyCuts = bisector.cuts;
+    // Simplified block creation - faithful to mfcg-clean WardGroup.js
+    // The reference just uses the available shape as a single block
+    std::vector<geom::Polygon> blockShapes;
+    blockShapes.push_back(available);
 
     // Create Block objects from shapes
     blocks.clear();

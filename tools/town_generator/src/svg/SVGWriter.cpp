@@ -186,18 +186,9 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
     }
     svg << "  </g>\n";
 
-    // Alleys (from WardGroups and individual wards)
+    // Alleys (from individual wards)
     svg << "  <g id=\"alleys\">\n";
-    // Render alley cuts from WardGroups (Alleys wards)
-    for (const auto& group : model.wardGroups_) {
-        for (const auto& alley : group->alleyCuts) {
-            svg << "    <path d=\"" << polylineToPath(alley) << "\" ";
-            svg << "fill=\"none\" stroke=\"" << style.alleyStroke << "\" ";
-            svg << "stroke-width=\"" << style.alleyStrokeWidth << "\" ";
-            svg << "stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n";
-        }
-    }
-    // Render alleys from non-grouped wards (Farm, etc.)
+    // Render alleys from wards
     for (const auto& ward : model.wards_) {
         std::string wardName = ward->getName();
         if (wardName == "Alleys") continue;  // Already rendered from WardGroups

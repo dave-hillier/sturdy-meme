@@ -1,11 +1,9 @@
 #include "town_generator/building/Building.h"
-#include "town_generator/building/Cutter.h"
 #include "town_generator/geom/GeomUtils.h"
 #include "town_generator/utils/Random.h"
 #include <algorithm>
 #include <cmath>
 #include <map>
-#include <SDL3/SDL_log.h>
 
 namespace town_generator {
 namespace building {
@@ -341,8 +339,29 @@ geom::Polygon Building::create(
         return geom::Polygon();  // No L-shape possible
     }
 
-    // Generate grid cells (using Cutter::grid, faithful to MFCG)
-    auto gridCells = Cutter::grid(quad, cols, rows, gap);
+    // Generate grid cells - inline grid function (simplified from Cutter::grid)
+    std::vector<geom::Polygon> gridCells;
+    {
+        geom::Point p0 = quad[0], p1 = quad[1], p2 = quad[2], p3 = quad[3];
+        for (int r = 0; r < rows; ++r) {
+            double r0 = static_cast<double>(r) / rows;
+            double r1 = static_cast<double>(r + 1) / rows;
+            geom::Point left0 = geom::GeomUtils::lerp(p0, p3, r0);
+            geom::Point right0 = geom::GeomUtils::lerp(p1, p2, r0);
+            geom::Point left1 = geom::GeomUtils::lerp(p0, p3, r1);
+            geom::Point right1 = geom::GeomUtils::lerp(p1, p2, r1);
+            for (int c = 0; c < cols; ++c) {
+                double c0 = static_cast<double>(c) / cols;
+                double c1 = static_cast<double>(c + 1) / cols;
+                gridCells.push_back(geom::Polygon({
+                    geom::GeomUtils::lerp(left0, right0, c0),
+                    geom::GeomUtils::lerp(left0, right0, c1),
+                    geom::GeomUtils::lerp(left1, right1, c1),
+                    geom::GeomUtils::lerp(left1, right1, c0)
+                }));
+            }
+        }
+    }
 
     // Collect filled cells
     std::vector<geom::Polygon> filledPolygons;

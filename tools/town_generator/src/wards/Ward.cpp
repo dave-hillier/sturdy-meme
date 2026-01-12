@@ -1,9 +1,7 @@
 #include "town_generator/wards/Ward.h"
 #include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
-#include "town_generator/building/Cutter.h"
 #include "town_generator/building/Block.h"
-#include "town_generator/building/Bisector.h"
 #include "town_generator/geom/GeomUtils.h"
 #include <algorithm>
 #include <cmath>
@@ -913,62 +911,9 @@ void Ward::createBlock(const geom::Polygon& shape, bool isSmall) {
 }
 
 void Ward::createAlleys(const geom::Polygon& shape, const AlleyParams& params) {
-    // Faithful to mfcg.js createAlleys (lines 13124-13145)
-    // Uses Bisector for proper partitioning
-
-    // Create bisector with minArea = minSq * blockSize, variance = 16 * gridChaos
-    double minArea = params.minSq * params.blockSize;
-    double variance = 16.0 * params.gridChaos;
-
-    building::Bisector bisector(shape, minArea, variance);
-
-    // Set gap callback (returns ALLEY)
-    bisector.getGap = [](const std::vector<geom::Point>&) { return ALLEY; };
-
-    // Set processCut to semiSmooth (optional, can be nullptr)
-    double minFront = params.minFront;
-    bisector.processCut = [minFront](const std::vector<geom::Point>& pts) {
-        if (pts.size() >= 3) {
-            return Ward::semiSmooth(pts[0], pts[1], pts[2], minFront);
-        }
-        return pts;
-    };
-
-    // For non-urban wards, use isBlockSized check
-    if (!urban) {
-        bisector.isAtomic = [this, &params](const geom::Polygon& p) {
-            return isBlockSized(p, params);
-        };
-    }
-
-    // Partition
-    auto partitions = bisector.partition();
-
-    // Store alley cuts for rendering
-    for (const auto& cut : bisector.cuts) {
-        alleys.push_back(cut);
-    }
-
-    // Process each partition
-    for (const auto& partition : partitions) {
-        double area = std::abs(partition.square());
-
-        // Calculate threshold with random variation (faithful to mfcg.js line 13138-13139)
-        double threshold = params.minSq * std::pow(2.0,
-            params.sizeChaos * (2.0 * utils::Random::floatVal() - 1.0));
-        double churchThreshold = 4.0 * threshold;
-
-        if (area < threshold) {
-            // Small block - create Block with isSmall=true
-            createBlock(partition, true);
-        } else if (church.empty() && area <= churchThreshold) {
-            // Church-sized block - create church
-            createChurch(partition);
-        } else {
-            // Regular block - create Block with isSmall=false
-            createBlock(partition, false);
-        }
-    }
+    // Simplified createAlleys - faithful to mfcg-clean WardGroup.js
+    // Just create a single block from the shape
+    createBlock(shape, false);
 }
 
 bool Ward::isBlockSized(const geom::Polygon& shape, const AlleyParams& params) {
