@@ -339,25 +339,56 @@ geom::Polygon Building::create(
         return geom::Polygon();  // No L-shape possible
     }
 
-    // Generate grid cells - inline grid function (simplified from Cutter::grid)
+    // Generate grid cells - faithful to Cutter.grid (mfcg.js lines 6127-6167)
+    // The gap parameter adds randomness to grid line positions
     std::vector<geom::Polygon> gridCells;
     {
         geom::Point p0 = quad[0], p1 = quad[1], p2 = quad[2], p3 = quad[3];
+
+        // Create parameter arrays for columns and rows
+        std::vector<double> colParams(cols + 1);
+        std::vector<double> rowParams(rows + 1);
+
+        for (int c = 0; c <= cols; ++c) {
+            colParams[c] = static_cast<double>(c) / cols;
+        }
+        for (int r = 0; r <= rows; ++r) {
+            rowParams[r] = static_cast<double>(r) / rows;
+        }
+
+        // Apply chaos/randomness to interior grid lines (faithful to mfcg.js lines 6140-6145)
+        if (gap > 0) {
+            for (int c = 1; c < cols; ++c) {
+                double noise = (utils::Random::floatVal() + utils::Random::floatVal() +
+                               utils::Random::floatVal()) / 3.0 - 0.5;
+                colParams[c] += noise / (cols - 1) * gap;
+            }
+            for (int r = 1; r < rows; ++r) {
+                double noise = (utils::Random::floatVal() + utils::Random::floatVal() +
+                               utils::Random::floatVal()) / 3.0 - 0.5;
+                rowParams[r] += noise / (rows - 1) * gap;
+            }
+        }
+
+        // Generate vertex grid
+        std::vector<std::vector<geom::Point>> vertices(rows + 1);
+        for (int r = 0; r <= rows; ++r) {
+            geom::Point left = geom::GeomUtils::lerp(p0, p3, rowParams[r]);
+            geom::Point right = geom::GeomUtils::lerp(p1, p2, rowParams[r]);
+            vertices[r].resize(cols + 1);
+            for (int c = 0; c <= cols; ++c) {
+                vertices[r][c] = geom::GeomUtils::lerp(left, right, colParams[c]);
+            }
+        }
+
+        // Create cells from vertex grid
         for (int r = 0; r < rows; ++r) {
-            double r0 = static_cast<double>(r) / rows;
-            double r1 = static_cast<double>(r + 1) / rows;
-            geom::Point left0 = geom::GeomUtils::lerp(p0, p3, r0);
-            geom::Point right0 = geom::GeomUtils::lerp(p1, p2, r0);
-            geom::Point left1 = geom::GeomUtils::lerp(p0, p3, r1);
-            geom::Point right1 = geom::GeomUtils::lerp(p1, p2, r1);
             for (int c = 0; c < cols; ++c) {
-                double c0 = static_cast<double>(c) / cols;
-                double c1 = static_cast<double>(c + 1) / cols;
                 gridCells.push_back(geom::Polygon({
-                    geom::GeomUtils::lerp(left0, right0, c0),
-                    geom::GeomUtils::lerp(left0, right0, c1),
-                    geom::GeomUtils::lerp(left1, right1, c1),
-                    geom::GeomUtils::lerp(left1, right1, c0)
+                    vertices[r][c],
+                    vertices[r][c + 1],
+                    vertices[r + 1][c + 1],
+                    vertices[r + 1][c]
                 }));
             }
         }

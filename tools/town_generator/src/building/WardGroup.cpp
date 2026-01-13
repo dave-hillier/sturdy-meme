@@ -132,13 +132,14 @@ void WardGroup::createGeometry() {
         return;
     }
 
-    // Use Bisector to recursively subdivide into building footprints
-    // Faithful to TownGeneratorOS Ward.createAlleys() which uses Cutter.bisect recursively
-    // to create lots until they reach minSq size.
+    // Use Bisector to recursively subdivide into BLOCKS (not individual buildings)
+    // Faithful to mfcg.js WardGroup.createAlleys (line 825):
+    //   new Bisector(a, b.minSq * b.blockSize, 16 * this.district.alleys.gridChaos)
     //
-    // The minSq parameter controls final building size (default 100 sq units)
-    // The variance controls how much size can vary
-    double bisectorMinArea = alleys.minSq;
+    // Key insight: Bisector creates BLOCKS with gaps (alleys) between them.
+    // Each block is then subdivided into LOTS (individual buildings) via Block.subdivideLots()
+    // which uses frontage-based subdivision WITHOUT gaps.
+    double bisectorMinArea = alleys.minSq * alleys.blockSize;
     double bisectorVariance = 16.0 * alleys.gridChaos;
 
     utils::Bisector bisector(available.vertexValues(), bisectorMinArea, bisectorVariance);
@@ -173,39 +174,39 @@ void WardGroup::createGeometry() {
     // Store cuts as alleys
     alleyPaths = bisector.cuts;
 
-    // Create Block objects - one per building lot
-    // Gap between blocks is already handled by bisector's getGap callback
-    // No additional inset needed for individual buildings
+    // Create Block objects from bisector output
+    // Faithful to mfcg.js createAlleys (lines 831-839):
+    //   for each part from bisector.partition():
+    //     if area < threshold: createBlock(part, small=true)
+    //     else: createBlock(part)
+    //
+    // Each Block then subdivides itself into lots via subdivideLots() in constructor
     blocks.clear();
     for (const auto& shape : buildingShapes) {
         if (shape.size() < 3) continue;
 
-        geom::Polygon buildingPoly(shape);
-        double buildingArea = std::abs(buildingPoly.square());
+        geom::Polygon blockPoly(shape);
+        double blockArea = std::abs(blockPoly.square());
 
         // Skip very small shapes
-        if (buildingArea < alleys.minSq / 4) continue;
+        if (blockArea < alleys.minSq / 4) continue;
 
-        // Filter out inner lots that don't touch the available boundary
-        // Faithful to mfcg.js Block.filterInner (lines 12201-12231)
-        // A building must touch the ward boundary (street edge) to have street access
+        // Filter out blocks that don't touch the available boundary
+        // A block must touch the ward boundary (street edge) to have street access
         bool touchesBoundary = false;
-        for (const auto& buildingVertex : shape) {
-            // Check if this vertex is on any edge of the available area
+        for (const auto& blockVertex : shape) {
             size_t availLen = available.length();
             for (size_t i = 0; i < availLen; ++i) {
                 const geom::Point& e0 = available[i];
                 const geom::Point& e1 = available[(i + 1) % availLen];
 
-                // Check if point is on this edge (within tolerance)
                 double edgeLen = geom::Point::distance(e0, e1);
                 if (edgeLen < 0.001) continue;
 
-                double d0 = geom::Point::distance(buildingVertex, e0);
-                double d1 = geom::Point::distance(buildingVertex, e1);
+                double d0 = geom::Point::distance(blockVertex, e0);
+                double d1 = geom::Point::distance(blockVertex, e1);
                 double dEdge = d0 + d1;
 
-                // If sum of distances to endpoints ~= edge length, point is on edge
                 if (std::abs(dEdge - edgeLen) < 0.1) {
                     touchesBoundary = true;
                     break;
@@ -214,14 +215,26 @@ void WardGroup::createGeometry() {
             if (touchesBoundary) break;
         }
 
-        // Skip inner lots without street access
         if (!touchesBoundary) {
             continue;
         }
 
-        // Create a block with this building shape (no extra inset)
-        auto block = std::make_unique<Block>(buildingPoly, this);
-        block->buildings.push_back(buildingPoly);
+        // Determine if this is a small block (faithful to mfcg.js line 837-838)
+        double sizeThreshold = alleys.minSq * std::pow(2.0, alleys.sizeChaos * (2.0 * utils::Random::floatVal() - 1.0));
+        bool isSmall = blockArea < sizeThreshold;
+
+        // Create block - Block constructor calls subdivideLots() to create lots
+        auto block = std::make_unique<Block>(blockPoly, this);
+
+        // Subdivide block into lots (individual building footprints)
+        // This uses frontage-based subdivision WITHOUT gaps between lots
+        block->createLots();
+
+        // Filter out inner lots that don't touch block perimeter
+        block->filterInner();
+
+        // Create building shapes from lots
+        block->createBuildings();
 
         if (!block->buildings.empty()) {
             blocks.push_back(std::move(block));
