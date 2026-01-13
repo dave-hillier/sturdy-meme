@@ -9,7 +9,6 @@
 #include <functional>
 
 #include "SceneMaterial.h"
-#include "Renderable.h"
 
 /**
  * SceneCollection - A collection of scene materials
