@@ -2,6 +2,7 @@
 #include "town_generator/building/Block.h"
 #include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
+#include "town_generator/building/EdgeData.h"
 #include "town_generator/utils/Random.h"
 #include "town_generator/utils/Bisector.h"
 #include "town_generator/wards/Ward.h"
@@ -172,10 +173,9 @@ void WardGroup::createGeometry() {
     // Store cuts as alleys
     alleyPaths = bisector.cuts;
 
-    // Create Block objects - one per building footprint
-    // (In this simplified model, each "block" is actually a single building)
-    constexpr double BLOCK_INSET = 0.3;  // Small inset for gaps between buildings
-
+    // Create Block objects - one per building lot
+    // Gap between blocks is already handled by bisector's getGap callback
+    // No additional inset needed for individual buildings
     blocks.clear();
     for (const auto& shape : buildingShapes) {
         if (shape.size() < 3) continue;
@@ -186,18 +186,42 @@ void WardGroup::createGeometry() {
         // Skip very small shapes
         if (buildingArea < alleys.minSq / 4) continue;
 
-        // Apply small inset for visual separation
-        geom::Polygon shrunkBuilding = buildingPoly.bufferEq(-BLOCK_INSET);
-        if (shrunkBuilding.length() < 3 || std::abs(shrunkBuilding.square()) < 1.0) {
-            shrunkBuilding = buildingPoly;
+        // Filter out inner lots that don't touch the available boundary
+        // Faithful to mfcg.js Block.filterInner (lines 12201-12231)
+        // A building must touch the ward boundary (street edge) to have street access
+        bool touchesBoundary = false;
+        for (const auto& buildingVertex : shape) {
+            // Check if this vertex is on any edge of the available area
+            size_t availLen = available.length();
+            for (size_t i = 0; i < availLen; ++i) {
+                const geom::Point& e0 = available[i];
+                const geom::Point& e1 = available[(i + 1) % availLen];
+
+                // Check if point is on this edge (within tolerance)
+                double edgeLen = geom::Point::distance(e0, e1);
+                if (edgeLen < 0.001) continue;
+
+                double d0 = geom::Point::distance(buildingVertex, e0);
+                double d1 = geom::Point::distance(buildingVertex, e1);
+                double dEdge = d0 + d1;
+
+                // If sum of distances to endpoints ~= edge length, point is on edge
+                if (std::abs(dEdge - edgeLen) < 0.1) {
+                    touchesBoundary = true;
+                    break;
+                }
+            }
+            if (touchesBoundary) break;
         }
 
-        // Create a block with this single building shape
-        auto block = std::make_unique<Block>(shrunkBuilding, this);
+        // Skip inner lots without street access
+        if (!touchesBoundary) {
+            continue;
+        }
 
-        // For bisector-generated shapes, use the shape directly as the building
-        // (no further subdivision needed since bisector already created building-sized lots)
-        block->buildings.push_back(shrunkBuilding);
+        // Create a block with this building shape (no extra inset)
+        auto block = std::make_unique<Block>(buildingPoly, this);
+        block->buildings.push_back(buildingPoly);
 
         if (!block->buildings.empty()) {
             blocks.push_back(std::move(block));
@@ -790,6 +814,34 @@ std::vector<std::unique_ptr<WardGroup>> WardGroupBuilder::build() {
     return groups;
 }
 
+// Helper to check if two cells share an edge without a road/wall/canal between them
+// Faithful to mfcg.js pickFaces: null == n.data check (line 11376)
+static bool cellsShareInternalEdge(Cell* cell1, Cell* cell2) {
+    // Find the shared edge between the two cells
+    size_t len1 = cell1->shape.length();
+    for (size_t i = 0; i < len1; ++i) {
+        const geom::Point& a = cell1->shape[i];
+        const geom::Point& b = cell1->shape[(i + 1) % len1];
+
+        // Check if cell2 has this edge
+        int edgeIdx2 = cell2->findEdgeIndex(a, b);
+        if (edgeIdx2 >= 0) {
+            // Found shared edge - check if it has road/wall/canal data
+            EdgeType type1 = cell1->getEdgeType(i);
+            EdgeType type2 = cell2->getEdgeType(static_cast<size_t>(edgeIdx2));
+
+            // Only allow grouping if BOTH cells see this edge as NONE (no road/wall/canal)
+            // mfcg.js: null == n.data means no road/wall/canal between cells
+            if (type1 == EdgeType::NONE && type2 == EdgeType::NONE) {
+                return true;  // Internal edge - can group
+            }
+            // Edge has road/wall/canal - cannot group across it
+            return false;
+        }
+    }
+    return false;  // No shared edge found
+}
+
 void WardGroupBuilder::growGroup(WardGroup* group, std::vector<Cell*>& unassigned) {
     if (!group || unassigned.empty()) return;
 
@@ -798,6 +850,7 @@ void WardGroupBuilder::growGroup(WardGroup* group, std::vector<Cell*>& unassigne
 
     while (keepGrowing && !unassigned.empty()) {
         // Find candidates: neighbors of current group cells that are in unassigned
+        // Faithful to mfcg.js pickFaces (lines 11364-11387)
         std::vector<Cell*> candidates;
         for (Cell* patch : group->cells) {
             for (Cell* neighbor : patch->neighbors) {
@@ -806,9 +859,13 @@ void WardGroupBuilder::growGroup(WardGroup* group, std::vector<Cell*>& unassigne
                 if (it != unassigned.end()) {
                     // Check if same ward type
                     if (neighbor->ward && neighbor->ward->getName() == typeName) {
-                        // Not already a candidate
-                        if (std::find(candidates.begin(), candidates.end(), neighbor) == candidates.end()) {
-                            candidates.push_back(neighbor);
+                        // CRITICAL: Check that shared edge has no road/wall/canal
+                        // Faithful to mfcg.js: null == n.data (line 11376)
+                        if (cellsShareInternalEdge(patch, neighbor)) {
+                            // Not already a candidate
+                            if (std::find(candidates.begin(), candidates.end(), neighbor) == candidates.end()) {
+                                candidates.push_back(neighbor);
+                            }
                         }
                     }
                 }
