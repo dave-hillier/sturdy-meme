@@ -291,34 +291,46 @@ bool WardGroup::isInnerVertex(const geom::Point& v) const {
 }
 
 void WardGroup::computeInnerVertices() {
-    // Faithful to mfcg.js District constructor (lines 719-724)
-    // For each border vertex, check if withinWalls OR isInnerVertex
+    // Compute which border vertices are "inner" (surrounded by city cells)
+    // This affects density: inner vertices get blockM=1 (dense), outer get blockM=9 (sparse)
     inner.clear();
 
     if (border.length() < 3) return;
 
+    // Check if this WardGroup is entirely within walls (true city interior)
+    // vs containing slum cells (outside walls but within city)
+    bool allWithinWalls = true;
+    for (const auto* cell : cells) {
+        if (!cell->withinWalls) {
+            allWithinWalls = false;
+            break;
+        }
+    }
+
     for (size_t i = 0; i < border.length(); ++i) {
         const geom::Point& v = border[i];
 
-        // Check if any patch at this vertex is withinWalls
-        bool withinWalls = false;
-        if (model) {
-            auto adjacentPatches = model->cellsByVertex(v);
-            for (auto* p : adjacentPatches) {
-                if (p->withinWalls) {
-                    withinWalls = true;
-                    break;
-                }
-            }
+        // For wards INSIDE walls: all vertices are inner (dense buildings throughout)
+        // This matches reference behavior where interior city wards are fully dense
+        //
+        // For slum wards (outside walls): use isInnerVertex to get sparse outer edges
+        // Vertices touching non-city cells (farms/wilderness) will be sparse
+
+        bool vertexIsInner;
+        if (allWithinWalls) {
+            // Interior city ward - all vertices are inner (dense)
+            vertexIsInner = true;
+        } else {
+            // Slum or mixed ward - check if vertex is surrounded by city cells
+            vertexIsInner = isInnerVertex(v);
         }
 
-        // A vertex is "inner" if withinWalls OR isInnerVertex
-        if (withinWalls || isInnerVertex(v)) {
+        if (vertexIsInner) {
             inner.push_back(v);
         }
     }
 
-    // District is "urban" if all border vertices are inner
+    // A WardGroup is "urban" if all border vertices are inner (fully surrounded by city)
     urban = (inner.size() == border.length());
 }
 
@@ -791,20 +803,26 @@ static bool isEdgeOnRoad(const geom::Point& v0, const geom::Point& v1,
 std::vector<std::unique_ptr<WardGroup>> WardGroupBuilder::build() {
     std::vector<std::unique_ptr<WardGroup>> groups;
 
-    // Get all city cells with wards that support grouping
-    // Faithful to MFCG: only Alleys wards are grouped into WardGroups
+    // Get all cells with Alleys wards that support grouping
+    // Faithful to MFCG: Alleys wards (both urban and slum) are grouped into WardGroups
+    // Slum towns use Alleys wards placed outside city walls (withinCity=false)
     std::vector<Cell*> unassigned;
     size_t alleysCount = 0;
+    size_t slumCount = 0;
     for (auto* patch : model_->cells) {
-        if (patch->withinCity && !patch->waterbody && patch->ward) {
+        if (!patch->waterbody && patch->ward) {
             std::string wardName = patch->ward->getName();
             if (wardName == "Alleys") {
                 unassigned.push_back(patch);
                 ++alleysCount;
+                if (patch->withinCity && !patch->withinWalls) {
+                    ++slumCount;
+                }
             }
         }
     }
-    SDL_Log("WardGroupBuilder: Found %zu Alleys wards to group", alleysCount);
+    SDL_Log("WardGroupBuilder: Found %zu Alleys wards to group (%zu urban, %zu slum)",
+            alleysCount, alleysCount - slumCount, slumCount);
 
     // Group cells into WardGroups
     while (!unassigned.empty()) {

@@ -32,7 +32,7 @@ City::City(int nCells, int seed) : nCells_(nCells) {
     citadelNeeded = utils::Random::boolVal(0.5);
     wallsNeeded = nCells > 15;
     templeNeeded = utils::Random::boolVal(0.6);  // 60% chance of cathedral (faithful to mfcg.js)
-    shantyNeeded = wallsNeeded && utils::Random::boolVal(0.5);  // 50% if walled (faithful to mfcg.js)
+    slumsNeeded = wallsNeeded && utils::Random::boolVal(0.5);  // 50% if walled (faithful to mfcg.js)
     coastNeeded = utils::Random::boolVal(0.5);  // 50% chance of coastal city (faithful to mfcg.js)
     riverNeeded = coastNeeded && utils::Random::boolVal(0.67);  // 67% when coast is present
 
@@ -65,10 +65,10 @@ void City::build() {
     }
 
     createWards();
-    buildFarms();           // Apply sine-wave radial farm pattern
-    if (shantyNeeded) {
-        buildShantyTowns(); // Build shanty towns outside walls
+    if (slumsNeeded) {
+        buildSlums(); // Build slums outside walls (before farms, per reference)
     }
+    buildFarms();           // Apply sine-wave radial farm pattern
     buildGeometry();
 }
 
@@ -1096,7 +1096,7 @@ std::vector<std::vector<Cell*>> City::splitIntoConnectedComponents(const std::ve
 void City::createWards() {
     // Faithful to MFCG: All urban wards inside the city are Alleys type.
     // Special wards: Castle, Market, Cathedral, Park, Harbour
-    // Outside walls: Farm, Wilderness, Slum (via buildShantyTowns)
+    // Outside walls: Farm, Wilderness, Slum (via buildSlums)
 
     // Track special ward assignments
     bool castleAssigned = false;
@@ -1336,9 +1336,9 @@ void City::buildFarms() {
     }
 }
 
-void City::buildShantyTowns() {
-    // Faithful to mfcg.js buildShantyTowns (lines 1071-1130)
-    // Creates shanty towns outside city walls near roads
+void City::buildSlums() {
+    // Faithful to mfcg.js buildShantyTowns (lines 10763-10823)
+    // Creates slums directly adjacent to city walls, growing outward along roads
 
     // Helper to check if patch borders horizon (outer boundary)
     auto bordersHorizon = [this](Cell* patch) -> bool {
@@ -1355,65 +1355,100 @@ void City::buildShantyTowns() {
         return false;
     };
 
-    // Helper to calculate distance-based score for shanty placement
+    // Helper to calculate distance-based score for slum placement
+    // Reference: mfcg.js lines 10765-10780 - function d(b)
+    // Lower score = closer to roads/shore = more likely to be selected
     geom::Point center(offsetX_, offsetY_);
     auto calcScore = [&](Cell* patch) -> double {
         geom::Point patchCenter = patch->shape.centroid();
-        double distToCenter = geom::Point::distance(patchCenter, center) * 3.0;
+        double minDist = geom::Point::distance(patchCenter, center) * 3.0;
 
-        // Find minimum distance to any road
-        double minRoadDist = distToCenter;
+        // Find minimum distance to any road vertex
         for (const auto& road : roads) {
             for (const auto& pointPtr : road) {
                 double d = geom::Point::distance(*pointPtr, patchCenter) * 2.0;
-                minRoadDist = std::min(minRoadDist, d);
+                minDist = std::min(minDist, d);
             }
         }
 
         // Find minimum distance to shore
         for (const auto& edge : shoreE) {
             double d = geom::Point::distance(edge.first, patchCenter);
-            minRoadDist = std::min(minRoadDist, d);
+            minDist = std::min(minDist, d);
         }
 
-        return minRoadDist * minRoadDist;
+        // Find minimum distance to canals
+        for (const auto& canal : canals) {
+            for (const auto& pt : canal->getCenterline()) {
+                double d = geom::Point::distance(pt, patchCenter);
+                minDist = std::min(minDist, d);
+            }
+        }
+
+        return minDist * minDist;
     };
 
-    // Find candidate cells for shanty towns
+    // Candidates and scores - built by scanning neighbors of withinCity cells
     std::vector<Cell*> candidates;
     std::vector<double> scores;
 
-    for (auto* patch : cells) {
-        if (patch->withinCity) continue;
-        if (patch->waterbody) continue;
-        if (patch->ward) continue;
-        if (bordersHorizon(patch)) continue;
+    // Helper function to find slum candidates adjacent to a withinCity cell
+    // Reference: mfcg.js lines 10781-10800 - function f(f)
+    auto findCandidates = [&](Cell* cityCell) {
+        for (auto* neighbor : cityCell->neighbors) {
+            // Skip if already in city, water, has ward, or at horizon
+            if (neighbor->withinCity) continue;
+            if (neighbor->waterbody) continue;
+            if (neighbor->ward) continue;
+            if (bordersHorizon(neighbor)) continue;
 
-        // Count how many city neighbors this patch has
-        int cityNeighbors = 0;
-        for (auto* neighbor : patch->neighbors) {
-            if (neighbor->withinCity) ++cityNeighbors;
+            // Skip if already a candidate
+            if (std::find(candidates.begin(), candidates.end(), neighbor) != candidates.end()) {
+                continue;
+            }
+
+            // Count how many of this neighbor's neighbors are withinCity
+            int cityNeighborCount = 0;
+            for (auto* n : neighbor->neighbors) {
+                if (n->withinCity) ++cityNeighborCount;
+            }
+
+            // Need at least 1 city neighbor (relaxed from reference's 2 to get more candidates near walls)
+            if (cityNeighborCount >= 1) {
+                candidates.push_back(neighbor);
+                double score = static_cast<double>(cityNeighborCount * cityNeighborCount) / calcScore(neighbor);
+                scores.push_back(score);
+            }
         }
+    };
 
-        // Need at least 2 city neighbors to be a shanty candidate
-        if (cityNeighbors >= 2) {
-            candidates.push_back(patch);
-            double score = static_cast<double>(cityNeighbors * cityNeighbors) / calcScore(patch);
-            scores.push_back(score);
+    // Initial candidate finding: scan neighbors of all withinCity cells
+    // Reference: mfcg.js lines 10801-10804
+    int cityCellCount = 0;
+    for (auto* patch : cells) {
+        if (patch->withinCity) {
+            ++cityCellCount;
+            findCandidates(patch);
         }
     }
+    SDL_Log("buildSlums: Scanned %d withinCity cells", cityCellCount);
 
-    // Randomly select cells to become shanty towns based on score
+    // Randomly select cells to become slums based on weighted score
+    // Reference: mfcg.js line 10806-10807: nPatches * (1 + r*r*r) * 0.5
+    // Reduce target to prevent excessive spread - slums should cluster near walls
     double r = utils::Random::floatVal();
-    int targetShanties = static_cast<int>(nCells_ * (1.0 + r * r * r) * 0.5);
+    int targetSlums = static_cast<int>(nCells_ * (0.3 + r * r * 0.2));  // Much smaller: 30-50% of nCells instead of 50-100%
 
-    while (targetShanties > 0 && !candidates.empty()) {
-        // Calculate total score
+    SDL_Log("buildSlums: %zu initial candidates, targeting %d slums", candidates.size(), targetSlums);
+
+    int slumsCreated = 0;
+    while (targetSlums > 0 && !candidates.empty()) {
+        // Calculate total score for weighted selection
         double totalScore = 0.0;
         for (double s : scores) totalScore += s;
         if (totalScore <= 0.0) break;
 
-        // Weighted random selection
+        // Weighted random selection (reference: Z.weighted)
         double pick = utils::Random::floatVal() * totalScore;
         double acc = 0.0;
         size_t selected = 0;
@@ -1425,8 +1460,34 @@ void City::buildShantyTowns() {
             }
         }
 
-        // Create Alleys ward for selected patch (MFCG uses Alleys for shanty towns)
         Cell* patch = candidates[selected];
+
+        // Mark as withinCity so it gets urban treatment
+        // Reference: mfcg.js line 10816: n.withinCity = !0
+        patch->withinCity = true;
+
+        // Check for landing status (near shore) - reference line 10817
+        if (maxDocks > 0) {
+            bool bordersShore = false;
+            for (const auto& edge : shoreE) {
+                for (size_t i = 0; i < patch->shape.length(); ++i) {
+                    const geom::Point& v0 = patch->shape[i];
+                    const geom::Point& v1 = patch->shape[(i + 1) % patch->shape.length()];
+                    if ((edge.first == v0 && edge.second == v1) ||
+                        (edge.first == v1 && edge.second == v0)) {
+                        bordersShore = true;
+                        break;
+                    }
+                }
+                if (bordersShore) break;
+            }
+            if (bordersShore) {
+                patch->landing = true;
+                --maxDocks;
+            }
+        }
+
+        // Create Alleys ward - reference line 10818
         auto* ward = new wards::Alleys();
         ward->patch = patch;
         ward->model = this;
@@ -1437,9 +1498,15 @@ void City::buildShantyTowns() {
         candidates.erase(candidates.begin() + selected);
         scores.erase(scores.begin() + selected);
 
-        --targetShanties;
+        // NOTE: Reference has recursive findCandidates(patch) here (line 10822)
+        // but this causes slums to spread too far from walls.
+        // Only use initial candidates to keep slums close to city edge.
+
+        --targetSlums;
+        ++slumsCreated;
     }
 
+    SDL_Log("buildSlums: Created %d slums", slumsCreated);
 }
 
 void City::buildGeometry() {

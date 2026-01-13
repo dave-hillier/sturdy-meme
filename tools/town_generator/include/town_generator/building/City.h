@@ -57,7 +57,7 @@ public:
     bool citadelNeeded = false;
     bool wallsNeeded = false;
     bool templeNeeded = false;    // True if city has a cathedral/temple
-    bool shantyNeeded = false;    // True if city has shanty towns outside walls
+    bool slumsNeeded = false;     // True if city has slums outside walls
     bool coastNeeded = false;     // True if city has a coastline
     double coastDir = 0.0;        // Direction of coast (0-2, multiplied by PI)
 
@@ -143,7 +143,7 @@ private:
     void tidyUpRoads();
     void createWards();
     void buildFarms();       // Build farms with sine-wave radial pattern (faithful to mfcg.js)
-    void buildShantyTowns(); // Build shanty towns outside city walls (faithful to mfcg.js)
+    void buildSlums();       // Build slums outside city walls (faithful to mfcg.js)
     void buildGeometry();
     void setEdgeData();      // Set edge types (COAST, ROAD, WALL, CANAL) on all cells
     void createWardGroups(); // Create WardGroups from adjacent same-type cells
