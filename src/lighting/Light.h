@@ -4,8 +4,8 @@
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
 #include <algorithm>
-#include <cmath>
 #include <cstdint>
+#include "scene/RotationUtils.h"
 
 // Maximum number of lights supported in the shader
 static constexpr uint32_t MAX_LIGHTS = 16;
@@ -52,35 +52,19 @@ struct Light {
     bool enabled = true;
 
     // ========================================================================
-    // Direction helpers
+    // Direction helpers (delegates to RotationUtils)
     // ========================================================================
 
-    // Get direction from rotation (default direction is -Y, pointing down)
     glm::vec3 getDirection() const {
-        return glm::vec3(glm::mat4_cast(rotation) * glm::vec4(0.0f, -1.0f, 0.0f, 0.0f));
+        return RotationUtils::directionFromRotation(rotation);
     }
 
-    // Set rotation from a direction vector
     void setDirection(const glm::vec3& dir) {
-        rotation = rotationFromDirection(dir);
+        rotation = RotationUtils::rotationFromDirection(dir);
     }
 
-    // Create rotation quaternion to point light in a specific direction
     static glm::quat rotationFromDirection(const glm::vec3& direction) {
-        glm::vec3 dir = glm::normalize(direction);
-        glm::vec3 defaultDir(0.0f, -1.0f, 0.0f);
-
-        float dot = glm::dot(defaultDir, dir);
-        if (dot < -0.9999f) {
-            return glm::angleAxis(glm::pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f));
-        }
-        if (dot > 0.9999f) {
-            return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-        }
-
-        glm::vec3 axis = glm::normalize(glm::cross(defaultDir, dir));
-        float angle = std::acos(glm::clamp(dot, -1.0f, 1.0f));
-        return glm::angleAxis(angle, axis);
+        return RotationUtils::rotationFromDirection(direction);
     }
 
     // ========================================================================
