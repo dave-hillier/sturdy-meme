@@ -165,6 +165,7 @@ set(SOURCES
     src/gui/GuiPlayerTab.cpp
     src/gui/GuiPerformanceTab.cpp
     src/gui/GuiTreeTab.cpp
+    src/gui/GuiSceneGraphTab.cpp
     # Subdivision
     src/subdivision/CatmullClarkCBT.cpp
     src/subdivision/CatmullClarkMesh.cpp
