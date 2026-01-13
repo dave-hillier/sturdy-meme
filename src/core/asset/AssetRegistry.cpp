@@ -1,5 +1,5 @@
 #include "AssetRegistry.h"
-#include <SDL_log.h>
+#include <SDL3/SDL_log.h>
 
 void AssetRegistry::init(VkDevice device, VkPhysicalDevice physicalDevice,
                          VmaAllocator allocator, VkCommandPool commandPool,
