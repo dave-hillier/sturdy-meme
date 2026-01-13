@@ -688,7 +688,7 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
             ImpostorInstanceGPU instance;
             instance.position = tree.position;
             instance.scale = tree.scale;
-            instance.rotation = tree.rotation;
+            instance.rotation = tree.getYRotation();  // GPU needs Y-axis rotation as float
             instance.archetypeIndex = state.archetypeIndex;
             instance.blendFactor = state.blendFactor;
 

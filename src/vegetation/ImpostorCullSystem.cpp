@@ -285,7 +285,7 @@ void ImpostorCullSystem::updateTreeData(const TreeSystem& treeSystem, const Tree
         }
 
         inputData[i].rotationAndArchetype = glm::vec4(
-            tree.rotation,
+            tree.getYRotation(),  // GPU shader expects Y-axis rotation as float
             glm::uintBitsToFloat(archetypeIndex),
             0.0f, 0.0f
         );

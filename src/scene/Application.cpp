@@ -331,9 +331,8 @@ bool Application::init(const std::string& title, int width, int height) {
             auto capsules = treeSystem->getTreeCollisionCapsules(static_cast<uint32_t>(i), treeCollisionConfig);
 
             if (!capsules.empty()) {
-                // Create rotation quaternion from Y-axis rotation
-                glm::quat rotation = glm::angleAxis(tree.rotation, glm::vec3(0.0f, 1.0f, 0.0f));
-                physics().createStaticCompoundCapsules(tree.position, capsules, rotation);
+                // TreeInstanceData already stores rotation as quaternion
+                physics().createStaticCompoundCapsules(tree.position, capsules, tree.rotation);
             }
         }
         SDL_Log("Created %zu tree compound capsule colliders", treeInstances.size());
@@ -494,15 +493,16 @@ void Application::run() {
                 // Only rotate player to face movement direction if not locked
                 if (!effectiveLock) {
                     float newYaw = glm::degrees(atan2(moveDir.x, moveDir.z));
-                    float currentYaw = playerTransform.yaw;
+                    float currentYaw = playerTransform.getYaw();
                     float yawDiff = newYaw - currentYaw;
                     // Normalize yaw difference
                     while (yawDiff > 180.0f) yawDiff -= 360.0f;
                     while (yawDiff < -180.0f) yawDiff += 360.0f;
-                    playerTransform.yaw += yawDiff * 10.0f * deltaTime;  // Smooth rotation
+                    float smoothedYaw = currentYaw + yawDiff * 10.0f * deltaTime;  // Smooth rotation
                     // Keep yaw in reasonable range
-                    while (playerTransform.yaw > 360.0f) playerTransform.yaw -= 360.0f;
-                    while (playerTransform.yaw < 0.0f) playerTransform.yaw += 360.0f;
+                    while (smoothedYaw > 360.0f) smoothedYaw -= 360.0f;
+                    while (smoothedYaw < 0.0f) smoothedYaw += 360.0f;
+                    playerTransform.setYaw(smoothedYaw);
                 }
             }
         }

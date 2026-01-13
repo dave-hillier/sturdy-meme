@@ -3,6 +3,8 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <vector>
 #include <string>
 #include <functional>
@@ -35,11 +37,40 @@ struct LeafDrawInfo {
 // A single tree instance in the scene
 struct TreeInstanceData {
     glm::vec3 position;
-    float rotation;         // Y-axis rotation
-    float scale;            // Uniform scale factor
-    uint32_t meshIndex;     // Which tree mesh to use
-    uint32_t archetypeIndex; // Which impostor archetype to use (0=oak, 1=pine, 2=ash, 3=aspen)
-    bool isSelected;        // Is this the currently editable tree
+    glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};  // Full quaternion rotation (default identity)
+    float scale{1.0f};      // Uniform scale factor
+    uint32_t meshIndex{0};  // Which tree mesh to use
+    uint32_t archetypeIndex{0}; // Which impostor archetype to use (0=oak, 1=pine, 2=ash, 3=aspen)
+    bool isSelected{false}; // Is this the currently editable tree
+
+    TreeInstanceData() = default;
+
+    // Convenience: Create with Y-axis rotation only (radians)
+    static TreeInstanceData withYRotation(const glm::vec3& pos, float yRotation, float s,
+                                           uint32_t mesh, uint32_t archetype) {
+        TreeInstanceData data;
+        data.position = pos;
+        data.rotation = glm::angleAxis(yRotation, glm::vec3(0.0f, 1.0f, 0.0f));
+        data.scale = s;
+        data.meshIndex = mesh;
+        data.archetypeIndex = archetype;
+        data.isSelected = false;
+        return data;
+    }
+
+    // Get Y-axis rotation in radians (for backward compatibility)
+    float getYRotation() const {
+        glm::vec3 euler = glm::eulerAngles(rotation);
+        return euler.y;
+    }
+
+    // Get transform matrix
+    glm::mat4 getTransformMatrix() const {
+        glm::mat4 transform = glm::translate(glm::mat4(1.0f), position);
+        transform = transform * glm::mat4_cast(rotation);
+        transform = glm::scale(transform, glm::vec3(scale));
+        return transform;
+    }
 };
 
 class TreeSystem {

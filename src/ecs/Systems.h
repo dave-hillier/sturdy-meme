@@ -19,17 +19,11 @@ inline void lightAttachmentSystem(entt::registry& registry) {
             registry.all_of<Transform>(attachment.parent)) {
             auto& parentTransform = registry.get<Transform>(attachment.parent);
 
-            // Apply parent's rotation to the offset
-            float radYaw = glm::radians(parentTransform.yaw);
-            glm::mat3 rotMat = glm::mat3(
-                glm::cos(radYaw), 0.0f, glm::sin(radYaw),
-                0.0f, 1.0f, 0.0f,
-                -glm::sin(radYaw), 0.0f, glm::cos(radYaw)
-            );
-            glm::vec3 rotatedOffset = rotMat * attachment.offset;
+            // Apply parent's rotation to the offset using quaternion
+            glm::vec3 rotatedOffset = glm::vec3(glm::mat4_cast(parentTransform.rotation) * glm::vec4(attachment.offset, 0.0f));
 
             transform.position = parentTransform.position + rotatedOffset;
-            transform.yaw = parentTransform.yaw;
+            transform.rotation = parentTransform.rotation;
         }
     }
 }
@@ -89,17 +83,19 @@ inline void patrolSystem(entt::registry& registry, float deltaTime) {
             float targetYaw = glm::degrees(atan2(direction.x, direction.z));
 
             // Turn towards target
-            float yawDiff = targetYaw - transform.yaw;
+            float currentYaw = transform.getYaw();
+            float yawDiff = targetYaw - currentYaw;
             while (yawDiff > 180.0f) yawDiff -= 360.0f;
             while (yawDiff < -180.0f) yawDiff += 360.0f;
 
             float maxTurn = movement.turnSpeed * deltaTime;
+            float newYaw;
             if (fabs(yawDiff) <= maxTurn) {
-                transform.yaw = targetYaw;
+                newYaw = targetYaw;
             } else {
-                transform.yaw += (yawDiff > 0 ? 1.0f : -1.0f) * maxTurn;
+                newYaw = currentYaw + (yawDiff > 0 ? 1.0f : -1.0f) * maxTurn;
             }
-            transform.normalizeYaw();
+            transform.setYaw(newYaw);
 
             // Move forward
             transform.position += transform.getForward() * movement.walkSpeed * deltaTime;

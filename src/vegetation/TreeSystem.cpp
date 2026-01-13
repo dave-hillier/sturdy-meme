@@ -470,10 +470,8 @@ void TreeSystem::createSceneObjects() {
 
         const TreeOptions& opts = treeOptions_[instance.meshIndex];
 
-        // Build transform
-        glm::mat4 transform = glm::translate(glm::mat4(1.0f), instance.position);
-        transform = glm::rotate(transform, instance.rotation, glm::vec3(0.0f, 1.0f, 0.0f));
-        transform = glm::scale(transform, glm::vec3(instance.scale));
+        // Build transform using quaternion rotation
+        glm::mat4 transform = instance.getTransformMatrix();
 
         // Get textures based on tree options (string-based lookup)
         Texture* barkTex = getBarkTexture(opts.bark.type);
@@ -545,7 +543,7 @@ uint32_t TreeSystem::addTree(const glm::vec3& position, float rotation, float sc
 
     TreeInstanceData instance;
     instance.position = position;
-    instance.rotation = rotation;
+    instance.rotation = glm::angleAxis(rotation, glm::vec3(0.0f, 1.0f, 0.0f));  // Convert Y-axis float to quaternion
     instance.scale = scale;
     instance.meshIndex = meshIndex;
     instance.isSelected = false;
@@ -623,7 +621,7 @@ uint32_t TreeSystem::addTreeFromStagedData(
 
     TreeInstanceData instance;
     instance.position = position;
-    instance.rotation = rotation;
+    instance.rotation = glm::angleAxis(rotation, glm::vec3(0.0f, 1.0f, 0.0f));  // Convert Y-axis float to quaternion
     instance.scale = scale;
     instance.meshIndex = meshIndex;
     instance.isSelected = false;
