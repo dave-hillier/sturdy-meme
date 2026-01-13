@@ -272,6 +272,7 @@ add_executable(town_generator
     town_generator/src/geom/Graph.cpp
     town_generator/src/geom/Spline.cpp
     town_generator/src/geom/Voronoi.cpp
+    town_generator/src/geom/DCEL.cpp
     town_generator/src/utils/Random.cpp
     town_generator/src/utils/MathUtils.cpp
     town_generator/src/utils/Forester.cpp

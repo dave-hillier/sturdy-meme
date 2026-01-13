@@ -3,6 +3,7 @@
 #include "town_generator/geom/Point.h"
 #include "town_generator/geom/Polygon.h"
 #include "town_generator/geom/Voronoi.h"
+#include "town_generator/geom/DCEL.h"
 #include "town_generator/building/Cell.h"
 #include "town_generator/building/Topology.h"
 #include "town_generator/building/Canal.h"
@@ -80,6 +81,9 @@ public:
 
     // Ward groups for unified geometry generation
     std::vector<std::unique_ptr<WardGroup>> wardGroups_;
+
+    // DCEL for topological operations (circumference, edge collapse, neighbor queries)
+    std::unique_ptr<geom::DCEL> dcel_;
 
     City(int nCells, int seed = -1);
     ~City();

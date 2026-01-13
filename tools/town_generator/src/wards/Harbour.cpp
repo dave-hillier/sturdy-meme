@@ -2,6 +2,7 @@
 #include "town_generator/building/City.h"
 #include "town_generator/building/Cell.h"
 #include "town_generator/building/EdgeData.h"
+#include "town_generator/geom/DCEL.h"
 #include "town_generator/utils/Random.h"
 #include "town_generator/geom/GeomUtils.h"
 #include <SDL3/SDL_log.h>
@@ -16,26 +17,65 @@ void Harbour::createGeometry() {
     geom::Polygon block = getAvailable();
     if (block.length() < 3) return;
 
-    // Find edges that border water using EdgeData
-    // (faithful to mfcg.js Harbour which uses edge data for COAST detection)
+    // Find edges that border water
+    // Use DCEL half-edge navigation if available, otherwise fallback to neighbors
     std::vector<std::pair<geom::Point, geom::Point>> waterEdges;
-    size_t len = patch->shape.length();
 
-    for (size_t i = 0; i < len; ++i) {
-        const geom::Point& v0 = patch->shape[i];
-        const geom::Point& v1 = patch->shape[(i + 1) % len];
+    if (patch->face && patch->face->halfEdge) {
+        // DCEL half-edge navigation: iterate face edges via twin->face->data
+        geom::HalfEdgePtr edge = patch->face->halfEdge;
+        geom::HalfEdgePtr startEdge = edge;
+        do {
+            bool isWaterEdge = false;
 
-        // Use edge data if available
-        building::EdgeType edgeType = patch->getEdgeType(i);
-        if (edgeType == building::EdgeType::COAST) {
-            waterEdges.push_back({v0, v1});
-        } else {
-            // Fallback: check neighbors
-            for (auto* neighbor : patch->neighbors) {
-                if (neighbor->waterbody) {
-                    if (neighbor->shape.contains(v0) && neighbor->shape.contains(v1)) {
-                        waterEdges.push_back({v0, v1});
-                        break;
+            // Check if twin face is water
+            if (auto twin = edge->getTwin()) {
+                if (auto twinFace = twin->getFace()) {
+                    if (auto* neighbor = static_cast<building::Cell*>(twinFace->data)) {
+                        if (neighbor->waterbody) {
+                            isWaterEdge = true;
+                        }
+                    }
+                }
+            } else {
+                // No twin = external boundary (could be water)
+                // Check edge data for COAST type
+                if (edge->hasData()) {
+                    try {
+                        auto edgeType = edge->getData<building::EdgeType>();
+                        if (edgeType == building::EdgeType::COAST) {
+                            isWaterEdge = true;
+                        }
+                    } catch (...) {}
+                }
+            }
+
+            if (isWaterEdge && edge->origin && edge->origin->point &&
+                edge->destination() && edge->destination()->point) {
+                waterEdges.push_back({*edge->origin->point, *edge->destination()->point});
+            }
+
+            edge = edge->next;
+        } while (edge && edge != startEdge);
+    } else {
+        // Fallback: use shape edges and neighbor iteration
+        size_t len = patch->shape.length();
+        for (size_t i = 0; i < len; ++i) {
+            const geom::Point& v0 = patch->shape[i];
+            const geom::Point& v1 = patch->shape[(i + 1) % len];
+
+            // Use edge data if available
+            building::EdgeType edgeType = patch->getEdgeType(i);
+            if (edgeType == building::EdgeType::COAST) {
+                waterEdges.push_back({v0, v1});
+            } else {
+                // Fallback: check neighbors
+                for (auto* neighbor : patch->neighbors) {
+                    if (neighbor->waterbody) {
+                        if (neighbor->shape.contains(v0) && neighbor->shape.contains(v1)) {
+                            waterEdges.push_back({v0, v1});
+                            break;
+                        }
                     }
                 }
             }

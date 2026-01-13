@@ -14,6 +14,7 @@ set(GEOM_SOURCES
     src/geom/Graph.cpp
     src/geom/Spline.cpp
     src/geom/Voronoi.cpp
+    src/geom/DCEL.cpp
 )
 
 set(UTILS_SOURCES

@@ -6,10 +6,16 @@
 #include "town_generator/building/EdgeData.h"
 #include <vector>
 #include <map>
+#include <memory>
 
 namespace town_generator {
 
 // Forward declarations
+namespace geom {
+    class Face;
+    using FacePtr = std::shared_ptr<Face>;
+}
+
 namespace wards {
     class Ward;
 }
@@ -39,6 +45,10 @@ public:
 
     // Group of adjacent cells with same ward type for unified geometry generation
     WardGroup* group = nullptr;
+
+    // DCEL face reference for topological operations
+    // Set after DCEL construction in City::buildPatches()
+    geom::FacePtr face;
 
     bool withinWalls = false;
     bool withinCity = false;

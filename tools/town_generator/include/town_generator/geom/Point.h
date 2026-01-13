@@ -94,6 +94,11 @@ public:
         return std::sqrt(dx * dx + dy * dy);
     }
 
+    // Midpoint between two points
+    static Point midpoint(const Point& p1, const Point& p2) {
+        return Point((p1.x + p2.x) / 2.0, (p1.y + p2.y) / 2.0);
+    }
+
     // Normalize (in-place and returning new)
     void normalize(double len = 1.0) {
         double l = length();

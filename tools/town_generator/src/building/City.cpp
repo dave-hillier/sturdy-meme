@@ -1,6 +1,7 @@
 #include "town_generator/building/City.h"
 #include "town_generator/building/CurtainWall.h"
 #include "town_generator/building/Topology.h"
+#include "town_generator/geom/EdgeChain.h"
 #include "town_generator/utils/Noise.h"
 #include <iostream>
 #include <SDL3/SDL_log.h>
@@ -446,63 +447,115 @@ void City::buildPatches() {
             }
         }
     }
+
+    // Build DCEL from cell polygons for topological operations
+    // This enables efficient circumference, edge collapse, and neighbor queries
+    std::vector<geom::Polygon> cellPolygons;
+    cellPolygons.reserve(cells.size());
+    for (auto* cell : cells) {
+        cellPolygons.push_back(cell->shape);
+    }
+
+    dcel_ = std::make_unique<geom::DCEL>(cellPolygons);
+
+    // Link Cell <-> Face bidirectionally
+    // The DCEL faces are created in the same order as the polygons
+    for (size_t i = 0; i < cells.size() && i < dcel_->faces.size(); ++i) {
+        cells[i]->face = dcel_->faces[i];
+        dcel_->faces[i]->data = cells[i];
+    }
+
+    SDL_Log("DCEL built: %zu vertices, %zu edges, %zu faces",
+            dcel_->vertices.size(), dcel_->edges.size(), dcel_->faces.size());
 }
 
 void City::optimizeJunctions() {
     // Merge vertices that are too close together (< 8 units)
-    // With shared_ptr<Point>, mutations automatically propagate to all
-    // cells sharing the same vertex (matching Haxe reference semantics)
+    // Uses DCEL::collapseEdge for proper topological edge collapse
+    // Faithful to mfcg.js optimizeJunctions which uses DCEL.collapseEdge
 
-    std::vector<Cell*> patchesToOptimize = inner;
-    std::set<Cell*> patchesToClean;
+    if (!dcel_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "optimizeJunctions: DCEL not built");
+        return;
+    }
 
-    for (auto* patch : patchesToOptimize) {
-        size_t index = 0;
-        while (index < patch->shape.length()) {
-            // Get shared pointers to adjacent vertices
-            geom::PointPtr v0Ptr = patch->shape.ptr(index);
-            geom::PointPtr v1Ptr = patch->shape.ptr((index + 1) % patch->shape.length());
+    // Collect faces to optimize (corresponding to inner cells)
+    std::set<geom::Face*> facesToOptimize;
+    for (auto* patch : inner) {
+        if (patch->face) {
+            facesToOptimize.insert(patch->face.get());
+        }
+    }
 
-            if (v0Ptr != v1Ptr && geom::Point::distance(*v0Ptr, *v1Ptr) < 8.0) {
-                // Move v0 to midpoint (mutates the shared point!)
-                // All cells sharing this vertex see the change automatically
-                v0Ptr->addEq(*v1Ptr);
-                v0Ptr->scaleEq(0.5);
+    // Track affected cells for shape update
+    std::set<Cell*> affectedCells;
+    int collapseCount = 0;
 
-                // Replace v1 references with v0 in all cells
-                for (auto* otherPatch : cells) {
-                    if (otherPatch == patch) continue;
+    // Iterate through edges and collapse short ones
+    // We need to be careful since collapseEdge modifies the structure
+    bool changed = true;
+    while (changed) {
+        changed = false;
 
-                    // Find v1 by pointer identity and replace with v0
-                    int v1Index = otherPatch->shape.indexOfPtr(v1Ptr);
-                    if (v1Index != -1) {
-                        otherPatch->shape.vertices()[v1Index] = v0Ptr;
-                        patchesToClean.insert(otherPatch);
+        for (const auto& edge : dcel_->edges) {
+            if (!edge || !edge->origin || !edge->next || !edge->next->origin) continue;
+
+            // Only process edges in faces we want to optimize
+            auto edgeFace = edge->getFace();
+            if (!edgeFace || facesToOptimize.find(edgeFace.get()) == facesToOptimize.end()) {
+                continue;
+            }
+
+            // Check edge length
+            double len = edge->length();
+            if (len < 8.0 && len > 0.0) {
+                // Collapse this edge using DCEL
+                auto result = dcel_->collapseEdge(edge);
+
+                if (result.vertex) {
+                    collapseCount++;
+                    changed = true;
+
+                    // Mark affected cells for shape update
+                    for (const auto& affected : result.affectedEdges) {
+                        auto face = affected->getFace();
+                        if (face && face->data) {
+                            affectedCells.insert(static_cast<Cell*>(face->data));
+                        }
                     }
+
+                    // Also mark the edge's face
+                    if (edgeFace && edgeFace->data) {
+                        affectedCells.insert(static_cast<Cell*>(edgeFace->data));
+                    }
+
+                    // Twin's face too
+                    auto twin = edge->getTwin();
+                    if (twin) {
+                        auto twinFace = twin->getFace();
+                        if (twinFace && twinFace->data) {
+                            affectedCells.insert(static_cast<Cell*>(twinFace->data));
+                        }
+                    }
+
+                    break; // Restart iteration since edges vector changed
                 }
-
-                // Remove v1 from current patch
-                patch->shape.removePtr(v1Ptr);
-                patchesToClean.insert(patch);
-
-                // Don't increment index since we removed an element
-            } else {
-                index++;
             }
         }
     }
 
-    // Remove duplicate vertices (by pointer identity) from affected cells
-    for (auto* patch : patchesToClean) {
-        std::vector<geom::PointPtr> cleaned;
-        for (const auto& vPtr : patch->shape) {
-            bool isDuplicate = std::find(cleaned.begin(), cleaned.end(), vPtr) != cleaned.end();
-            if (!isDuplicate) {
-                cleaned.push_back(vPtr);
+    // Update cell shapes from DCEL faces
+    for (auto* cell : affectedCells) {
+        if (cell->face) {
+            auto polyPtrs = cell->face->getPolyPtrs();
+            if (polyPtrs.size() >= 3) {
+                cell->shape = geom::Polygon(polyPtrs);
             }
         }
-        patch->shape = geom::Polygon(cleaned);
     }
+
+    SDL_Log("optimizeJunctions: collapsed %d edges, updated %zu cells",
+            collapseCount, affectedCells.size());
 }
 
 void City::buildWalls() {
@@ -912,9 +965,36 @@ geom::Polygon City::findCircumference(const std::vector<Cell*>& patchList) {
     if (patchList.empty()) return geom::Polygon();
     if (patchList.size() == 1) return patchList[0]->shape.copy();
 
+    // Use DCEL::circumference if cells have DCEL faces
+    // Convert Cell* list to FacePtr list
+    std::vector<geom::FacePtr> faceList;
+    faceList.reserve(patchList.size());
+    bool allHaveFaces = true;
+    for (auto* patch : patchList) {
+        if (patch->face) {
+            faceList.push_back(patch->face);
+        } else {
+            allHaveFaces = false;
+            break;
+        }
+    }
+
+    if (allHaveFaces && !faceList.empty()) {
+        // Use DCEL circumference algorithm
+        auto boundaryEdges = geom::DCEL::circumference(nullptr, faceList);
+        if (!boundaryEdges.empty()) {
+            // Convert edge chain to polygon with shared pointers
+            auto points = geom::EdgeChain::toPolyPtrs(boundaryEdges);
+            geom::Polygon result;
+            for (const auto& pt : points) {
+                result.pushShared(pt);
+            }
+            return result;
+        }
+    }
+
+    // Fallback: manual boundary finding (for cases without DCEL)
     // Find all edges that belong to exactly one patch in the set
-    // Store edges as pairs of shared pointers to preserve vertex identity
-    // Edge format: (start_ptr, end_ptr)
     std::vector<std::pair<geom::PointPtr, geom::PointPtr>> boundaryEdges;
 
     for (auto* patch : patchList) {
@@ -924,11 +1004,9 @@ geom::Polygon City::findCircumference(const std::vector<Cell*>& patchList) {
             geom::PointPtr v1Ptr = patch->shape.ptr((i + 1) % len);
 
             // Check if this edge is shared with another patch in the set
-            // Edge is shared if another patch has the reverse edge (v1 -> v0)
             bool isShared = false;
             for (auto* other : patchList) {
                 if (other == patch) continue;
-                // Look for reverse edge by pointer identity
                 if (other->shape.findEdgePtr(v1Ptr, v0Ptr) != -1) {
                     isShared = true;
                     break;
@@ -957,7 +1035,6 @@ geom::Polygon City::findCircumference(const std::vector<Cell*>& patchList) {
 
         bool found = false;
         for (auto it = boundaryEdges.begin(); it != boundaryEdges.end(); ++it) {
-            // Compare by pointer identity
             if (it->first == current) {
                 current = it->second;
                 boundaryEdges.erase(it);
@@ -967,7 +1044,6 @@ geom::Polygon City::findCircumference(const std::vector<Cell*>& patchList) {
         }
 
         if (!found) {
-            // Try to find any edge to continue
             if (!boundaryEdges.empty()) {
                 current = boundaryEdges[0].second;
                 result.pushShared(boundaryEdges[0].first);
