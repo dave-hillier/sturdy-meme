@@ -32,6 +32,7 @@
 #include "GuiIKTab.h"
 #include "GuiPlayerTab.h"
 #include "GuiTreeTab.h"
+#include "GuiSceneGraphTab.h"
 
 #include "terrain/TerrainSystem.h"
 #include "terrain/TerrainTileCache.h"
@@ -337,6 +338,9 @@ void GuiSystem::render(GuiInterfaces& ui, const Camera& camera, float deltaTime,
     if (windowStates.showTileLoader) {
         renderTileLoaderWindow(ui, camera);
     }
+    if (windowStates.showSceneGraph) {
+        renderSceneGraphWindow(ui);
+    }
 
     // Skeleton/IK debug overlay
     if (ikDebugSettings.showSkeleton || ikDebugSettings.showIKTargets) {
@@ -394,6 +398,7 @@ void GuiSystem::renderMainMenuBar() {
             ImGui::MenuItem("Performance Toggles", nullptr, &windowStates.showPerformance);
             ImGui::MenuItem("Profiler", nullptr, &windowStates.showProfiler);
             ImGui::MenuItem("Tile Loader", nullptr, &windowStates.showTileLoader);
+            ImGui::MenuItem("Scene Graph", nullptr, &windowStates.showSceneGraph);
             ImGui::EndMenu();
         }
 
@@ -969,6 +974,16 @@ void GuiSystem::renderTileLoaderWindow(GuiInterfaces& ui, const Camera& camera) 
 
         // Reserve space for the grid
         ImGui::Dummy(ImVec2(GRID_SIZE * CELL_SIZE, GRID_SIZE * CELL_SIZE));
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderSceneGraphWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(620, 260), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(340, 500), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Scene Graph", &windowStates.showSceneGraph)) {
+        GuiSceneGraphTab::render(ui.scene, sceneGraphTabState);
     }
     ImGui::End();
 }

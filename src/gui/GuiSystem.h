@@ -10,6 +10,7 @@
 #include "GuiIKTab.h"
 #include "GuiPlayerTab.h"
 #include "GuiEnvironmentTab.h"
+#include "GuiSceneGraphTab.h"
 #include "GuiInterfaces.h"
 
 class Camera;
@@ -76,6 +77,7 @@ private:
     void renderPerformanceWindow(GuiInterfaces& ui);
     void renderProfilerWindow(GuiInterfaces& ui);
     void renderTileLoaderWindow(GuiInterfaces& ui, const Camera& camera);
+    void renderSceneGraphWindow(GuiInterfaces& ui);
 
     VkDevice device_ = VK_NULL_HANDLE;  // Stored for cleanup
     VkDescriptorPool imguiPool = VK_NULL_HANDLE;
@@ -89,6 +91,9 @@ private:
 
     // Environment tab state
     EnvironmentTabState environmentTabState;
+
+    // Scene graph tab state
+    SceneGraphTabState sceneGraphTabState;
 
     // Cached performance metrics
     float frameTimeHistory[120] = {0};
@@ -112,6 +117,7 @@ private:
         bool showPerformance = false;
         bool showProfiler = false;
         bool showTileLoader = false;
+        bool showSceneGraph = false;
     } windowStates;
 
     // Tile loader visualization mode
