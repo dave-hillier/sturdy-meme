@@ -1,7 +1,6 @@
 #pragma once
 
-#include <memory>
-#include <vulkan/vulkan.h>
+#include "SystemGroupMacros.h"
 
 // Forward declarations
 class SkySystem;
@@ -28,23 +27,16 @@ class CloudShadowSystem;
  */
 struct AtmosphereSystemGroup {
     // Non-owning references to systems (owned by RendererSystems)
-    SkySystem* sky_ = nullptr;
-    FroxelSystem* froxel_ = nullptr;
-    AtmosphereLUTSystem* atmosphereLUT_ = nullptr;
-    CloudShadowSystem* cloudShadow_ = nullptr;
+    SYSTEM_MEMBER(SkySystem, sky);
+    SYSTEM_MEMBER(FroxelSystem, froxel);
+    SYSTEM_MEMBER(AtmosphereLUTSystem, atmosphereLUT);
+    SYSTEM_MEMBER(CloudShadowSystem, cloudShadow);
 
     // Accessors
-    SkySystem& sky() { return *sky_; }
-    const SkySystem& sky() const { return *sky_; }
-
-    FroxelSystem& froxel() { return *froxel_; }
-    const FroxelSystem& froxel() const { return *froxel_; }
-
-    AtmosphereLUTSystem& atmosphereLUT() { return *atmosphereLUT_; }
-    const AtmosphereLUTSystem& atmosphereLUT() const { return *atmosphereLUT_; }
-
-    CloudShadowSystem& cloudShadow() { return *cloudShadow_; }
-    const CloudShadowSystem& cloudShadow() const { return *cloudShadow_; }
+    REQUIRED_SYSTEM_ACCESSORS(SkySystem, sky)
+    REQUIRED_SYSTEM_ACCESSORS(FroxelSystem, froxel)
+    REQUIRED_SYSTEM_ACCESSORS(AtmosphereLUTSystem, atmosphereLUT)
+    REQUIRED_SYSTEM_ACCESSORS(CloudShadowSystem, cloudShadow)
 
     // Validation
     bool isValid() const {

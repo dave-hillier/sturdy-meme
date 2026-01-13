@@ -1,7 +1,6 @@
 #pragma once
 
-#include <memory>
-#include <vulkan/vulkan.h>
+#include "SystemGroupMacros.h"
 
 // Forward declarations
 class GrassSystem;
@@ -38,45 +37,26 @@ class RockSystem;
  */
 struct VegetationSystemGroup {
     // Non-owning references to systems (owned by RendererSystems)
-    GrassSystem* grass_ = nullptr;
-    WindSystem* wind_ = nullptr;
-    TreeSystem* tree_ = nullptr;
-    TreeRenderer* treeRenderer_ = nullptr;
-    TreeLODSystem* treeLOD_ = nullptr;
-    ImpostorCullSystem* impostorCull_ = nullptr;
-    DetritusSystem* detritus_ = nullptr;
-    RockSystem* rock_ = nullptr;
+    SYSTEM_MEMBER(GrassSystem, grass);
+    SYSTEM_MEMBER(WindSystem, wind);
+    SYSTEM_MEMBER(TreeSystem, tree);
+    SYSTEM_MEMBER(TreeRenderer, treeRenderer);
+    SYSTEM_MEMBER(TreeLODSystem, treeLOD);
+    SYSTEM_MEMBER(ImpostorCullSystem, impostorCull);
+    SYSTEM_MEMBER(DetritusSystem, detritus);
+    SYSTEM_MEMBER(RockSystem, rock);
 
     // Required system accessors
-    GrassSystem& grass() { return *grass_; }
-    const GrassSystem& grass() const { return *grass_; }
-
-    WindSystem& wind() { return *wind_; }
-    const WindSystem& wind() const { return *wind_; }
-
-    RockSystem& rock() { return *rock_; }
-    const RockSystem& rock() const { return *rock_; }
+    REQUIRED_SYSTEM_ACCESSORS(GrassSystem, grass)
+    REQUIRED_SYSTEM_ACCESSORS(WindSystem, wind)
+    REQUIRED_SYSTEM_ACCESSORS(RockSystem, rock)
 
     // Optional system accessors (may be null)
-    TreeSystem* tree() { return tree_; }
-    const TreeSystem* tree() const { return tree_; }
-    bool hasTree() const { return tree_ != nullptr; }
-
-    TreeRenderer* treeRenderer() { return treeRenderer_; }
-    const TreeRenderer* treeRenderer() const { return treeRenderer_; }
-    bool hasTreeRenderer() const { return treeRenderer_ != nullptr; }
-
-    TreeLODSystem* treeLOD() { return treeLOD_; }
-    const TreeLODSystem* treeLOD() const { return treeLOD_; }
-    bool hasTreeLOD() const { return treeLOD_ != nullptr; }
-
-    ImpostorCullSystem* impostorCull() { return impostorCull_; }
-    const ImpostorCullSystem* impostorCull() const { return impostorCull_; }
-    bool hasImpostorCull() const { return impostorCull_ != nullptr; }
-
-    DetritusSystem* detritus() { return detritus_; }
-    const DetritusSystem* detritus() const { return detritus_; }
-    bool hasDetritus() const { return detritus_ != nullptr; }
+    OPTIONAL_SYSTEM_ACCESSORS(TreeSystem, tree, Tree)
+    OPTIONAL_SYSTEM_ACCESSORS(TreeRenderer, treeRenderer, TreeRenderer)
+    OPTIONAL_SYSTEM_ACCESSORS(TreeLODSystem, treeLOD, TreeLOD)
+    OPTIONAL_SYSTEM_ACCESSORS(ImpostorCullSystem, impostorCull, ImpostorCull)
+    OPTIONAL_SYSTEM_ACCESSORS(DetritusSystem, detritus, Detritus)
 
     // Validation (only required systems)
     bool isValid() const {

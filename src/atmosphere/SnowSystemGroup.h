@@ -1,7 +1,6 @@
 #pragma once
 
-#include <memory>
-#include <vulkan/vulkan.h>
+#include "SystemGroupMacros.h"
 
 // Forward declarations
 class SnowMaskSystem;
@@ -28,23 +27,16 @@ class LeafSystem;
  */
 struct SnowSystemGroup {
     // Non-owning references to systems (owned by RendererSystems)
-    SnowMaskSystem* mask_ = nullptr;
-    VolumetricSnowSystem* volumetric_ = nullptr;
-    WeatherSystem* weather_ = nullptr;
-    LeafSystem* leaf_ = nullptr;
+    SYSTEM_MEMBER(SnowMaskSystem, mask);
+    SYSTEM_MEMBER(VolumetricSnowSystem, volumetric);
+    SYSTEM_MEMBER(WeatherSystem, weather);
+    SYSTEM_MEMBER(LeafSystem, leaf);
 
     // Accessors
-    SnowMaskSystem& mask() { return *mask_; }
-    const SnowMaskSystem& mask() const { return *mask_; }
-
-    VolumetricSnowSystem& volumetric() { return *volumetric_; }
-    const VolumetricSnowSystem& volumetric() const { return *volumetric_; }
-
-    WeatherSystem& weather() { return *weather_; }
-    const WeatherSystem& weather() const { return *weather_; }
-
-    LeafSystem& leaf() { return *leaf_; }
-    const LeafSystem& leaf() const { return *leaf_; }
+    REQUIRED_SYSTEM_ACCESSORS(SnowMaskSystem, mask)
+    REQUIRED_SYSTEM_ACCESSORS(VolumetricSnowSystem, volumetric)
+    REQUIRED_SYSTEM_ACCESSORS(WeatherSystem, weather)
+    REQUIRED_SYSTEM_ACCESSORS(LeafSystem, leaf)
 
     // Validation
     bool isValid() const {

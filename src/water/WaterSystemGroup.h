@@ -1,7 +1,6 @@
 #pragma once
 
-#include <memory>
-#include <vulkan/vulkan.h>
+#include "SystemGroupMacros.h"
 
 // Forward declarations
 class WaterSystem;
@@ -34,38 +33,24 @@ class WaterGBuffer;
  */
 struct WaterSystemGroup {
     // Non-owning references to systems (owned by RendererSystems)
-    WaterSystem* system_ = nullptr;
-    WaterDisplacement* displacement_ = nullptr;
-    FlowMapGenerator* flowMap_ = nullptr;
-    FoamBuffer* foam_ = nullptr;
-    SSRSystem* ssr_ = nullptr;
-    WaterTileCull* tileCull_ = nullptr;
-    WaterGBuffer* gBuffer_ = nullptr;
+    SYSTEM_MEMBER(WaterSystem, system);
+    SYSTEM_MEMBER(WaterDisplacement, displacement);
+    SYSTEM_MEMBER(FlowMapGenerator, flowMap);
+    SYSTEM_MEMBER(FoamBuffer, foam);
+    SYSTEM_MEMBER(SSRSystem, ssr);
+    SYSTEM_MEMBER(WaterTileCull, tileCull);
+    SYSTEM_MEMBER(WaterGBuffer, gBuffer);
 
     // Required system accessors
-    WaterSystem& system() { return *system_; }
-    const WaterSystem& system() const { return *system_; }
-
-    WaterDisplacement& displacement() { return *displacement_; }
-    const WaterDisplacement& displacement() const { return *displacement_; }
-
-    FlowMapGenerator& flowMap() { return *flowMap_; }
-    const FlowMapGenerator& flowMap() const { return *flowMap_; }
-
-    FoamBuffer& foam() { return *foam_; }
-    const FoamBuffer& foam() const { return *foam_; }
-
-    SSRSystem& ssr() { return *ssr_; }
-    const SSRSystem& ssr() const { return *ssr_; }
+    REQUIRED_SYSTEM_ACCESSORS(WaterSystem, system)
+    REQUIRED_SYSTEM_ACCESSORS(WaterDisplacement, displacement)
+    REQUIRED_SYSTEM_ACCESSORS(FlowMapGenerator, flowMap)
+    REQUIRED_SYSTEM_ACCESSORS(FoamBuffer, foam)
+    REQUIRED_SYSTEM_ACCESSORS(SSRSystem, ssr)
 
     // Optional system accessors (may be null)
-    WaterTileCull* tileCull() { return tileCull_; }
-    const WaterTileCull* tileCull() const { return tileCull_; }
-    bool hasTileCull() const { return tileCull_ != nullptr; }
-
-    WaterGBuffer* gBuffer() { return gBuffer_; }
-    const WaterGBuffer* gBuffer() const { return gBuffer_; }
-    bool hasGBuffer() const { return gBuffer_ != nullptr; }
+    OPTIONAL_SYSTEM_ACCESSORS(WaterTileCull, tileCull, TileCull)
+    OPTIONAL_SYSTEM_ACCESSORS(WaterGBuffer, gBuffer, GBuffer)
 
     // Validation (only required systems)
     bool isValid() const {
