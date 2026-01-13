@@ -13,6 +13,49 @@
 #include <unordered_map>
 #include <mutex>
 
+// Configuration for texture loading (defined outside class for default argument support)
+struct TextureLoadConfig {
+    bool useSRGB = true;
+    bool generateMipmaps = true;
+    bool enableAnisotropy = true;
+};
+
+// Configuration for mesh creation (defined outside class for default argument support)
+struct MeshConfig {
+    enum class Type {
+        Cube,
+        Plane,
+        Sphere,
+        Cylinder,
+        Capsule,
+        Disc,
+        Rock,
+        Custom
+    };
+
+    Type type = Type::Cube;
+
+    // Plane/Disc parameters
+    float width = 1.0f;
+    float depth = 1.0f;
+    float radius = 1.0f;
+
+    // Sphere/Cylinder/Capsule parameters
+    float height = 1.0f;
+    int stacks = 16;
+    int slices = 32;
+    int segments = 32;
+
+    // Rock parameters
+    int subdivisions = 3;
+    uint32_t seed = 0;
+    float roughness = 0.3f;
+    float asymmetry = 0.2f;
+
+    // Disc UV scale
+    float uvScale = 1.0f;
+};
+
 /**
  * AssetRegistry - Centralized asset management with deduplication and RAII
  *
@@ -69,49 +112,6 @@ public:
         }
 
         operator vk::ShaderModule() const { return module; }
-    };
-
-    // Configuration for texture loading
-    struct TextureLoadConfig {
-        bool useSRGB = true;
-        bool generateMipmaps = true;
-        bool enableAnisotropy = true;
-    };
-
-    // Configuration for mesh creation
-    struct MeshConfig {
-        enum class Type {
-            Cube,
-            Plane,
-            Sphere,
-            Cylinder,
-            Capsule,
-            Disc,
-            Rock,
-            Custom
-        };
-
-        Type type = Type::Cube;
-
-        // Plane/Disc parameters
-        float width = 1.0f;
-        float depth = 1.0f;
-        float radius = 1.0f;
-
-        // Sphere/Cylinder/Capsule parameters
-        float height = 1.0f;
-        int stacks = 16;
-        int slices = 32;
-        int segments = 32;
-
-        // Rock parameters
-        int subdivisions = 3;
-        uint32_t seed = 0;
-        float roughness = 0.3f;
-        float asymmetry = 0.2f;
-
-        // Disc UV scale
-        float uvScale = 1.0f;
     };
 
     AssetRegistry() = default;
