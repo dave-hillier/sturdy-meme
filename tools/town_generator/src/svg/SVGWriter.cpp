@@ -4,6 +4,7 @@
 #include "town_generator/building/WardGroup.h"
 #include "town_generator/building/Block.h"
 #include "town_generator/wards/Ward.h"
+#include "town_generator/wards/Harbour.h"
 #include <cmath>
 #include <map>
 
@@ -104,9 +105,11 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
     svg << "  </g>\n";
 
     // Water bodies (rendered on top of farms)
+    // Use getOcean() for smart smoothing that preserves landing area alignment
     svg << "  <g id=\"water\">\n";
-    if (model.waterEdge.length() > 0) {
-        svg << "    <path d=\"" << polygonToPath(model.waterEdge) << "\" ";
+    geom::Polygon ocean = model.getOcean();
+    if (ocean.length() > 0) {
+        svg << "    <path d=\"" << polygonToPath(ocean) << "\" ";
         svg << "fill=\"" << style.waterFill << "\" stroke=\"none\"/>\n";
     }
     svg << "  </g>\n";
@@ -132,6 +135,21 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
         }
         svg << "  </g>\n";
     }
+
+    // Harbour piers - rendered as filled polygons on water
+    // Reference: mfcg.js drawPier renders piers with stroke width 1.2
+    svg << "  <g id=\"piers\" fill=\"" << style.backgroundColor << "\" stroke=\"" << style.buildingStroke << "\" stroke-width=\"0.3\">\n";
+    for (const auto& ward : model.wards_) {
+        if (ward->getName() == "Harbour") {
+            auto* harbour = dynamic_cast<wards::Harbour*>(ward.get());
+            if (harbour) {
+                for (const auto& pier : harbour->getPiers()) {
+                    svg << "    <path d=\"" << polygonToPath(pier) << "\"/>\n";
+                }
+            }
+        }
+    }
+    svg << "  </g>\n";
 
     // Roads (outside walls) - use CSS class for common attributes
     svg << "  <g id=\"roads\" class=\"road\" stroke=\"" << style.roadStroke << "\" stroke-width=\"" << style.roadStrokeWidth << "\">\n";

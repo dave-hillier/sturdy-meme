@@ -399,12 +399,8 @@ void City::buildPatches() {
             }
 
             // Compute circumference of water cells (boundary polygon)
+            // Store raw (unsmoothed) - getOcean() will apply smart smoothing later
             waterEdge = findCircumference(waterPatches);
-
-            // Smooth the water edge (faithful to mfcg.js line 10515)
-            // Uses 1-3 random iterations like the original
-            int smoothIterations = 1 + static_cast<int>(utils::Random::floatVal() * 3);
-            waterEdge = geom::Polygon::smooth(waterEdge, nullptr, smoothIterations);
 
             // Also compute earth edge (boundary of land cells)
             std::vector<Cell*> landPatches;
@@ -427,11 +423,11 @@ void City::buildPatches() {
             earthEdge = findCircumference(landPatches);
 
             // Shore is the shared boundary between water and land
-            // For now, use water edge as shore (simplified)
-            shore = waterEdge;
+            // This is the raw earthEdge (Voronoi vertices), used for alignment
+            shore = earthEdge;
 
-            SDL_Log("Coast: waterEdge has %zu vertices (smoothed %d iterations), earthEdge has %zu vertices",
-                    waterEdge.length(), smoothIterations, earthEdge.length());
+            SDL_Log("Coast: waterEdge has %zu vertices, earthEdge has %zu vertices",
+                    waterEdge.length(), earthEdge.length());
         }
     }
 
@@ -1130,10 +1126,11 @@ void City::createWards() {
         // Regular wards
         if (!ward) {
             if (patch->waterbody) {
-                // Water cells don't get wards - skip
+                // Water cells don't get wards here - Harbour wards added later via addHarbour
                 continue;
             } else if (patch->withinCity) {
-                // Check if this patch borders water - could be harbour
+                // Faithful to MFCG: mark land cells that border shore as landing
+                // Harbour wards go on WATER cells, not land cells
                 bool bordersWater = false;
                 for (auto* neighbor : patch->neighbors) {
                     if (neighbor->waterbody) {
@@ -1143,14 +1140,13 @@ void City::createWards() {
                 }
 
                 if (bordersWater && coastNeeded && maxDocks > 0) {
-                    // Harbour ward for waterfront cells (uses maxDocks limit)
-                    ward = new wards::Harbour();
+                    // Mark as landing - this land cell borders water
+                    // The Harbour ward will be placed on the water neighbor later
                     patch->landing = true;
                     --maxDocks;
-                } else {
-                    // Faithful to MFCG: all urban wards are Alleys
-                    ward = new wards::Alleys();
                 }
+                // All urban land wards are Alleys (including landing cells)
+                ward = new wards::Alleys();
             } else {
                 // Outer cells - handled by buildFarms() with sine-wave radial pattern
                 // Leave as nullptr here - farms assigned later
@@ -1234,6 +1230,25 @@ void City::createWards() {
             ward->model = this;
             templePatch->ward = ward;
             wards_.emplace_back(ward);
+        }
+    }
+
+    // Add harbour wards to water cells adjacent to landing cells
+    // Faithful to mfcg.js addHarbour (lines 10648-10657) and line 10715
+    // Harbour wards go on WATER cells, with piers extending toward land
+    for (auto* patch : cells) {
+        if (!patch->landing) continue;  // Only process landing cells
+
+        // For each neighbor of this landing cell, if it's a waterbody with no ward, add Harbour
+        for (auto* neighbor : patch->neighbors) {
+            if (neighbor && neighbor->waterbody && !neighbor->ward) {
+                auto* ward = new wards::Harbour();
+                ward->patch = neighbor;
+                ward->model = this;
+                neighbor->ward = ward;
+                wards_.emplace_back(ward);
+                SDL_Log("City: Created Harbour ward on water cell adjacent to landing");
+            }
         }
     }
 }
@@ -1561,6 +1576,57 @@ double City::getCanalWidth(const geom::Point& v) const {
         }
     }
     return 0.0;
+}
+
+geom::Polygon City::getOcean() const {
+    // Faithful to mfcg.js getOcean() (lines 10838-10855)
+    // Returns the ocean polygon for rendering, smoothed except at landing areas
+    // This ensures piers align properly with the rendered water boundary
+
+    if (waterEdge.length() == 0) {
+        return geom::Polygon();
+    }
+
+    // Collect vertices that should NOT be smoothed (fixed points)
+    // These are vertices at landing cell boundaries where piers connect
+    std::vector<geom::Point> fixedPoints;
+
+    // Find all vertices of landing cells that are on the water edge
+    // These are the dock/pier connection points that must stay fixed
+    for (const auto* cell : cells) {
+        if (!cell->landing) continue;
+
+        // Check each vertex of this landing cell
+        for (size_t i = 0; i < cell->shape.length(); ++i) {
+            const geom::Point& v = cell->shape[i];
+
+            // Check if this vertex is on the water edge (exact match since both use same Voronoi vertices)
+            for (size_t j = 0; j < waterEdge.length(); ++j) {
+                if (geom::Point::distance(v, waterEdge[j]) < 0.01) {
+                    fixedPoints.push_back(waterEdge[j]);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Also fix vertices at shore edges (land-water boundary)
+    // These ensure the coastline stays aligned where buildings face water
+    for (const auto& edge : shoreE) {
+        for (size_t j = 0; j < waterEdge.length(); ++j) {
+            if (geom::Point::distance(edge.first, waterEdge[j]) < 0.01) {
+                fixedPoints.push_back(waterEdge[j]);
+            }
+            if (geom::Point::distance(edge.second, waterEdge[j]) < 0.01) {
+                fixedPoints.push_back(waterEdge[j]);
+            }
+        }
+    }
+
+    // Apply smoothing with fixed points (3 iterations like the reference)
+    // Fixed points won't move, preserving alignment at landing/shore areas
+    // Non-fixed points get smoothed for a natural coastline appearance
+    return geom::Polygon::smooth(waterEdge, &fixedPoints, 3);
 }
 
 } // namespace building

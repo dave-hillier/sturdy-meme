@@ -17,6 +17,9 @@ public:
 
     void createGeometry() override;
 
+    // Get piers for rendering
+    const std::vector<geom::Polygon>& getPiers() const { return piers; }
+
 private:
     // Pier structures
     std::vector<geom::Polygon> piers;

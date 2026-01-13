@@ -34,12 +34,12 @@ static building::Cell* getNeighbourForEdge(building::Cell* patch, const geom::Po
 
 void Harbour::createGeometry() {
     // Faithful to mfcg.js Harbour.createGeometry (lines 12822-12865)
-    // Creates piers along the longest water edge
+    // Creates piers extending INTO the water cell from edges bordering landing (land) cells
+    //
+    // Key insight: This ward's patch is a WATER cell. Piers extend from the
+    // land/water boundary INTO the water (toward the cell's center).
 
     if (!patch || !model) return;
-
-    // Mark patch as landing for correct inset calculations
-    patch->landing = true;
 
     // Collect canal start points (mfcg.js lines 12823-12828)
     std::vector<geom::Point> canalStarts;
@@ -49,10 +49,13 @@ void Harbour::createGeometry() {
         }
     }
 
-    // Find edges that border water (landing neighbors)
+    // Get water cell centroid - piers extend toward this point
+    geom::Point waterCentroid = patch->shape.centroid();
+
+    // Find edges that border landing cells (land neighbors)
     // mfcg.js lines 12829-12838: d = this.model.getNeighbour(this.patch, f.origin)
     // if (null != d && d.landing) { ... }
-    std::vector<std::pair<geom::Point, geom::Point>> waterEdges;
+    std::vector<std::pair<geom::Point, geom::Point>> landingEdges;
     size_t len = patch->shape.length();
 
     for (size_t i = 0; i < len; ++i) {
@@ -62,7 +65,7 @@ void Harbour::createGeometry() {
         // Find neighbor that shares this edge (faithful to getNeighbour)
         building::Cell* neighbor = getNeighbourForEdge(patch, v0, v1);
 
-        // Check if neighbor is a landing (water edge) - faithful to mfcg.js
+        // Check if neighbor is a landing cell (land cell bordering water)
         if (neighbor && neighbor->landing) {
             // Check for canal intersection and adjust edge if needed (mfcg.js line 12835)
             geom::Point start = v0;
@@ -83,22 +86,22 @@ void Harbour::createGeometry() {
                 }
             }
 
-            waterEdges.push_back({start, end});
+            landingEdges.push_back({start, end});
         }
     }
 
     piers.clear();
 
-    if (waterEdges.empty()) {
-        SDL_Log("Harbour: No water edges found, created 0 piers");
+    if (landingEdges.empty()) {
+        SDL_Log("Harbour: No landing edges found (no land neighbors), created 0 piers");
         return;
     }
 
-    // Find the longest water edge (mfcg.js lines 12840-12843)
+    // Find the longest landing edge (mfcg.js lines 12840-12843)
     double longestLen = 0;
     size_t longestIdx = 0;
-    for (size_t i = 0; i < waterEdges.size(); ++i) {
-        double edgeLen = geom::Point::distance(waterEdges[i].first, waterEdges[i].second);
+    for (size_t i = 0; i < landingEdges.size(); ++i) {
+        double edgeLen = geom::Point::distance(landingEdges[i].first, landingEdges[i].second);
         if (edgeLen > longestLen) {
             longestLen = edgeLen;
             longestIdx = i;
@@ -106,7 +109,7 @@ void Harbour::createGeometry() {
     }
 
     // Create piers only along the longest edge (mfcg.js lines 12844-12864)
-    const auto& longestEdge = waterEdges[longestIdx];
+    const auto& longestEdge = landingEdges[longestIdx];
     geom::Point start = longestEdge.first;
     geom::Point end = longestEdge.second;
     double edgeLen = longestLen;
@@ -129,7 +132,19 @@ void Harbour::createGeometry() {
     double step = (numPiers > 1) ? (totalPierSpace / (numPiers - 1) / edgeLen) : 0.0;
 
     geom::Point edgeDir = end.subtract(start);
-    geom::Point perpDir(-edgeDir.y / edgeLen, edgeDir.x / edgeLen);  // Normalized perpendicular (into water)
+
+    // Calculate perpendicular direction pointing INTO the water cell (toward centroid)
+    // First get a candidate perpendicular (90 degree rotation)
+    geom::Point perpCandidate(-edgeDir.y / edgeLen, edgeDir.x / edgeLen);
+
+    // Test which direction points toward water cell center
+    geom::Point edgeMid = geom::GeomUtils::lerp(start, end, 0.5);
+    geom::Point testPoint = edgeMid.add(geom::Point(perpCandidate.x, perpCandidate.y));
+    geom::Point toCenter = waterCentroid.subtract(edgeMid);
+
+    // Dot product: if positive, perpCandidate points toward center; if negative, flip it
+    double dot = perpCandidate.x * toCenter.x + perpCandidate.y * toCenter.y;
+    geom::Point perpDir = (dot >= 0) ? perpCandidate : geom::Point(-perpCandidate.x, -perpCandidate.y);
 
     double k = initialOffset;
     for (int p = 0; p < numPiers; ++p) {
@@ -154,7 +169,7 @@ void Harbour::createGeometry() {
         k += step;
     }
 
-    SDL_Log("Harbour: Created %zu piers along longest edge (%.1f units)", piers.size(), edgeLen);
+    SDL_Log("Harbour: Created %zu piers along longest landing edge (%.1f units), extending into water", piers.size(), edgeLen);
 }
 
 } // namespace wards

@@ -62,12 +62,16 @@ public:
     double coastDir = 0.0;        // Direction of coast (0-2, multiplied by PI)
 
     // Water features
-    geom::Polygon waterEdge;      // Boundary of water area
-    geom::Polygon earthEdge;      // Boundary of land area
+    geom::Polygon waterEdge;      // Boundary of water area (smoothed for basic display)
+    geom::Polygon earthEdge;      // Boundary of land area (raw Voronoi vertices)
     geom::Polygon shore;          // Shore line where land meets water
     bool riverNeeded = false;     // Whether to generate a river/canal
     int maxDocks = 0;             // Maximum number of dock/harbour cells (faithful to mfcg.js)
     std::vector<std::unique_ptr<Canal>> canals;  // Rivers/canals
+
+    // Get ocean polygon for rendering (smoothed except at landing areas)
+    // Faithful to mfcg.js getOcean() - lazy evaluated after wards are created
+    geom::Polygon getOcean() const;
 
     // Edge classification (faithful to mfcg.js buildDomains)
     // Each edge is represented as a pair of points (start, end)
