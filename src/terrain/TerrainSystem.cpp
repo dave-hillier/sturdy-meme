@@ -292,6 +292,7 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
         .addBinding(21, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)  // caustics texture
         .addBinding(22, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)          // caustics UBO
         .addBinding(29, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)          // liquid UBO (composable materials)
+        .addBinding(30, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)          // material layer UBO (composable materials)
         .build();
 
     return renderDescriptorSetLayout != VK_NULL_HANDLE;
@@ -523,6 +524,10 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         constexpr VkDeviceSize liquidUBOSize = 128;  // TerrainLiquidUBO size
         writer.writeBuffer(29, buffers->getLiquidUniformBuffer(i), 0, liquidUBOSize);
 
+        // Material Layer UBO (binding 30) - per-frame buffer for layer blending
+        constexpr VkDeviceSize materialLayerUBOSize = 336;  // MaterialLayerUBO size
+        writer.writeBuffer(30, buffers->getMaterialLayerUniformBuffer(i), 0, materialLayerUBOSize);
+
         writer.update();
     }
 
@@ -531,6 +536,14 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         void* liquidData = buffers->getLiquidMappedPtr(i);
         if (liquidData) {
             memcpy(liquidData, &liquidConfig, sizeof(material::TerrainLiquidUBO));
+        }
+    }
+
+    // Initialize material layer UBO with default state (no layers = fallback to hardcoded blend)
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        void* layerData = buffers->getMaterialLayerMappedPtr(i);
+        if (layerData) {
+            memcpy(layerData, &materialLayerUBO, sizeof(material::MaterialLayerUBO));
         }
     }
 
@@ -621,6 +634,21 @@ void TerrainSystem::setLiquidConfig(const material::TerrainLiquidUBO& config) {
         void* liquidData = buffers->getLiquidMappedPtr(i);
         if (liquidData) {
             memcpy(liquidData, &liquidConfig, sizeof(material::TerrainLiquidUBO));
+        }
+    }
+}
+
+void TerrainSystem::setMaterialLayerStack(const material::MaterialLayerStack& stack) {
+    materialLayerStack = stack;
+
+    // Pack into UBO format
+    materialLayerUBO.packFromStack(materialLayerStack);
+
+    // Update all frames
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        void* layerData = buffers->getMaterialLayerMappedPtr(i);
+        if (layerData) {
+            memcpy(layerData, &materialLayerUBO, sizeof(material::MaterialLayerUBO));
         }
     }
 }

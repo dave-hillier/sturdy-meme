@@ -14,6 +14,8 @@
 #include "../snow_common.glsl"
 #include "../cloud_shadow_common.glsl"
 #include "../terrain_liquid_common.glsl"
+#include "../material_layer_common.glsl"
+#include "../ubo_material_layer.glsl"
 
 // Virtual texturing support - define USE_VIRTUAL_TEXTURE to enable
 #ifdef USE_VIRTUAL_TEXTURE
@@ -296,14 +298,40 @@ void main() {
     }
 
 #ifndef USE_VIRTUAL_TEXTURE
-    // Blend in rock color on steep slopes (only for non-VT mode; VT handles cliffs separately)
+    // === MATERIAL LAYER BLENDING (Composable Material System) ===
+    // Blend terrain materials based on configured layers or fallback to slope-based
     vec3 rockColor = vec3(0.4, 0.35, 0.3);
-    vec3 grassColor = albedo;
-    albedo = mix(grassColor, rockColor, smoothstep(0.3, 0.6, slope));
+    float rockRoughness = 0.95;
+    float grassRoughness = 0.8;
+
+    if (materialLayerUbo.numMaterialLayers > 0) {
+        // Use configured material layers from UBO
+        // Layer 0 is base (grass), layer 1 is rock overlay
+        float rockBlend = 0.0;
+
+        for (int i = 1; i < materialLayerUbo.numMaterialLayers && i < MAX_MATERIAL_LAYERS; i++) {
+            MaterialLayerData layerData;
+            layerData.params0 = materialLayerUbo.materialLayers[i].params0;
+            layerData.params1 = materialLayerUbo.materialLayers[i].params1;
+            layerData.params2 = materialLayerUbo.materialLayers[i].params2;
+            layerData.center = materialLayerUbo.materialLayers[i].center;
+            layerData.direction = materialLayerUbo.materialLayers[i].direction;
+
+            float layerBlend = calculateLayerBlendFactor(layerData, fragWorldPos, normal, 0.0);
+            rockBlend = max(rockBlend, layerBlend);
+        }
+
+        albedo = mix(albedo, rockColor, rockBlend);
+    } else {
+        // Fallback: use helper functions from material_layer_common.glsl
+        float rockBlend = getRockBlendFactor(normal);
+        albedo = mix(albedo, rockColor, rockBlend);
+    }
 #endif
 
-    // Material properties
-    float roughness = mix(0.8, 0.95, slope);  // Rougher on slopes
+    // Material properties - blend roughness based on rock coverage
+    float rockBlendForRoughness = getRockBlendFactor(normal);
+    float roughness = mix(grassRoughness, rockRoughness, rockBlendForRoughness);
     float metallic = 0.0;  // Terrain is non-metallic
 
     // === SNOW LAYER ===

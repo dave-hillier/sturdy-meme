@@ -21,6 +21,7 @@
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "core/material/TerrainLiquidUBO.h"
+#include "core/material/MaterialLayer.h"
 #include <optional>
 
 class GpuProfiler;
@@ -202,6 +203,11 @@ public:
     void setLiquidWetness(float wetness);
     void setLiquidConfig(const material::TerrainLiquidUBO& config);
     const material::TerrainLiquidUBO& getLiquidConfig() const { return liquidConfig; }
+
+    // Set material layer configuration (composable material system)
+    // Use this to configure height/slope-based terrain material blending
+    void setMaterialLayerStack(const material::MaterialLayerStack& stack);
+    const material::MaterialLayerStack& getMaterialLayerStack() const { return materialLayerStack; }
 
     // Update terrain uniforms for a frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
@@ -386,6 +392,10 @@ private:
 
     // Liquid effects state (composable material system)
     material::TerrainLiquidUBO liquidConfig;
+
+    // Material layer state (composable material system)
+    material::MaterialLayerStack materialLayerStack;
+    material::MaterialLayerUBO materialLayerUBO;
 
     // Constants
     static constexpr uint32_t SUBDIVISION_WORKGROUP_SIZE = 64;

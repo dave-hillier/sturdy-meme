@@ -50,6 +50,10 @@ public:
     VkBuffer getLiquidUniformBuffer(uint32_t frameIndex) const { return liquidUniforms.buffers[frameIndex]; }
     void* getLiquidMappedPtr(uint32_t frameIndex) const { return liquidUniforms.mappedPointers[frameIndex]; }
 
+    // Material Layer UBO accessors (composable material system - layer blending)
+    VkBuffer getMaterialLayerUniformBuffer(uint32_t frameIndex) const { return materialLayerUniforms.buffers[frameIndex]; }
+    void* getMaterialLayerMappedPtr(uint32_t frameIndex) const { return materialLayerUniforms.mappedPointers[frameIndex]; }
+
 private:
     TerrainBuffers() = default;
     bool initInternal(const InitInfo& info);
@@ -79,4 +83,7 @@ private:
 
     // Liquid uniform buffers (composable material system - puddles, wetness)
     BufferUtils::PerFrameBufferSet liquidUniforms;
+
+    // Material layer uniform buffers (composable material system - layer blending)
+    BufferUtils::PerFrameBufferSet materialLayerUniforms;
 };
