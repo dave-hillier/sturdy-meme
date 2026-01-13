@@ -205,6 +205,7 @@ std::vector<double> Ward::getCityBlock() {
 geom::Polygon Ward::getAvailable() {
     // Faithful to mfcg.js Ward.getAvailable (lines 25-80 in 07-wards.js)
     // Computes tower radii, edge insets, and applies Ward.inset() for corner rounding
+
     if (!patch || !model) return geom::Polygon();
 
     size_t len = patch->shape.length();
@@ -260,20 +261,20 @@ geom::Polygon Ward::getAvailable() {
 
         // Determine edge type and inset
         // mfcg.js lines 58-78 with edge data switch
-        double inset = ALLEY / 2.0;  // Default for internal edges
+        double insetVal = ALLEY / 2.0;  // Default for internal edges
 
         // Check if on wall
         if (model->wall && model->wall->bordersBy(patch, v0, v1)) {
-            inset = building::CurtainWall::THICKNESS / 2.0 + ALLEY;
+            insetVal = building::CurtainWall::THICKNESS / 2.0 + ALLEY;
         } else if (model->citadel && model->citadel->bordersBy(patch, v0, v1)) {
-            inset = building::CurtainWall::THICKNESS / 2.0 + ALLEY;
+            insetVal = building::CurtainWall::THICKNESS / 2.0 + ALLEY;
         }
         // Check if on canal
         else {
             bool onCanal = false;
             for (const auto& canal : model->canals) {
                 if (canal->containsEdge(v0, v1)) {
-                    inset = canal->width / 2.0 + ALLEY;
+                    insetVal = canal->width / 2.0 + ALLEY;
                     onCanal = true;
                     break;
                 }
@@ -282,11 +283,11 @@ geom::Polygon Ward::getAvailable() {
             if (!onCanal) {
                 // Check if on artery - landing gives 2.0, otherwise 1.2
                 if (isEdgeOnRoad(v0, v1, model->arteries)) {
-                    inset = patch->landing ? 2.0 : 1.2;
+                    insetVal = patch->landing ? 2.0 : 1.2;
                 }
                 // Check if on street
                 else if (isEdgeOnRoad(v0, v1, model->streets) || isEdgeOnRoad(v0, v1, model->roads)) {
-                    inset = 1.0;
+                    insetVal = 1.0;
                 }
                 // Check if neighbor is plaza
                 else {
@@ -295,7 +296,7 @@ geom::Polygon Ward::getAvailable() {
                             // Check if shares this edge
                             if (neighbor->shape.findEdge(v0, v1) != -1 ||
                                 neighbor->shape.findEdge(v1, v0) != -1) {
-                                inset = 1.0;  // Plaza edge
+                                insetVal = 1.0;  // Plaza edge
                                 break;
                             }
                         }
@@ -304,7 +305,7 @@ geom::Polygon Ward::getAvailable() {
             }
         }
 
-        edgeInsets[i] = inset;
+        edgeInsets[i] = insetVal;
     }
 
     // Step 3: Apply Ward.inset with tower corner rounding

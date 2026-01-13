@@ -113,13 +113,17 @@ public:
     // Get the city block after accounting for streets (returns per-edge insets)
     std::vector<double> getCityBlock();
 
-    /**
-     * Get available space after applying street/wall insets and tower corner rounding
-     * Faithful to mfcg.js Ward.getAvailable (lines 25-80 in 07-wards.js)
-     *
-     * @return The available polygon with proper insets and rounded tower corners
-     */
+    // Get available area for building (with tower corner cutoffs)
+    // Faithful to mfcg.js Ward.getAvailable (lines 12326-12381) and Ward.inset (lines 12309-12319)
     virtual geom::Polygon getAvailable();
+
+    // Static inset function with corner cutoffs (mfcg.js Ward.inset)
+    // shape: original polygon
+    // edgeInsets: inset distance per edge
+    // towerRadii: tower radius per vertex (for corner cutoffs)
+    static geom::Polygon inset(const geom::Polygon& shape,
+                               const std::vector<double>& edgeInsets,
+                               const std::vector<double>& towerRadii);
 
     // Create geometry (buildings)
     virtual void createGeometry();
@@ -139,21 +143,6 @@ public:
         const geom::Point& p1,
         const geom::Point& p2,
         double minFront
-    );
-
-    /**
-     * Inset a polygon with per-edge amounts and tower corner rounding
-     * Faithful to mfcg.js Ward.inset (lines 8-19 in 07-wards.js)
-     *
-     * @param poly The polygon to inset
-     * @param edgeInsets Per-edge inset amounts (same length as poly)
-     * @param towerRadii Per-vertex tower radii for corner rounding (same length as poly)
-     * @return The inset polygon with rounded corners at tower positions
-     */
-    static geom::Polygon inset(
-        const geom::Polygon& poly,
-        const std::vector<double>& edgeInsets,
-        const std::vector<double>& towerRadii
     );
 
     // Create a church in a medium-sized block (faithful to mfcg.js createChurch)

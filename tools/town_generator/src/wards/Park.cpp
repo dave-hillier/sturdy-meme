@@ -37,32 +37,29 @@ void Park::createGeometry() {
 }
 
 geom::Polygon Park::createWavyBoundary(const geom::Polygon& shape) {
-    // Faithful to mfcg.js Park.createGeometry (lines 687-694)
-    // For each vertex, add the vertex and a midpoint to the next vertex
-    // Then apply Chaikin smoothing (3 iterations, closed polygon)
+    // Faithful to mfcg.js Park.createGeometry (lines 12988-12996)
+    // 1. Double vertices by adding midpoints
+    // 2. Apply Chaikin smoothing 3 times
 
     if (shape.length() < 3) return shape;
 
-    std::vector<geom::Point> pointsWithMidpoints;
+    // Double vertices by adding midpoints between each pair
+    std::vector<geom::Point> doubled;
     size_t len = shape.length();
 
     for (size_t i = 0; i < len; ++i) {
         const geom::Point& v0 = shape[i];
         const geom::Point& v1 = shape[(i + 1) % len];
 
-        // Add vertex
-        pointsWithMidpoints.push_back(v0);
-
-        // Add midpoint to next vertex (lerp at 0.5)
-        pointsWithMidpoints.emplace_back(
-            (v0.x + v1.x) / 2.0,
-            (v0.y + v1.y) / 2.0
-        );
+        doubled.push_back(v0);
+        doubled.push_back(geom::GeomUtils::lerp(v0, v1));  // midpoint
     }
 
-    // Apply Chaikin smoothing (closed=true, iterations=3)
-    geom::Polygon expanded(pointsWithMidpoints);
-    return geom::Polygon::chaikin(expanded, true, 3);
+    // Apply Chaikin smoothing 3 times (closed polygon)
+    geom::Polygon result(doubled);
+    result = geom::Polygon::chaikin(result, true, 3);
+
+    return result;
 }
 
 void Park::createPaths() {
