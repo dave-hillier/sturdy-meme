@@ -549,3 +549,152 @@ private:
     VkImageAspectFlags aspectMask_ = VK_IMAGE_ASPECT_COLOR_BIT;
     bool autoMipLevels_ = true;
 };
+
+/**
+ * ImageWithView - RAII container for a Vulkan image with its associated view
+ *
+ * Bundles a ManagedImage (VkImage + VmaAllocation) with a vk::raii::ImageView
+ * for convenient lifetime management and passing around.
+ *
+ * Example usage:
+ *   auto result = createImageWithView(device, allocator, 1920, 1080,
+ *                                      VK_FORMAT_R8G8B8A8_SRGB,
+ *                                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+ *   if (!result.isValid()) {
+ *       // handle error
+ *   }
+ *   // Use result.image and result.view
+ */
+struct ImageWithView {
+    ManagedImage image;
+    std::optional<vk::raii::ImageView> view;
+    VkFormat format = VK_FORMAT_UNDEFINED;
+    VkExtent3D extent = {0, 0, 0};
+    uint32_t mipLevels = 0;
+    uint32_t arrayLayers = 0;
+
+    void reset() {
+        view.reset();
+        image.reset();
+        format = VK_FORMAT_UNDEFINED;
+        extent = {0, 0, 0};
+        mipLevels = 0;
+        arrayLayers = 0;
+    }
+
+    [[nodiscard]] bool isValid() const {
+        return image.get() != VK_NULL_HANDLE && view.has_value();
+    }
+
+    // Get the raw VkImage handle
+    [[nodiscard]] VkImage getImage() const { return image.get(); }
+
+    // Get the raw VkImageView handle
+    [[nodiscard]] VkImageView getView() const {
+        return view.has_value() ? static_cast<VkImageView>(**view) : VK_NULL_HANDLE;
+    }
+};
+
+/**
+ * createImageWithView - Convenience function to create an image with its view
+ *
+ * Combines image creation, memory allocation, and view creation in one call.
+ * Uses sensible defaults for most parameters.
+ *
+ * @param device      The Vulkan RAII device
+ * @param allocator   The VMA allocator
+ * @param width       Image width in pixels
+ * @param height      Image height in pixels
+ * @param format      Vulkan format for the image
+ * @param usage       Image usage flags
+ * @param aspectMask  Image aspect mask (default: eColor)
+ * @param mipLevels   Number of mip levels (default: 1)
+ * @param arrayLayers Number of array layers (default: 1)
+ * @return ImageWithView containing the created resources, check isValid() for success
+ */
+inline ImageWithView createImageWithView(
+    const vk::raii::Device& device,
+    VmaAllocator allocator,
+    uint32_t width,
+    uint32_t height,
+    VkFormat format,
+    VkImageUsageFlags usage,
+    vk::ImageAspectFlags aspectMask = vk::ImageAspectFlagBits::eColor,
+    uint32_t mipLevels = 1,
+    uint32_t arrayLayers = 1) {
+
+    ImageWithView result;
+
+    ImageBuilder builder(allocator);
+    builder.setExtent(width, height)
+           .setFormat(format)
+           .setUsage(usage)
+           .setMipLevels(mipLevels)
+           .setArrayLayers(arrayLayers);
+
+    if (!builder.build(device, result.image, result.view, aspectMask)) {
+        result.reset();
+        return result;
+    }
+
+    result.format = format;
+    result.extent = {width, height, 1};
+    result.mipLevels = mipLevels;
+    result.arrayLayers = arrayLayers;
+
+    return result;
+}
+
+/**
+ * createImageWithView - Overload accepting VkExtent2D
+ */
+inline ImageWithView createImageWithView(
+    const vk::raii::Device& device,
+    VmaAllocator allocator,
+    VkExtent2D extent,
+    VkFormat format,
+    VkImageUsageFlags usage,
+    vk::ImageAspectFlags aspectMask = vk::ImageAspectFlagBits::eColor,
+    uint32_t mipLevels = 1,
+    uint32_t arrayLayers = 1) {
+
+    return createImageWithView(device, allocator, extent.width, extent.height,
+                               format, usage, aspectMask, mipLevels, arrayLayers);
+}
+
+/**
+ * createImageWithView - Overload using ImageBuilder for advanced configuration
+ *
+ * Use when you need more control over image creation parameters.
+ *
+ * Example:
+ *   ImageBuilder builder(allocator);
+ *   builder.setExtent(1920, 1080)
+ *          .setFormat(VK_FORMAT_R16G16B16A16_SFLOAT)
+ *          .asColorAttachment()
+ *          .setSamples(VK_SAMPLE_COUNT_4_BIT);
+ *   auto result = createImageWithView(device, builder);
+ */
+inline ImageWithView createImageWithView(
+    const vk::raii::Device& device,
+    const ImageBuilder& builder,
+    vk::ImageAspectFlags aspectMask = vk::ImageAspectFlagBits::eColor) {
+
+    ImageWithView result;
+
+    ManagedImage image;
+    std::optional<vk::raii::ImageView> view;
+
+    if (!builder.build(device, image, view, aspectMask)) {
+        return result;
+    }
+
+    result.image = std::move(image);
+    result.view = std::move(view);
+    result.format = builder.getFormat();
+    result.extent = builder.getExtent();
+    result.mipLevels = builder.getMipLevels();
+    result.arrayLayers = builder.getArrayLayers();
+
+    return result;
+}
