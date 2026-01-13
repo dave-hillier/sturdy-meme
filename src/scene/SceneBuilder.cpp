@@ -204,11 +204,11 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
 
 bool SceneBuilder::loadTextures(const InitInfo& info) {
     // Load textures via AssetRegistry (with caching and deduplication)
-    AssetRegistry::TextureLoadConfig srgbConfig{};
+    TextureLoadConfig srgbConfig{};
     srgbConfig.useSRGB = true;
     srgbConfig.generateMipmaps = true;
 
-    AssetRegistry::TextureLoadConfig linearConfig{};
+    TextureLoadConfig linearConfig{};
     linearConfig.useSRGB = false;  // Normal maps are linear
     linearConfig.generateMipmaps = true;
 
@@ -271,7 +271,7 @@ bool SceneBuilder::loadTextures(const InitInfo& info) {
         return false;
     }
 
-    SDL_Log("SceneBuilder: Loaded %zu textures via AssetRegistry", 8u);
+    SDL_Log("SceneBuilder: Loaded 8 textures via AssetRegistry");
     return true;
 }
 

@@ -778,8 +778,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
             common.shadowMapSampler = systems_->shadow().getShadowSampler();
             common.lightBuffer = systems_->globalBuffers().lightBuffers.buffers[i];
             common.lightBufferSize = sizeof(LightBuffer);
-            common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap().getImageView();
-            common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap().getSampler();
+            common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getImageView();
+            common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getSampler();
             common.pointShadowView = systems_->shadow().getPointShadowArrayView(i);
             common.pointShadowSampler = systems_->shadow().getPointShadowSampler();
             common.spotShadowView = systems_->shadow().getSpotShadowArrayView(i);
@@ -787,8 +787,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
             common.snowMaskView = systems_->snowMask().getSnowMaskView();
             common.snowMaskSampler = systems_->snowMask().getSnowMaskSampler();
             // Placeholder texture for unused PBR bindings (13-16)
-            common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture().getImageView();
-            common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture().getSampler();
+            common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture()->getImageView();
+            common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture()->getSampler();
 
             MaterialDescriptorFactory::MaterialTextures mat{};
             mat.diffuseView = systems_->rock().getRockTexture().getImageView();
@@ -810,16 +810,16 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
             common.shadowMapSampler = systems_->shadow().getShadowSampler();
             common.lightBuffer = systems_->globalBuffers().lightBuffers.buffers[i];
             common.lightBufferSize = sizeof(LightBuffer);
-            common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap().getImageView();
-            common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap().getSampler();
+            common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getImageView();
+            common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getSampler();
             common.pointShadowView = systems_->shadow().getPointShadowArrayView(i);
             common.pointShadowSampler = systems_->shadow().getPointShadowSampler();
             common.spotShadowView = systems_->shadow().getSpotShadowArrayView(i);
             common.spotShadowSampler = systems_->shadow().getSpotShadowSampler();
             common.snowMaskView = systems_->snowMask().getSnowMaskView();
             common.snowMaskSampler = systems_->snowMask().getSnowMaskSampler();
-            common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture().getImageView();
-            common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture().getSampler();
+            common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture()->getImageView();
+            common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture()->getSampler();
 
             MaterialDescriptorFactory::MaterialTextures mat{};
             mat.diffuseView = systems_->detritus()->getBarkTexture().getImageView();
@@ -863,16 +863,16 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
             common.shadowMapSampler = systems_->shadow().getShadowSampler();
             common.lightBuffer = systems_->globalBuffers().lightBuffers.buffers[i];
             common.lightBufferSize = sizeof(LightBuffer);
-            common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap().getImageView();
-            common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap().getSampler();
+            common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getImageView();
+            common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getSampler();
             common.pointShadowView = systems_->shadow().getPointShadowArrayView(i);
             common.pointShadowSampler = systems_->shadow().getPointShadowSampler();
             common.spotShadowView = systems_->shadow().getSpotShadowArrayView(i);
             common.spotShadowSampler = systems_->shadow().getSpotShadowSampler();
             common.snowMaskView = systems_->snowMask().getSnowMaskView();
             common.snowMaskSampler = systems_->snowMask().getSnowMaskSampler();
-            common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture().getImageView();
-            common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture().getSampler();
+            common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture()->getImageView();
+            common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture()->getSampler();
             // Wind buffer for vegetation animation
             common.windBuffer = windBuffers[i];
             common.windBufferSize = 32;  // sizeof(WindUBO): 2 x vec4
