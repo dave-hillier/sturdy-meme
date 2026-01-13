@@ -217,6 +217,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     sceneInfo.graphicsQueue = graphicsQueue;
     sceneInfo.physicalDevice = physicalDevice;
     sceneInfo.resourcePath = resourcePath;
+    sceneInfo.assetRegistry = &assetRegistry_;  // Pass asset registry for centralized texture management
     sceneInfo.getTerrainHeight = [this](float x, float z) {
         return systems_->terrain().getHeightAt(x, z);
     };

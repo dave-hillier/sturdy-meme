@@ -18,6 +18,8 @@
 #include <optional>
 #include <memory>
 
+class AssetRegistry;
+
 // Holds all scene resources (meshes, textures) and provides scene objects
 class SceneBuilder {
 public:
@@ -31,6 +33,7 @@ public:
         VkQueue graphicsQueue;
         VkPhysicalDevice physicalDevice;
         std::string resourcePath;
+        AssetRegistry* assetRegistry = nullptr;  // Centralized asset management
         HeightQueryFunc getTerrainHeight;  // Optional: query terrain height for object placement
         glm::vec2 sceneOrigin = glm::vec2(0.0f);  // World XZ offset for scene objects
     };
@@ -63,15 +66,15 @@ public:
     MaterialRegistry& getMaterialRegistry() { return materialRegistry; }
     const MaterialRegistry& getMaterialRegistry() const { return materialRegistry; }
 
-    // Access to textures for descriptor set creation
-    Texture& getGroundTexture() { return *groundTexture; }
-    Texture& getGroundNormalMap() { return *groundNormalMap; }
-    Texture& getCrateTexture() { return *crateTexture; }
-    Texture& getCrateNormalMap() { return *crateNormalMap; }
-    Texture& getMetalTexture() { return *metalTexture; }
-    Texture& getMetalNormalMap() { return *metalNormalMap; }
-    Texture& getDefaultEmissiveMap() { return *defaultEmissiveMap; }
-    Texture& getWhiteTexture() { return *whiteTexture; }
+    // Access to textures for descriptor set creation (via AssetRegistry)
+    const Texture* getGroundTexture() const;
+    const Texture* getGroundNormalMap() const;
+    const Texture* getCrateTexture() const;
+    const Texture* getCrateNormalMap() const;
+    const Texture* getMetalTexture() const;
+    const Texture* getMetalNormalMap() const;
+    const Texture* getDefaultEmissiveMap() const;
+    const Texture* getWhiteTexture() const;
 
     // Access to meshes for dynamic updates (e.g., cloth)
     Mesh& getFlagClothMesh() { return flagClothMesh; }
@@ -137,6 +140,9 @@ private:
     VmaAllocator storedAllocator = VK_NULL_HANDLE;
     VkDevice storedDevice = VK_NULL_HANDLE;
 
+    // Asset registry for centralized resource management
+    AssetRegistry* assetRegistry_ = nullptr;
+
     // Meshes (static RAII-managed)
     std::unique_ptr<Mesh> cubeMesh;
     std::unique_ptr<Mesh> sphereMesh;
@@ -155,15 +161,15 @@ private:
     PlayerCape playerCape;
     bool hasCapeEnabled = false;
 
-    // Textures (RAII-managed)
-    std::unique_ptr<Texture> crateTexture;
-    std::unique_ptr<Texture> crateNormalMap;
-    std::unique_ptr<Texture> groundTexture;
-    std::unique_ptr<Texture> groundNormalMap;
-    std::unique_ptr<Texture> metalTexture;
-    std::unique_ptr<Texture> metalNormalMap;
-    std::unique_ptr<Texture> defaultEmissiveMap;  // Black texture for objects without emissive
-    std::unique_ptr<Texture> whiteTexture;        // White texture for vertex-colored objects
+    // Textures (managed via AssetRegistry with shared_ptr)
+    std::shared_ptr<Texture> crateTexture_;
+    std::shared_ptr<Texture> crateNormal_;
+    std::shared_ptr<Texture> groundTexture_;
+    std::shared_ptr<Texture> groundNormal_;
+    std::shared_ptr<Texture> metalTexture_;
+    std::shared_ptr<Texture> metalNormal_;
+    std::shared_ptr<Texture> defaultEmissive_;  // Black texture for objects without emissive
+    std::shared_ptr<Texture> whiteTexture_;     // White texture for vertex-colored objects
 
     // Scene objects
     std::vector<Renderable> sceneObjects;

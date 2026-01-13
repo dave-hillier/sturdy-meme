@@ -129,6 +129,17 @@ bool Renderer::initInternal(const InitInfo& info) {
         if (!initCoreVulkanResources()) return false;
     }
 
+    // Initialize asset registry (after command pool is ready)
+    {
+        INIT_PROFILE_PHASE("AssetRegistry");
+        assetRegistry_.init(
+            vulkanContext_->getDevice(),
+            vulkanContext_->getPhysicalDevice(),
+            vulkanContext_->getAllocator(),
+            **commandPool_,
+            vulkanContext_->getGraphicsQueue());
+    }
+
     // Phase 2: Descriptor infrastructure (layouts, pools)
     {
         INIT_PROFILE_PHASE("DescriptorInfrastructure");

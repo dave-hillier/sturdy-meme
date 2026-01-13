@@ -1,5 +1,6 @@
 #include "SceneBuilder.h"
 #include "PhysicsSystem.h"
+#include "asset/AssetRegistry.h"
 #include <SDL3/SDL_log.h>
 
 std::unique_ptr<SceneBuilder> SceneBuilder::create(const InitInfo& info) {
@@ -20,6 +21,12 @@ bool SceneBuilder::initInternal(const InitInfo& info) {
     storedAllocator = info.allocator;
     storedDevice = info.device;
     sceneOrigin = info.sceneOrigin;
+    assetRegistry_ = info.assetRegistry;
+
+    if (!assetRegistry_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SceneBuilder: AssetRegistry is required");
+        return false;
+    }
 
     if (!createMeshes(info)) return false;
     if (!loadTextures(info)) return false;
@@ -29,21 +36,36 @@ bool SceneBuilder::initInternal(const InitInfo& info) {
 }
 
 void SceneBuilder::registerMaterials() {
+    // Get textures from registry
+    const Texture* crateTex = getCrateTexture();
+    const Texture* crateNorm = getCrateNormalMap();
+    const Texture* groundTex = getGroundTexture();
+    const Texture* groundNorm = getGroundNormalMap();
+    const Texture* metalTex = getMetalTexture();
+    const Texture* metalNorm = getMetalNormalMap();
+    const Texture* whiteTex = getWhiteTexture();
+
+    if (!crateTex || !crateNorm || !groundTex || !groundNorm ||
+        !metalTex || !metalNorm || !whiteTex) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SceneBuilder: Missing textures for material registration");
+        return;
+    }
+
     // Register crate material
-    crateMaterialId = materialRegistry.registerMaterial("crate", *crateTexture, *crateNormalMap);
+    crateMaterialId = materialRegistry.registerMaterial("crate", *crateTex, *crateNorm);
 
     // Register ground material (for any ground-related objects)
-    groundMaterialId = materialRegistry.registerMaterial("ground", *groundTexture, *groundNormalMap);
+    groundMaterialId = materialRegistry.registerMaterial("ground", *groundTex, *groundNorm);
 
     // Register metal material
-    metalMaterialId = materialRegistry.registerMaterial("metal", *metalTexture, *metalNormalMap);
+    metalMaterialId = materialRegistry.registerMaterial("metal", *metalTex, *metalNorm);
 
     // Register white material (for vertex-colored objects like animated characters)
     // Uses white texture with a flat normal map
-    whiteMaterialId = materialRegistry.registerMaterial("white", *whiteTexture, *groundNormalMap);
+    whiteMaterialId = materialRegistry.registerMaterial("white", *whiteTex, *groundNorm);
 
     // Register cape material (using metal texture)
-    capeMaterialId = materialRegistry.registerMaterial("cape", *metalTexture, *metalNormalMap);
+    capeMaterialId = materialRegistry.registerMaterial("cape", *metalTex, *metalNorm);
 
     SDL_Log("SceneBuilder: Registered %zu materials", materialRegistry.getMaterialCount());
 }
@@ -56,15 +78,15 @@ float SceneBuilder::getTerrainHeight(float x, float z) const {
 }
 
 void SceneBuilder::cleanup() {
-    // RAII-managed textures
-    crateTexture.reset();
-    crateNormalMap.reset();
-    groundTexture.reset();
-    groundNormalMap.reset();
-    metalTexture.reset();
-    metalNormalMap.reset();
-    defaultEmissiveMap.reset();
-    whiteTexture.reset();
+    // Release texture shared_ptrs (textures freed automatically when last reference is released)
+    crateTexture_.reset();
+    crateNormal_.reset();
+    groundTexture_.reset();
+    groundNormal_.reset();
+    metalTexture_.reset();
+    metalNormal_.reset();
+    defaultEmissive_.reset();
+    whiteTexture_.reset();
 
     // RAII-managed meshes (static)
     cubeMesh.reset();
@@ -181,70 +203,75 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
 }
 
 bool SceneBuilder::loadTextures(const InitInfo& info) {
+    // Load textures via AssetRegistry (with caching and deduplication)
+    AssetRegistry::TextureLoadConfig srgbConfig{};
+    srgbConfig.useSRGB = true;
+    srgbConfig.generateMipmaps = true;
+
+    AssetRegistry::TextureLoadConfig linearConfig{};
+    linearConfig.useSRGB = false;  // Normal maps are linear
+    linearConfig.generateMipmaps = true;
+
+    // Crate textures
     std::string texturePath = info.resourcePath + "/assets/textures/crates/crate1/crate1_diffuse.png";
-    crateTexture = Texture::loadFromFile(texturePath, info.allocator, info.device, info.commandPool,
-                                          info.graphicsQueue, info.physicalDevice);
-    if (!crateTexture) {
-        SDL_Log("Failed to load texture: %s", texturePath.c_str());
+    crateTexture_ = assetRegistry_->loadTexture(texturePath, srgbConfig);
+    if (!crateTexture_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load texture: %s", texturePath.c_str());
         return false;
     }
 
     std::string crateNormalPath = info.resourcePath + "/assets/textures/crates/crate1/crate1_normal.png";
-    crateNormalMap = Texture::loadFromFile(crateNormalPath, info.allocator, info.device, info.commandPool,
-                                            info.graphicsQueue, info.physicalDevice, false);
-    if (!crateNormalMap) {
-        SDL_Log("Failed to load crate normal map: %s", crateNormalPath.c_str());
+    crateNormal_ = assetRegistry_->loadTexture(crateNormalPath, linearConfig);
+    if (!crateNormal_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load crate normal map: %s", crateNormalPath.c_str());
         return false;
     }
 
+    // Ground/grass textures
     std::string grassTexturePath = info.resourcePath + "/assets/textures/grass/grass/grass01.jpg";
-    groundTexture = Texture::loadFromFile(grassTexturePath, info.allocator, info.device, info.commandPool,
-                                           info.graphicsQueue, info.physicalDevice);
-    if (!groundTexture) {
-        SDL_Log("Failed to load grass texture: %s", grassTexturePath.c_str());
+    groundTexture_ = assetRegistry_->loadTexture(grassTexturePath, srgbConfig);
+    if (!groundTexture_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load grass texture: %s", grassTexturePath.c_str());
         return false;
     }
 
     std::string grassNormalPath = info.resourcePath + "/assets/textures/grass/grass/grass01_n.jpg";
-    groundNormalMap = Texture::loadFromFile(grassNormalPath, info.allocator, info.device, info.commandPool,
-                                             info.graphicsQueue, info.physicalDevice, false);
-    if (!groundNormalMap) {
-        SDL_Log("Failed to load grass normal map: %s", grassNormalPath.c_str());
+    groundNormal_ = assetRegistry_->loadTexture(grassNormalPath, linearConfig);
+    if (!groundNormal_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load grass normal map: %s", grassNormalPath.c_str());
         return false;
     }
 
+    // Metal textures
     std::string metalTexturePath = info.resourcePath + "/assets/textures/industrial/metal_1.jpg";
-    metalTexture = Texture::loadFromFile(metalTexturePath, info.allocator, info.device, info.commandPool,
-                                          info.graphicsQueue, info.physicalDevice);
-    if (!metalTexture) {
-        SDL_Log("Failed to load metal texture: %s", metalTexturePath.c_str());
+    metalTexture_ = assetRegistry_->loadTexture(metalTexturePath, srgbConfig);
+    if (!metalTexture_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load metal texture: %s", metalTexturePath.c_str());
         return false;
     }
 
     std::string metalNormalPath = info.resourcePath + "/assets/textures/industrial/metal_1_norm.jpg";
-    metalNormalMap = Texture::loadFromFile(metalNormalPath, info.allocator, info.device, info.commandPool,
-                                            info.graphicsQueue, info.physicalDevice, false);
-    if (!metalNormalMap) {
-        SDL_Log("Failed to load metal normal map: %s", metalNormalPath.c_str());
+    metalNormal_ = assetRegistry_->loadTexture(metalNormalPath, linearConfig);
+    if (!metalNormal_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load metal normal map: %s", metalNormalPath.c_str());
         return false;
     }
 
     // Create default black emissive map for objects without emissive textures
-    defaultEmissiveMap = Texture::createSolidColor(0, 0, 0, 255, info.allocator, info.device,
-                                                    info.commandPool, info.graphicsQueue);
-    if (!defaultEmissiveMap) {
-        SDL_Log("Failed to create default emissive map");
+    defaultEmissive_ = assetRegistry_->createSolidColorTexture(0, 0, 0, 255, "default_emissive");
+    if (!defaultEmissive_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create default emissive map");
         return false;
     }
 
     // Create white texture for vertex-colored objects (like glTF characters)
-    whiteTexture = Texture::createSolidColor(255, 255, 255, 255, info.allocator, info.device,
-                                              info.commandPool, info.graphicsQueue);
-    if (!whiteTexture) {
-        SDL_Log("Failed to create white texture");
+    whiteTexture_ = assetRegistry_->createSolidColorTexture(255, 255, 255, 255, "white");
+    if (!whiteTexture_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create white texture");
         return false;
     }
 
+    SDL_Log("SceneBuilder: Loaded %zu textures via AssetRegistry", 8u);
     return true;
 }
 
@@ -257,6 +284,11 @@ void SceneBuilder::createRenderables() {
     // Scene objects are placed relative to sceneOrigin (settlement location)
     const float originX = sceneOrigin.x;
     const float originZ = sceneOrigin.y;
+
+    // Cache texture pointers from registry (const_cast needed as Renderable uses non-const ptr)
+    Texture* crateTex = const_cast<Texture*>(getCrateTexture());
+    Texture* metalTex = const_cast<Texture*>(getMetalTexture());
+    Texture* whiteTex = const_cast<Texture*>(getWhiteTexture());
 
     // Helper: get world position with scene origin offset
     auto worldPos = [originX, originZ](float localX, float localZ) -> std::pair<float, float> {
@@ -282,7 +314,7 @@ void SceneBuilder::createRenderables() {
     addPhysicsObject(RenderableBuilder()
         .atPosition(glm::vec3(crateX, getGroundY(crateX, crateZ, 0.5f), crateZ))
         .withMesh(cubeMesh.get())
-        .withTexture(crateTexture.get())
+        .withTexture(crateTex)
         .withMaterialId(crateMaterialId)
         .withRoughness(0.4f)
         .withMetallic(0.0f)
@@ -296,7 +328,7 @@ void SceneBuilder::createRenderables() {
     addPhysicsObject(RenderableBuilder()
         .withTransform(rotatedCube)
         .withMesh(cubeMesh.get())
-        .withTexture(crateTexture.get())
+        .withTexture(crateTex)
         .withMaterialId(crateMaterialId)
         .withRoughness(0.4f)
         .withMetallic(0.0f)
@@ -307,7 +339,7 @@ void SceneBuilder::createRenderables() {
     addPhysicsObject(RenderableBuilder()
         .atPosition(glm::vec3(polishedSphereX, getGroundY(polishedSphereX, polishedSphereZ, 0.5f), polishedSphereZ))
         .withMesh(sphereMesh.get())
-        .withTexture(metalTexture.get())
+        .withTexture(metalTex)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.1f)
         .withMetallic(1.0f)
@@ -318,7 +350,7 @@ void SceneBuilder::createRenderables() {
     addPhysicsObject(RenderableBuilder()
         .atPosition(glm::vec3(roughSphereX, getGroundY(roughSphereX, roughSphereZ, 0.5f), roughSphereZ))
         .withMesh(sphereMesh.get())
-        .withTexture(metalTexture.get())
+        .withTexture(metalTex)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.5f)
         .withMetallic(1.0f)
@@ -329,7 +361,7 @@ void SceneBuilder::createRenderables() {
     addPhysicsObject(RenderableBuilder()
         .atPosition(glm::vec3(polishedCubeX, getGroundY(polishedCubeX, polishedCubeZ, 0.5f), polishedCubeZ))
         .withMesh(cubeMesh.get())
-        .withTexture(metalTexture.get())
+        .withTexture(metalTex)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.1f)
         .withMetallic(1.0f)
@@ -343,7 +375,7 @@ void SceneBuilder::createRenderables() {
     addPhysicsObject(RenderableBuilder()
         .withTransform(brushedCube)
         .withMesh(cubeMesh.get())
-        .withTexture(metalTexture.get())
+        .withTexture(metalTex)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.6f)
         .withMetallic(1.0f)
@@ -359,7 +391,7 @@ void SceneBuilder::createRenderables() {
     emissiveOrbIndex = addPhysicsObject(RenderableBuilder()
         .withTransform(glowingSphereTransform)
         .withMesh(sphereMesh.get())
-        .withTexture(metalTexture.get())
+        .withTexture(metalTex)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.2f)
         .withMetallic(0.0f)
@@ -376,7 +408,7 @@ void SceneBuilder::createRenderables() {
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(blueLightTransform)
         .withMesh(sphereMesh.get())
-        .withTexture(metalTexture.get())
+        .withTexture(metalTex)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.2f)
         .withMetallic(0.0f)
@@ -393,7 +425,7 @@ void SceneBuilder::createRenderables() {
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(greenLightTransform)
         .withMesh(sphereMesh.get())
-        .withTexture(metalTexture.get())
+        .withTexture(metalTex)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.2f)
         .withMetallic(0.0f)
@@ -407,7 +439,7 @@ void SceneBuilder::createRenderables() {
     sceneObjects.push_back(RenderableBuilder()
         .atPosition(glm::vec3(debugCubeX, getGroundY(debugCubeX, debugCubeZ, 0.5f), debugCubeZ))
         .withMesh(cubeMesh.get())
-        .withTexture(crateTexture.get())
+        .withTexture(crateTex)
         .withMaterialId(crateMaterialId)
         .withRoughness(0.3f)
         .withMetallic(0.0f)
@@ -442,7 +474,7 @@ void SceneBuilder::createRenderables() {
         sceneObjects.push_back(RenderableBuilder()
             .withTransform(buildCharacterTransform(glm::vec3(playerX, playerTerrainY, playerZ), 10.0f))
             .withMesh(&animatedCharacter->getMesh())
-            .withTexture(whiteTexture.get())  // White texture so vertex colors show through
+            .withTexture(whiteTex)  // White texture so vertex colors show through
             .withMaterialId(whiteMaterialId)
             .withRoughness(charRoughness)
             .withMetallic(charMetallic)
@@ -455,7 +487,7 @@ void SceneBuilder::createRenderables() {
         sceneObjects.push_back(RenderableBuilder()
             .atPosition(glm::vec3(playerX, playerTerrainY + 0.9f, playerZ))
             .withMesh(capsuleMesh.get())
-            .withTexture(metalTexture.get())
+            .withTexture(metalTex)
             .withMaterialId(metalMaterialId)
             .withRoughness(0.3f)
             .withMetallic(0.8f)
@@ -469,7 +501,7 @@ void SceneBuilder::createRenderables() {
     sceneObjects.push_back(RenderableBuilder()
         .atPosition(glm::vec3(flagPoleX, getGroundY(flagPoleX, flagPoleZ, 1.5f), flagPoleZ))
         .withMesh(flagPoleMesh.get())
-        .withTexture(metalTexture.get())
+        .withTexture(metalTex)
         .withMaterialId(metalMaterialId)
         .withRoughness(0.4f)
         .withMetallic(0.9f)
@@ -481,7 +513,7 @@ void SceneBuilder::createRenderables() {
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(glm::mat4(1.0f))  // Identity, will be handled differently
         .withMesh(&flagClothMesh)
-        .withTexture(crateTexture.get())  // Using crate texture for now
+        .withTexture(crateTex)  // Using crate texture for now
         .withMaterialId(crateMaterialId)
         .withRoughness(0.6f)
         .withMetallic(0.0f)
@@ -494,7 +526,7 @@ void SceneBuilder::createRenderables() {
         sceneObjects.push_back(RenderableBuilder()
             .withTransform(glm::mat4(1.0f))  // Identity, cloth positions are in world space
             .withMesh(&capeMesh)
-            .withTexture(metalTexture.get())
+            .withTexture(metalTex)
             .withMaterialId(capeMaterialId)
             .withRoughness(0.3f)
             .withMetallic(0.8f)
@@ -516,7 +548,7 @@ void SceneBuilder::createRenderables() {
     sceneObjects.push_back(RenderableBuilder()
         .withTransform(wellTransform)
         .withMesh(cubeMesh.get())
-        .withTexture(metalTexture.get())  // Stone-like appearance
+        .withTexture(metalTex)  // Stone-like appearance
         .withMaterialId(metalMaterialId)
         .withRoughness(0.8f)
         .withMetallic(0.1f)
@@ -597,4 +629,37 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
 void SceneBuilder::startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) {
     if (!hasAnimatedCharacter) return;
     animatedCharacter->startJump(startPos, velocity, gravity, physics);
+}
+
+// Texture accessors (return raw pointer from shared_ptr)
+const Texture* SceneBuilder::getGroundTexture() const {
+    return groundTexture_.get();
+}
+
+const Texture* SceneBuilder::getGroundNormalMap() const {
+    return groundNormal_.get();
+}
+
+const Texture* SceneBuilder::getCrateTexture() const {
+    return crateTexture_.get();
+}
+
+const Texture* SceneBuilder::getCrateNormalMap() const {
+    return crateNormal_.get();
+}
+
+const Texture* SceneBuilder::getMetalTexture() const {
+    return metalTexture_.get();
+}
+
+const Texture* SceneBuilder::getMetalNormalMap() const {
+    return metalNormal_.get();
+}
+
+const Texture* SceneBuilder::getDefaultEmissiveMap() const {
+    return defaultEmissive_.get();
+}
+
+const Texture* SceneBuilder::getWhiteTexture() const {
+    return whiteTexture_.get();
 }
