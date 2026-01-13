@@ -10,6 +10,10 @@
 #include "tree_lighting_common.glsl"
 #include "dither_common.glsl"
 
+// Define snow UBO binding for tree leaf shader (uses tree graphics descriptor set)
+#define SNOW_UBO_BINDING BINDING_TREE_GFX_SNOW_UBO
+#include "ubo_snow.glsl"
+
 layout(binding = BINDING_TREE_GFX_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;
 layout(binding = BINDING_TREE_GFX_LEAF_ALBEDO) uniform sampler2D leafAlbedo;
 
@@ -51,6 +55,14 @@ void main() {
     vec3 baseColor = albedo.rgb * fragLeafTint;
     baseColor = applyAutumnHueShift(baseColor, fragAutumnHueShift);
 
+    // === RAIN WETNESS (Composable Material System) ===
+    // Wet leaves are darker and shinier due to water film
+    float wetness = snow.rainWetness;
+    if (wetness > 0.01) {
+        // Darken wet leaves (water absorbs some light)
+        baseColor *= mix(1.0, 0.7, wetness);
+    }
+
     // Use geometry normal (leaves are flat)
     vec3 N = normalize(fragNormal);
 
@@ -79,6 +91,16 @@ void main() {
         ubo.toSunDirection.w,
         ubo.ambientColor.rgb
     );
+
+    // === WET LEAF SPECULAR (Composable Material System) ===
+    // Add extra specular reflection from water film on wet leaves
+    if (wetness > 0.01) {
+        vec3 H = normalize(V + L);
+        float NdotH = max(dot(N, H), 0.0);
+        // Water film creates sharper, brighter specular highlights
+        float wetSpec = pow(NdotH, 64.0) * wetness * 0.3;
+        color += vec3(wetSpec) * ubo.sunColor.rgb * ubo.toSunDirection.w * shadow;
+    }
 
     // Apply aerial perspective for distant leaves
     color = applyAerialPerspectiveSimple(color, fragWorldPos);

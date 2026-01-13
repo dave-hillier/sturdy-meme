@@ -89,6 +89,17 @@ void main() {
         albedo = snowyVegetationColor(albedo, snow.snowColor.rgb, snowCoverage);
     }
 
+    // === RAIN WETNESS (Composable Material System) ===
+    // Wet grass is darker and shinier
+    float wetness = snow.rainWetness;
+    float grassRoughness = GRASS_ROUGHNESS;
+    if (wetness > 0.01) {
+        // Darken albedo when wet (water absorption)
+        albedo *= mix(1.0, 0.7, wetness);
+        // Reduce roughness (wet surfaces are shinier)
+        grassRoughness = mix(GRASS_ROUGHNESS, GRASS_ROUGHNESS * 0.3, wetness);
+    }
+
     // === SUN LIGHTING ===
     vec3 sunL = normalize(ubo.toSunDirection.xyz);
     float terrainShadow = calculateCascadedShadow(
@@ -114,7 +125,7 @@ void main() {
     vec3 H = normalize(V + sunL);
     float NoH = max(dot(N, H), 0.0);
     float VoH = max(dot(V, H), 0.0);
-    float D = D_GGX(NoH, GRASS_ROUGHNESS);
+    float D = D_GGX(NoH, grassRoughness);  // Use wetness-adjusted roughness
     vec3 F0 = vec3(F0_DIELECTRIC);  // Dielectric grass
     vec3 F = F_Schlick(VoH, F0);
     vec3 specular = D * F * GRASS_SPECULAR_STRENGTH;
@@ -141,15 +152,17 @@ void main() {
     // === DYNAMIC LIGHTS (multiple point and spot lights) ===
     // Uses shared function from dynamic_lights_common.glsl for consistent lighting
     vec3 dynamicLights = calculateAllDynamicLightsVegetationNoShadow(N, V, fragWorldPos,
-                                                                      albedo, GRASS_ROUGHNESS, GRASS_SSS_STRENGTH);
+                                                                      albedo, grassRoughness, GRASS_SSS_STRENGTH);
 
     // === FRESNEL RIM LIGHTING ===
     // Grass blades catch light at grazing angles using unified constants
+    // Wet grass has enhanced rim reflections (water has strong fresnel)
     float NoV = max(dot(N, V), 0.0);
     float rimFresnel = pow(1.0 - NoV, GRASS_RIM_FRESNEL_POWER);
+    float wetRimBoost = mix(1.0, 1.5, wetness);  // Stronger rim when wet
     // Rim color based on sky/ambient
     vec3 rimColor = ubo.ambientColor.rgb * 0.5 + ubo.sunColor.rgb * ubo.toSunDirection.w * 0.2;
-    vec3 rimLight = rimColor * rimFresnel * GRASS_RIM_INTENSITY;
+    vec3 rimLight = rimColor * rimFresnel * GRASS_RIM_INTENSITY * wetRimBoost;
 
     // === AMBIENT LIGHTING ===
     // Ambient occlusion - darker at base, brighter at tip using unified constants

@@ -211,6 +211,7 @@
 #define BINDING_TREE_GFX_LEAF_INSTANCES    9   // Leaf instance SSBO (world-space)
 #define BINDING_TREE_GFX_TREE_DATA        10   // Tree render data SSBO (transforms, tints)
 #define BINDING_TREE_GFX_BRANCH_SHADOW_INSTANCES 11  // Branch shadow instance SSBO (model matrices)
+#define BINDING_TREE_GFX_SNOW_UBO              12   // Snow UBO for tree wetness effects
 
 // Tree Impostor Descriptor Set
 #define BINDING_TREE_IMPOSTOR_UBO          0   // Scene uniforms
@@ -630,6 +631,7 @@ constexpr uint32_t TREE_GFX_LEAF_ALBEDO   = BINDING_TREE_GFX_LEAF_ALBEDO;
 constexpr uint32_t TREE_GFX_LEAF_INSTANCES = BINDING_TREE_GFX_LEAF_INSTANCES;
 constexpr uint32_t TREE_GFX_TREE_DATA = BINDING_TREE_GFX_TREE_DATA;
 constexpr uint32_t TREE_GFX_BRANCH_SHADOW_INSTANCES = BINDING_TREE_GFX_BRANCH_SHADOW_INSTANCES;
+constexpr uint32_t TREE_GFX_SNOW_UBO       = BINDING_TREE_GFX_SNOW_UBO;
 
 // Tree Impostor
 constexpr uint32_t TREE_IMPOSTOR_UBO      = BINDING_TREE_IMPOSTOR_UBO;

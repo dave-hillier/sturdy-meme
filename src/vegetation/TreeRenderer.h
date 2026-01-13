@@ -100,7 +100,8 @@ public:
         vk::ImageView leafAlbedo,
         vk::Sampler leafSampler,
         vk::Buffer leafInstanceBuffer,
-        vk::DeviceSize leafInstanceBufferSize);
+        vk::DeviceSize leafInstanceBufferSize,
+        vk::Buffer snowBuffer = VK_NULL_HANDLE);
 
     // Update culled leaf descriptor sets (called after cull buffers are created)
     void updateCulledLeafDescriptorSet(
@@ -111,7 +112,8 @@ public:
         vk::ImageView shadowMapView,
         vk::Sampler shadowSampler,
         vk::ImageView leafAlbedo,
-        vk::Sampler leafSampler);
+        vk::Sampler leafSampler,
+        vk::Buffer snowBuffer = VK_NULL_HANDLE);
 
     // Get descriptor set for a specific type (returns default if type not found)
     vk::DescriptorSet getBranchDescriptorSet(uint32_t frameIndex, const std::string& barkType) const;
