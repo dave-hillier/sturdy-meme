@@ -1,79 +1,51 @@
 #include "AtmosphereLUTSystem.h"
-#include "ShaderLoader.h"
+#include "core/pipeline/ComputePipelineBuilder.h"
 #include <SDL3/SDL_log.h>
-#include <vulkan/vulkan.hpp>
-#include <vector>
-
-using ShaderLoader::loadShaderModule;
-
-namespace {
-// Helper to create a compute pipeline and clean up shader module
-bool createComputePipeline(VkDevice device, const std::string& shaderFile,
-                           VkPipelineLayout layout, VkPipeline& outPipeline,
-                           const char* pipelineName) {
-    auto shaderModule = loadShaderModule(device, shaderFile);
-    if (!shaderModule) {
-        SDL_Log("Failed to load %s shader", pipelineName);
-        return false;
-    }
-
-    vk::Device vkDevice(device);
-
-    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*shaderModule)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(stageInfo)
-        .setLayout(layout);
-
-    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
-    vkDevice.destroyShaderModule(*shaderModule);
-
-    if (result.result != vk::Result::eSuccess) {
-        SDL_Log("Failed to create %s pipeline", pipelineName);
-        return false;
-    }
-
-    outPipeline = result.value;
-    return true;
-}
-} // anonymous namespace
 
 bool AtmosphereLUTSystem::createComputePipelines() {
+    ComputePipelineBuilder builder(device);
+
     // Create transmittance pipeline
-    if (!createComputePipeline(device, shaderPath + "/transmittance_lut.comp.spv",
-                               transmittancePipelineLayout, transmittancePipeline,
-                               "transmittance")) {
+    if (!builder.setShader(shaderPath + "/transmittance_lut.comp.spv")
+                .setPipelineLayout(transmittancePipelineLayout)
+                .build(transmittancePipeline)) {
+        SDL_Log("Failed to create transmittance pipeline");
         return false;
     }
 
     // Create multi-scatter pipeline
-    if (!createComputePipeline(device, shaderPath + "/multiscatter_lut.comp.spv",
-                               multiScatterPipelineLayout, multiScatterPipeline,
-                               "multi-scatter")) {
+    if (!builder.reset()
+                .setShader(shaderPath + "/multiscatter_lut.comp.spv")
+                .setPipelineLayout(multiScatterPipelineLayout)
+                .build(multiScatterPipeline)) {
+        SDL_Log("Failed to create multi-scatter pipeline");
         return false;
     }
 
     // Create sky-view pipeline
-    if (!createComputePipeline(device, shaderPath + "/skyview_lut.comp.spv",
-                               skyViewPipelineLayout, skyViewPipeline,
-                               "sky-view")) {
+    if (!builder.reset()
+                .setShader(shaderPath + "/skyview_lut.comp.spv")
+                .setPipelineLayout(skyViewPipelineLayout)
+                .build(skyViewPipeline)) {
+        SDL_Log("Failed to create sky-view pipeline");
         return false;
     }
 
     // Create irradiance pipeline
-    if (!createComputePipeline(device, shaderPath + "/irradiance_lut.comp.spv",
-                               irradiancePipelineLayout, irradiancePipeline,
-                               "irradiance")) {
+    if (!builder.reset()
+                .setShader(shaderPath + "/irradiance_lut.comp.spv")
+                .setPipelineLayout(irradiancePipelineLayout)
+                .build(irradiancePipeline)) {
+        SDL_Log("Failed to create irradiance pipeline");
         return false;
     }
 
     // Create cloud map pipeline
-    if (!createComputePipeline(device, shaderPath + "/cloudmap_lut.comp.spv",
-                               cloudMapPipelineLayout, cloudMapPipeline,
-                               "cloud map")) {
+    if (!builder.reset()
+                .setShader(shaderPath + "/cloudmap_lut.comp.spv")
+                .setPipelineLayout(cloudMapPipelineLayout)
+                .build(cloudMapPipeline)) {
+        SDL_Log("Failed to create cloud map pipeline");
         return false;
     }
 

@@ -3,6 +3,7 @@
 #include "DescriptorManager.h"
 #include "VmaResources.h"
 #include "core/vulkan/BarrierHelpers.h"
+#include "core/pipeline/ComputePipelineBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -191,24 +192,6 @@ bool CloudShadowSystem::createDescriptorSets() {
 }
 
 bool CloudShadowSystem::createComputePipeline() {
-    // Load compute shader
-    auto shaderCode = ShaderLoader::readFile(shaderPath + "/cloud_shadow.comp.spv");
-    if (!shaderCode) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load cloud shadow compute shader");
-        return false;
-    }
-
-    auto shaderModule = ShaderLoader::createShaderModule(device, *shaderCode);
-    if (!shaderModule) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow shader module");
-        return false;
-    }
-
-    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*shaderModule)
-        .setPName("main");
-
     // Push constant for temporal spreading quadrant index
     auto pushConstantRange = vk::PushConstantRange{}
         .setStageFlags(vk::ShaderStageFlagBits::eCompute)
@@ -226,24 +209,21 @@ bool CloudShadowSystem::createComputePipeline() {
     try {
         pipelineLayout_.emplace(*raiiDevice_, layoutInfo);
     } catch (const vk::SystemError& e) {
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow pipeline layout: %s", e.what());
         return false;
     }
 
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(stageInfo)
-        .setLayout(**pipelineLayout_);
-
+    // Create compute pipeline
     VkPipeline rawPipeline = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
+    ComputePipelineBuilder builder(device);
+    if (!builder.setShader(shaderPath + "/cloud_shadow.comp.spv")
+                .setPipelineLayout(**pipelineLayout_)
+                .build(rawPipeline)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow compute pipeline");
         return false;
     }
     computePipeline_.emplace(*raiiDevice_, rawPipeline);
 
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
     return true;
 }
 

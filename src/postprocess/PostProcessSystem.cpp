@@ -3,6 +3,7 @@
 #include "BilateralGridSystem.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
+#include "core/pipeline/ComputePipelineBuilder.h"
 #include "VmaResources.h"
 #include "CommandBufferUtils.h"
 #include "core/vulkan/BarrierHelpers.h"
@@ -753,37 +754,13 @@ bool PostProcessSystem::createHistogramPipelines() {
             return false;
         }
 
-        // Load shader
-        auto shaderCode = ShaderLoader::readFile(shaderPath + "/histogram_build.comp.spv");
-        if (!shaderCode) {
-            SDL_Log("Failed to load histogram build shader");
-            return false;
-        }
-
-        auto shaderModule = ShaderLoader::createShaderModule(device, *shaderCode);
-        if (!shaderModule) {
-            SDL_Log("Failed to create histogram build shader module");
-            return false;
-        }
-
-        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-            .setStage(vk::ShaderStageFlagBits::eCompute)
-            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
-            .setPName("main");
-
-        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-            .setStage(stageInfo)
-            .setLayout(histogramBuildPipelineLayout);
-
-        vk::Device vkDevice(device);
-        auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
-        vkDevice.destroyShaderModule(*shaderModule);
-
-        if (result.result != vk::Result::eSuccess) {
+        ComputePipelineBuilder builder(device);
+        if (!builder.setShader(shaderPath + "/histogram_build.comp.spv")
+                    .setPipelineLayout(histogramBuildPipelineLayout)
+                    .build(histogramBuildPipeline)) {
             SDL_Log("Failed to create histogram build pipeline");
             return false;
         }
-        histogramBuildPipeline = result.value;
     }
 
     // ============================================
@@ -808,37 +785,13 @@ bool PostProcessSystem::createHistogramPipelines() {
             return false;
         }
 
-        // Load shader
-        auto shaderCode = ShaderLoader::readFile(shaderPath + "/histogram_reduce.comp.spv");
-        if (!shaderCode) {
-            SDL_Log("Failed to load histogram reduce shader");
-            return false;
-        }
-
-        auto shaderModule = ShaderLoader::createShaderModule(device, *shaderCode);
-        if (!shaderModule) {
-            SDL_Log("Failed to create histogram reduce shader module");
-            return false;
-        }
-
-        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-            .setStage(vk::ShaderStageFlagBits::eCompute)
-            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
-            .setPName("main");
-
-        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-            .setStage(stageInfo)
-            .setLayout(histogramReducePipelineLayout);
-
-        vk::Device vkDevice(device);
-        auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
-        vkDevice.destroyShaderModule(*shaderModule);
-
-        if (result.result != vk::Result::eSuccess) {
+        ComputePipelineBuilder builder(device);
+        if (!builder.setShader(shaderPath + "/histogram_reduce.comp.spv")
+                    .setPipelineLayout(histogramReducePipelineLayout)
+                    .build(histogramReducePipeline)) {
             SDL_Log("Failed to create histogram reduce pipeline");
             return false;
         }
-        histogramReducePipeline = result.value;
     }
 
     return true;

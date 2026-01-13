@@ -72,6 +72,7 @@ set(SOURCES
     src/core/pipeline/PipelineBuilder.cpp
     src/core/pipeline/PipelineCache.cpp
     src/core/pipeline/GraphicsPipelineFactory.cpp
+    src/core/pipeline/ComputePipelineBuilder.cpp
     src/core/material/DescriptorManager.cpp
     src/core/material/MaterialDescriptorFactory.cpp
     src/core/material/MaterialRegistry.cpp
