@@ -7,7 +7,8 @@ InitContext InitContext::build(
     DescriptorManager::Pool* descPool,
     const std::string& resourcePath,
     uint32_t framesInFlight,
-    std::optional<DescriptorPoolSizes> poolSizes
+    std::optional<DescriptorPoolSizes> poolSizes,
+    entt::registry* registry
 ) {
     InitContext ctx{};
     ctx.raiiDevice = &vulkanContext.getRaiiDevice();
@@ -23,5 +24,6 @@ InitContext InitContext::build(
     ctx.framesInFlight = framesInFlight;
     ctx.extent = vulkanContext.getVkSwapchainExtent();
     ctx.poolSizesHint = poolSizes;
+    ctx.registry = registry;
     return ctx;
 }

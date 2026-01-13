@@ -7,6 +7,7 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include <entt/entt.hpp>
 
 #include "Mesh.h"
 #include "Texture.h"
@@ -43,6 +44,7 @@ public:
         std::string resourcePath;
         std::function<float(float, float)> getTerrainHeight;  // Terrain height query
         float terrainSize;
+        entt::registry* registry = nullptr;  // ECS registry for rock entities
     };
 
     /**

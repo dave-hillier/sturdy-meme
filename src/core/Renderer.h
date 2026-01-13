@@ -11,7 +11,7 @@
 #include <optional>
 #include <memory>
 #include <unordered_map>
-#include <entt/fwd.hpp>
+#include <entt/entt.hpp>
 
 #include "Camera.h"
 #include "DescriptorManager.h"
@@ -57,6 +57,10 @@ public:
         // If provided, Renderer takes ownership and completes device init.
         // If nullptr, Renderer creates and fully initializes a new VulkanContext.
         std::unique_ptr<VulkanContext> vulkanContext;
+
+        // Optional: ECS registry for systems that create entities
+        // If provided, vegetation systems will create ECS entities.
+        entt::registry* registry = nullptr;
     };
 
     /**

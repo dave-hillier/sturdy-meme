@@ -137,11 +137,14 @@ bool Renderer::initInternal(const InitInfo& info) {
         if (!initDescriptorInfrastructure()) return false;
     }
 
+    // Store ECS registry from init info (may be nullptr if not provided)
+    ecsRegistry_ = info.registry;
+
     // Build shared InitContext for subsystem initialization
     // Pass pool sizes hint so subsystems can create consistent pools if needed
     InitContext initCtx = InitContext::build(
         *vulkanContext_, **commandPool_, &*descriptorManagerPool,
-        resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes);
+        resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes, info.registry);
 
     // Phase 3: All subsystems (terrain, grass, weather, snow, water, etc.)
     {

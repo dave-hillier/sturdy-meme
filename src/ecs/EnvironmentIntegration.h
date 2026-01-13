@@ -423,6 +423,51 @@ inline entt::entity createRock(
     return entity;
 }
 
+// Create a detritus (fallen branch) entity
+inline entt::entity createDetritus(
+    entt::registry& registry,
+    const glm::vec3& position,
+    uint32_t variant = 0,
+    float scale = 1.0f,
+    const glm::vec3& rotation = glm::vec3(0.0f),
+    entt::entity sourceTree = entt::null,
+    const std::string& name = "Detritus")
+{
+    auto entity = registry.create();
+
+    DetritusInstance detritus;
+    detritus.meshVariant = variant;
+    detritus.scale = scale;
+    detritus.rotation = rotation;
+    detritus.sourceTree = sourceTree;
+    registry.emplace<DetritusInstance>(entity, detritus);
+
+    registry.emplace<Transform>(entity, Transform{position, rotation.y});
+    registry.emplace<StaticObject>(entity);
+
+    AABBBounds bounds;
+    bounds.min = glm::vec3(-0.5f * scale, 0.0f, -0.5f * scale);
+    bounds.max = glm::vec3(0.5f * scale, 0.5f * scale, 0.5f * scale);
+    registry.emplace<AABBBounds>(entity, bounds);
+
+    EntityInfo info;
+    info.name = name;
+    info.icon = "~";  // Branch-like icon
+    registry.emplace<EntityInfo>(entity, info);
+
+    return entity;
+}
+
+// Get all detritus entities
+inline std::vector<entt::entity> getDetritus(entt::registry& registry) {
+    std::vector<entt::entity> result;
+    auto view = registry.view<DetritusInstance>();
+    for (auto entity : view) {
+        result.push_back(entity);
+    }
+    return result;
+}
+
 // Get all tree entities
 inline std::vector<entt::entity> getTrees(entt::registry& registry) {
     std::vector<entt::entity> result;

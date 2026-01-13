@@ -294,6 +294,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     rockInfo.resourcePath = resourcePath;
     rockInfo.terrainSize = core.terrain.size;
     rockInfo.getTerrainHeight = core.terrain.getHeightAt;
+    rockInfo.registry = initCtx.registry;
 
     RockConfig rockConfig{};
     rockConfig.rockVariations = 6;
@@ -732,6 +733,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         detritusInfo.resourcePath = resourcePath;
         detritusInfo.terrainSize = core.terrain.size;
         detritusInfo.getTerrainHeight = core.terrain.getHeightAt;
+        detritusInfo.registry = initCtx.registry;
 
         // Gather tree positions for scattering detritus nearby
         if (systems_->tree()) {

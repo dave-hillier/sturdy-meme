@@ -184,10 +184,12 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Create full renderer (takes ownership of vulkanContext with device already initialized)
+    // Pass ECS registry so vegetation systems can create entities
     Renderer::InitInfo rendererInfo{};
     rendererInfo.window = window;
     rendererInfo.resourcePath = resourcePath;
     rendererInfo.vulkanContext = std::move(vulkanContext);  // Transfer ownership
+    rendererInfo.registry = &world_.registry();  // Pass registry for ECS entity creation
     renderer_ = Renderer::create(rendererInfo);
     if (!renderer_) {
         SDL_Log("Failed to initialize renderer");
@@ -196,7 +198,8 @@ bool Application::init(const std::string& title, int width, int height) {
         return false;
     }
 
-    // Connect ECS registry to renderer for ECS-based lighting
+    // Note: ECS registry is now set during Renderer::create via InitInfo
+    // This additional call is kept for backward compatibility and to ensure lighting works
     renderer_->setECSRegistry(&world_.registry());
 
     camera.setAspectRatio(static_cast<float>(width) / static_cast<float>(height));

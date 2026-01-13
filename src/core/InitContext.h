@@ -5,6 +5,7 @@
 #include <vk_mem_alloc.h>
 #include <string>
 #include <cstdint>
+#include <entt/fwd.hpp>
 
 #include "DescriptorManager.h"
 
@@ -45,6 +46,9 @@ struct InitContext {
     // Optional pool sizes hint for systems that create their own pools
     std::optional<DescriptorPoolSizes> poolSizesHint;
 
+    // Optional: ECS registry for systems that create entities (rocks, trees, etc.)
+    entt::registry* registry = nullptr;
+
     // ========================================================================
     // Factory and modifier methods
     // ========================================================================
@@ -59,7 +63,8 @@ struct InitContext {
         DescriptorManager::Pool* descriptorPool,
         const std::string& resourcePath,
         uint32_t framesInFlight,
-        std::optional<DescriptorPoolSizes> poolSizes = std::nullopt
+        std::optional<DescriptorPoolSizes> poolSizes = std::nullopt,
+        entt::registry* registry = nullptr
     );
 
     /**
@@ -87,5 +92,15 @@ struct InitContext {
      */
     void setExtent(VkExtent2D newExtent) {
         extent = newExtent;
+    }
+
+    /**
+     * Create a modified InitContext with ECS registry.
+     * Use when a subsystem needs to create ECS entities.
+     */
+    [[nodiscard]] InitContext withRegistry(entt::registry* reg) const {
+        InitContext modified = *this;
+        modified.registry = reg;
+        return modified;
     }
 };

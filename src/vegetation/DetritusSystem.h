@@ -7,6 +7,7 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include <entt/entt.hpp>
 
 #include "BranchGenerator.h"
 #include "Mesh.h"
@@ -46,6 +47,7 @@ public:
         std::function<float(float, float)> getTerrainHeight;  // Terrain height query
         float terrainSize;
         std::vector<glm::vec3> treePositions;  // Tree positions to scatter detritus near
+        entt::registry* registry = nullptr;  // ECS registry for detritus entities
     };
 
     /**
