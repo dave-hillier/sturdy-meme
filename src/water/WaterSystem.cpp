@@ -757,3 +757,57 @@ void WaterSystem::setupMaterialTransition(WaterType from, WaterType to, const gl
             static_cast<int>(from), static_cast<int>(to),
             center.x, center.y, distance, static_cast<int>(mode));
 }
+
+// New composable material API using LiquidComponent
+
+void WaterSystem::setPrimaryLiquid(const material::LiquidComponent& liquid) {
+    waterUniforms.waterColor = liquid.color;
+    waterUniforms.scatteringCoeffs = liquid.absorption;
+    waterUniforms.absorptionScale = liquid.absorptionScale;
+    waterUniforms.scatteringScale = liquid.scatteringScale;
+    waterUniforms.specularRoughness = liquid.roughness;
+    waterUniforms.sssIntensity = liquid.sssIntensity;
+
+    // Apply flow parameters if the liquid has flow enabled
+    if (material::hasLiquidFeature(liquid.flags, material::LiquidFlags::Flow)) {
+        waterUniforms.flowSpeed = liquid.flowSpeed;
+        waterUniforms.flowStrength = liquid.flowStrength;
+    }
+
+    SDL_Log("Primary liquid set: color (%.2f, %.2f, %.2f), roughness %.3f",
+            liquid.color.r, liquid.color.g, liquid.color.b, liquid.roughness);
+}
+
+void WaterSystem::setSecondaryLiquid(const material::LiquidComponent& liquid) {
+    waterUniforms.waterColor2 = liquid.color;
+    waterUniforms.scatteringCoeffs2 = liquid.absorption;
+    waterUniforms.absorptionScale2 = liquid.absorptionScale;
+    waterUniforms.scatteringScale2 = liquid.scatteringScale;
+    waterUniforms.specularRoughness2 = liquid.roughness;
+    waterUniforms.sssIntensity2 = liquid.sssIntensity;
+
+    SDL_Log("Secondary liquid set: color (%.2f, %.2f, %.2f), roughness %.3f",
+            liquid.color.r, liquid.color.g, liquid.color.b, liquid.roughness);
+}
+
+material::LiquidComponent WaterSystem::getPrimaryLiquid() const {
+    return material::WaterMaterialAdapter::fromWaterMaterial(
+        waterUniforms.waterColor,
+        waterUniforms.scatteringCoeffs,
+        waterUniforms.absorptionScale,
+        waterUniforms.scatteringScale,
+        waterUniforms.specularRoughness,
+        waterUniforms.sssIntensity
+    );
+}
+
+material::LiquidComponent WaterSystem::getSecondaryLiquid() const {
+    return material::WaterMaterialAdapter::fromWaterMaterial(
+        waterUniforms.waterColor2,
+        waterUniforms.scatteringCoeffs2,
+        waterUniforms.absorptionScale2,
+        waterUniforms.scatteringScale2,
+        waterUniforms.specularRoughness2,
+        waterUniforms.sssIntensity2
+    );
+}

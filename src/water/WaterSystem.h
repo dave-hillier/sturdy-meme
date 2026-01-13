@@ -15,6 +15,7 @@
 #include "DescriptorManager.h"
 #include "VmaResources.h"
 #include "core/FrameBuffered.h"
+#include "core/material/MaterialComponents.h"
 
 class ShadowSystem;
 
@@ -292,6 +293,14 @@ public:
     void setSecondaryMaterial(const WaterMaterial& material);
     void setPrimaryMaterial(WaterType type);
     void setSecondaryMaterial(WaterType type);
+
+    // New composable material API using LiquidComponent
+    void setPrimaryLiquid(const material::LiquidComponent& liquid);
+    void setSecondaryLiquid(const material::LiquidComponent& liquid);
+
+    // Get current materials as LiquidComponent
+    material::LiquidComponent getPrimaryLiquid() const;
+    material::LiquidComponent getSecondaryLiquid() const;
 
     // Configure blend parameters
     void setBlendCenter(const glm::vec2& worldPos) { waterUniforms.blendCenter.x = worldPos.x; waterUniforms.blendCenter.y = worldPos.y; }
