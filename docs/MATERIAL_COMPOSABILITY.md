@@ -204,7 +204,31 @@ vec4 evaluateMaterial(MaterialUBO mat, vec2 uv, vec3 worldPos, vec3 normal) {
   - Integration with LiquidComponent presets
 - Added BINDING_TERRAIN_LIQUID_UBO (29)
 
-### Phase 5: Generalize to All Renderables ✓
+### Phase 5: Generalize to All Renderables ✓ + Terrain Integration
+- Integrated terrain liquid effects into terrain.frag:
+  - Added `#include "terrain_liquid_common.glsl"`
+  - Added TerrainLiquidUniforms UBO at binding 29
+  - Applied puddle/wetness effects after snow layer
+  - Added liquid reflections to final color output
+- Updated TerrainSystem for liquid UBO management:
+  - `setLiquidWetness(float)` - simple wetness control
+  - `setLiquidConfig(TerrainLiquidUBO)` - full configuration
+  - Animation time updated each frame for rain ripples
+- Updated TerrainBuffers with liquid UBO allocation
+- Updated descriptor set layout with binding 29
+
+**Usage: Connect WeatherSystem to Terrain**
+```cpp
+// In your renderer update loop:
+if (weatherSystem && terrainSystem) {
+    float rainIntensity = weatherSystem->getIntensity();
+    // Rain type is 0, snow is 1
+    if (weatherSystem->getWeatherType() == 0) {
+        terrainSystem->setLiquidWetness(rainIntensity);
+    }
+}
+```
+
 - Created `ComposedMaterialRegistry` class with RAII GPU resource management:
   - `registerMaterial()` for composed materials with components
   - `createGPUResources()` allocates per-frame UBOs

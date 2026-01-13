@@ -291,6 +291,7 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
         .addBinding(20, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT)            // tile info SSBO
         .addBinding(21, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)  // caustics texture
         .addBinding(22, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)          // caustics UBO
+        .addBinding(29, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)          // liquid UBO (composable materials)
         .build();
 
     return renderDescriptorSetLayout != VK_NULL_HANDLE;
@@ -518,7 +519,19 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         constexpr VkDeviceSize causticsUBOSize = 32;  // 8 floats
         writer.writeBuffer(22, buffers->getCausticsUniformBuffer(i), 0, causticsUBOSize);
 
+        // Liquid UBO (binding 29) - per-frame buffer for terrain liquid effects
+        constexpr VkDeviceSize liquidUBOSize = 128;  // TerrainLiquidUBO size
+        writer.writeBuffer(29, buffers->getLiquidUniformBuffer(i), 0, liquidUBOSize);
+
         writer.update();
+    }
+
+    // Initialize liquid UBO with default state (no wetness)
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        void* liquidData = buffers->getLiquidMappedPtr(i);
+        if (liquidData) {
+            memcpy(liquidData, &liquidConfig, sizeof(material::TerrainLiquidUBO));
+        }
     }
 
     // Initialize caustics UBO with disabled state (causticsEnabled = 0)
@@ -588,6 +601,30 @@ void TerrainSystem::setCaustics(vk::Device device, vk::ImageView causticsView, v
     }
 }
 
+void TerrainSystem::setLiquidWetness(float wetness) {
+    liquidConfig.globalWetness = wetness;
+
+    // Update all frames
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        void* liquidData = buffers->getLiquidMappedPtr(i);
+        if (liquidData) {
+            memcpy(liquidData, &liquidConfig, sizeof(material::TerrainLiquidUBO));
+        }
+    }
+}
+
+void TerrainSystem::setLiquidConfig(const material::TerrainLiquidUBO& config) {
+    liquidConfig = config;
+
+    // Update all frames
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        void* liquidData = buffers->getLiquidMappedPtr(i);
+        if (liquidData) {
+            memcpy(liquidData, &liquidConfig, sizeof(material::TerrainLiquidUBO));
+        }
+    }
+}
+
 void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
                                     const glm::mat4& view, const glm::mat4& proj,
                                     const std::array<glm::vec4, 3>& snowCascadeParams,
@@ -649,6 +686,13 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
     float* causticsData = static_cast<float*>(buffers->getCausticsMappedPtr(frameIndex));
     if (causticsData && causticsEnabled) {
         causticsData[5] = causticsTime;  // causticsTime in UBO
+    }
+
+    // Update liquid animation time for rain ripples, etc.
+    liquidConfig.updateTime(0.0167f);
+    void* liquidData = buffers->getLiquidMappedPtr(frameIndex);
+    if (liquidData && liquidConfig.globalWetness > 0.0f) {
+        memcpy(liquidData, &liquidConfig, sizeof(material::TerrainLiquidUBO));
     }
 }
 

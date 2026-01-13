@@ -46,6 +46,10 @@ public:
     VkBuffer getCausticsUniformBuffer(uint32_t frameIndex) const { return causticsUniforms.buffers[frameIndex]; }
     void* getCausticsMappedPtr(uint32_t frameIndex) const { return causticsUniforms.mappedPointers[frameIndex]; }
 
+    // Liquid UBO accessors (composable material system - puddles, wet surfaces)
+    VkBuffer getLiquidUniformBuffer(uint32_t frameIndex) const { return liquidUniforms.buffers[frameIndex]; }
+    void* getLiquidMappedPtr(uint32_t frameIndex) const { return liquidUniforms.mappedPointers[frameIndex]; }
+
 private:
     TerrainBuffers() = default;
     bool initInternal(const InitInfo& info);
@@ -72,4 +76,7 @@ private:
 
     // Caustics uniform buffers (per-frame for underwater caustics)
     BufferUtils::PerFrameBufferSet causticsUniforms;
+
+    // Liquid uniform buffers (composable material system - puddles, wetness)
+    BufferUtils::PerFrameBufferSet liquidUniforms;
 };

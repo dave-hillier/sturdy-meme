@@ -16,6 +16,7 @@ TerrainBuffers::~TerrainBuffers() {
     if (allocator_) {
         BufferUtils::destroyBuffers(allocator_, uniformBuffers);
         BufferUtils::destroyBuffers(allocator_, causticsUniforms);
+        BufferUtils::destroyBuffers(allocator_, liquidUniforms);
         BufferUtils::destroyBuffer(allocator_, indirectDispatch);
         BufferUtils::destroyBuffer(allocator_, indirectDraw);
         BufferUtils::destroyBuffer(allocator_, visibleIndices);
@@ -35,6 +36,7 @@ TerrainBuffers::TerrainBuffers(TerrainBuffers&& other) noexcept
     , shadowVisible(std::move(other.shadowVisible))
     , shadowIndirectDraw(std::move(other.shadowIndirectDraw))
     , causticsUniforms(std::move(other.causticsUniforms))
+    , liquidUniforms(std::move(other.liquidUniforms))
 {
     other.allocator_ = VK_NULL_HANDLE;
 }
@@ -45,6 +47,7 @@ TerrainBuffers& TerrainBuffers::operator=(TerrainBuffers&& other) noexcept {
         if (allocator_) {
             BufferUtils::destroyBuffers(allocator_, uniformBuffers);
             BufferUtils::destroyBuffers(allocator_, causticsUniforms);
+            BufferUtils::destroyBuffers(allocator_, liquidUniforms);
             BufferUtils::destroyBuffer(allocator_, indirectDispatch);
             BufferUtils::destroyBuffer(allocator_, indirectDraw);
             BufferUtils::destroyBuffer(allocator_, visibleIndices);
@@ -63,6 +66,7 @@ TerrainBuffers& TerrainBuffers::operator=(TerrainBuffers&& other) noexcept {
         shadowVisible = std::move(other.shadowVisible);
         shadowIndirectDraw = std::move(other.shadowIndirectDraw);
         causticsUniforms = std::move(other.causticsUniforms);
+        liquidUniforms = std::move(other.liquidUniforms);
 
         other.allocator_ = VK_NULL_HANDLE;
     }
@@ -98,6 +102,19 @@ bool TerrainBuffers::createUniformBuffers(const InitInfo& info) {
         .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
         .build(causticsUniforms)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create caustics uniform buffers");
+        return false;
+    }
+
+    // Liquid uniforms (composable material system - puddles, wetness)
+    // Matches TerrainLiquidUniforms in terrain.frag and TerrainLiquidUBO in C++
+    constexpr VkDeviceSize liquidUBOSize = 128;  // Aligned size of TerrainLiquidUBO
+    if (!BufferUtils::PerFrameBufferBuilder()
+        .setAllocator(info.allocator)
+        .setFrameCount(info.framesInFlight)
+        .setSize(liquidUBOSize)
+        .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+        .build(liquidUniforms)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create liquid uniform buffers");
         return false;
     }
 

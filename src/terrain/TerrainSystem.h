@@ -20,6 +20,7 @@
 #include "VirtualTextureSystem.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
+#include "core/material/TerrainLiquidUBO.h"
 #include <optional>
 
 class GpuProfiler;
@@ -195,6 +196,12 @@ public:
     // Set caustics texture for underwater light projection
     void setCaustics(vk::Device device, vk::ImageView causticsView, vk::Sampler causticsSampler,
                      float waterLevel = 0.0f, bool enabled = true);
+
+    // Set terrain liquid effects (composable material system)
+    // Call this to enable puddles, wet surfaces based on weather
+    void setLiquidWetness(float wetness);
+    void setLiquidConfig(const material::TerrainLiquidUBO& config);
+    const material::TerrainLiquidUBO& getLiquidConfig() const { return liquidConfig; }
 
     // Update terrain uniforms for a frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
@@ -376,6 +383,9 @@ private:
     float causticsWaterLevel = 0.0f;
     bool causticsEnabled = false;
     float causticsTime = 0.0f;  // Animation time accumulator
+
+    // Liquid effects state (composable material system)
+    material::TerrainLiquidUBO liquidConfig;
 
     // Constants
     static constexpr uint32_t SUBDIVISION_WORKGROUP_SIZE = 64;
