@@ -1,6 +1,7 @@
 #include "OceanFFT.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
+#include "ComputePipelineBuilder.h"
 #include "VmaResources.h"
 #include "shaders/bindings.h"
 #include <SDL_log.h>
@@ -371,30 +372,12 @@ bool OceanFFT::createComputePipelines() {
         }
         spectrumPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
-        auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_spectrum.comp.spv");
-        if (!shaderModule) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to load ocean_spectrum.comp.spv");
+        if (!ComputePipelineBuilder(*raiiDevice_)
+                .setShader(shaderPath + "/ocean_spectrum.comp.spv")
+                .setPipelineLayout(**spectrumPipelineLayout_)
+                .buildInto(spectrumPipeline_)) {
             return false;
         }
-
-        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-            .setStage(vk::ShaderStageFlagBits::eCompute)
-            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
-            .setPName("main");
-
-        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-            .setStage(stageInfo)
-            .setLayout(**spectrumPipelineLayout_);
-
-        VkPipeline rawPipeline = VK_NULL_HANDLE;
-        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-                reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-                nullptr, &rawPipeline) != VK_SUCCESS) {
-            vk::Device(device).destroyShaderModule(*shaderModule);
-            return false;
-        }
-        spectrumPipeline_.emplace(*raiiDevice_, rawPipeline);
-        vk::Device(device).destroyShaderModule(*shaderModule);
     }
 
     // =========================================================================
@@ -426,30 +409,12 @@ bool OceanFFT::createComputePipelines() {
         }
         timeEvolutionPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
-        auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_time_evolution.comp.spv");
-        if (!shaderModule) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to load ocean_time_evolution.comp.spv");
+        if (!ComputePipelineBuilder(*raiiDevice_)
+                .setShader(shaderPath + "/ocean_time_evolution.comp.spv")
+                .setPipelineLayout(**timeEvolutionPipelineLayout_)
+                .buildInto(timeEvolutionPipeline_)) {
             return false;
         }
-
-        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-            .setStage(vk::ShaderStageFlagBits::eCompute)
-            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
-            .setPName("main");
-
-        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-            .setStage(stageInfo)
-            .setLayout(**timeEvolutionPipelineLayout_);
-
-        VkPipeline rawPipeline = VK_NULL_HANDLE;
-        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-                reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-                nullptr, &rawPipeline) != VK_SUCCESS) {
-            vk::Device(device).destroyShaderModule(*shaderModule);
-            return false;
-        }
-        timeEvolutionPipeline_.emplace(*raiiDevice_, rawPipeline);
-        vk::Device(device).destroyShaderModule(*shaderModule);
     }
 
     // =========================================================================
@@ -478,30 +443,12 @@ bool OceanFFT::createComputePipelines() {
         }
         fftPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
-        auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_fft.comp.spv");
-        if (!shaderModule) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to load ocean_fft.comp.spv");
+        if (!ComputePipelineBuilder(*raiiDevice_)
+                .setShader(shaderPath + "/ocean_fft.comp.spv")
+                .setPipelineLayout(**fftPipelineLayout_)
+                .buildInto(fftPipeline_)) {
             return false;
         }
-
-        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-            .setStage(vk::ShaderStageFlagBits::eCompute)
-            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
-            .setPName("main");
-
-        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-            .setStage(stageInfo)
-            .setLayout(**fftPipelineLayout_);
-
-        VkPipeline rawPipeline = VK_NULL_HANDLE;
-        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-                reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-                nullptr, &rawPipeline) != VK_SUCCESS) {
-            vk::Device(device).destroyShaderModule(*shaderModule);
-            return false;
-        }
-        fftPipeline_.emplace(*raiiDevice_, rawPipeline);
-        vk::Device(device).destroyShaderModule(*shaderModule);
     }
 
     // =========================================================================
@@ -534,30 +481,12 @@ bool OceanFFT::createComputePipelines() {
         }
         displacementPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
-        auto shaderModule = ShaderLoader::loadShaderModule(device, shaderPath + "/ocean_displacement.comp.spv");
-        if (!shaderModule) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to load ocean_displacement.comp.spv");
+        if (!ComputePipelineBuilder(*raiiDevice_)
+                .setShader(shaderPath + "/ocean_displacement.comp.spv")
+                .setPipelineLayout(**displacementPipelineLayout_)
+                .buildInto(displacementPipeline_)) {
             return false;
         }
-
-        auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-            .setStage(vk::ShaderStageFlagBits::eCompute)
-            .setModule(static_cast<vk::ShaderModule>(*shaderModule))
-            .setPName("main");
-
-        auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-            .setStage(stageInfo)
-            .setLayout(**displacementPipelineLayout_);
-
-        VkPipeline rawPipeline = VK_NULL_HANDLE;
-        if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-                reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-                nullptr, &rawPipeline) != VK_SUCCESS) {
-            vk::Device(device).destroyShaderModule(*shaderModule);
-            return false;
-        }
-        displacementPipeline_.emplace(*raiiDevice_, rawPipeline);
-        vk::Device(device).destroyShaderModule(*shaderModule);
     }
 
     return true;

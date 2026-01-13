@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "VmaResources.h"
 #include "core/ImageBuilder.h"
+#include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL_log.h>
@@ -167,33 +168,10 @@ bool HiZSystem::createPyramidPipeline() {
         return false;
     }
 
-    // Load compute shader
-    auto shaderModule = ShaderLoader::loadShaderModule(
-        device, shaderPath + "/hiz_downsample.comp.spv");
-    if (!shaderModule) {
-        SDL_Log("HiZSystem: Failed to load hiz_downsample.comp.spv");
-        return false;
-    }
-
-    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*shaderModule)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(stageInfo)
-        .setLayout(**pyramidPipelineLayout_);
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
-        SDL_Log("HiZSystem: Failed to create pyramid compute pipeline");
-        return false;
-    }
-    pyramidPipeline_.emplace(*raiiDevice_, rawPipeline);
-
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-    return true;
+    return ComputePipelineBuilder(*raiiDevice_)
+        .setShader(shaderPath + "/hiz_downsample.comp.spv")
+        .setPipelineLayout(**pyramidPipelineLayout_)
+        .buildInto(pyramidPipeline_);
 }
 
 bool HiZSystem::createCullingPipeline() {
@@ -225,34 +203,10 @@ bool HiZSystem::createCullingPipeline() {
         return false;
     }
 
-    // Load compute shader
-    auto shaderModule = ShaderLoader::loadShaderModule(
-        device, shaderPath + "/hiz_culling.comp.spv");
-    if (!shaderModule) {
-        SDL_Log("HiZSystem: Failed to load hiz_culling.comp.spv");
-        return false;
-    }
-
-    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*shaderModule)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(stageInfo)
-        .setLayout(**cullingPipelineLayout_);
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
-        SDL_Log("HiZSystem: Failed to create culling compute pipeline");
-        return false;
-    }
-    cullingPipeline_.emplace(*raiiDevice_, rawPipeline);
-
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-
-    return true;
+    return ComputePipelineBuilder(*raiiDevice_)
+        .setShader(shaderPath + "/hiz_culling.comp.spv")
+        .setPipelineLayout(**cullingPipelineLayout_)
+        .buildInto(cullingPipeline_);
 }
 
 void HiZSystem::destroyPipelines() {

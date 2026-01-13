@@ -3,6 +3,7 @@
 #include "DescriptorManager.h"
 #include "core/vulkan/BarrierHelpers.h"
 #include "core/vulkan/VmaResources.h"
+#include "core/pipeline/ComputePipelineBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -267,77 +268,17 @@ bool FroxelSystem::createDescriptorSets() {
 }
 
 bool FroxelSystem::createFroxelUpdatePipeline() {
-    std::string shaderFile = shaderPath + "/froxel_update.comp.spv";
-    auto shaderCode = ShaderLoader::readFile(shaderFile);
-    if (!shaderCode) {
-        SDL_Log("Failed to load froxel update shader: %s", shaderFile.c_str());
-        return false;
-    }
-
-    auto shaderModule = ShaderLoader::createShaderModule(device, *shaderCode);
-    if (!shaderModule) {
-        SDL_Log("Failed to create froxel update shader module");
-        return false;
-    }
-
-    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*shaderModule)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(stageInfo)
-        .setLayout(**froxelPipelineLayout_);
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-            reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-            nullptr, &rawPipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
-        SDL_Log("Failed to create froxel update pipeline");
-        return false;
-    }
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-    froxelUpdatePipeline_.emplace(*raiiDevice_, rawPipeline);
-
-    return true;
+    return ComputePipelineBuilder(*raiiDevice_)
+        .setShader(shaderPath + "/froxel_update.comp.spv")
+        .setPipelineLayout(**froxelPipelineLayout_)
+        .buildInto(froxelUpdatePipeline_);
 }
 
 bool FroxelSystem::createIntegrationPipeline() {
-    std::string shaderFile = shaderPath + "/froxel_integrate.comp.spv";
-    auto shaderCode = ShaderLoader::readFile(shaderFile);
-    if (!shaderCode) {
-        SDL_Log("Failed to load froxel integration shader: %s", shaderFile.c_str());
-        return false;
-    }
-
-    auto shaderModule = ShaderLoader::createShaderModule(device, *shaderCode);
-    if (!shaderModule) {
-        SDL_Log("Failed to create froxel integration shader module");
-        return false;
-    }
-
-    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*shaderModule)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(stageInfo)
-        .setLayout(**froxelPipelineLayout_);
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-            reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-            nullptr, &rawPipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
-        SDL_Log("Failed to create froxel integration pipeline");
-        return false;
-    }
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-    integrationPipeline_.emplace(*raiiDevice_, rawPipeline);
-
-    return true;
+    return ComputePipelineBuilder(*raiiDevice_)
+        .setShader(shaderPath + "/froxel_integrate.comp.spv")
+        .setPipelineLayout(**froxelPipelineLayout_)
+        .buildInto(integrationPipeline_);
 }
 
 void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,

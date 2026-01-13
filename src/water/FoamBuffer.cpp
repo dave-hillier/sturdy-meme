@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "VmaResources.h"
 #include "DescriptorManager.h"
+#include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
@@ -218,34 +219,16 @@ bool FoamBuffer::createComputePipeline() {
         return false;
     }
 
-    // Load compute shader
-    std::string shaderFile = shaderPath + "/foam_blur.comp.spv";
-    auto shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
-    if (!shaderModule) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "FoamBuffer: Compute shader not found at %s", shaderFile.c_str());
+    // Create compute pipeline - allow failure since system works without temporal foam
+    if (!ComputePipelineBuilder(*raiiDevice_)
+            .setShader(shaderPath + "/foam_blur.comp.spv")
+            .setPipelineLayout(**computePipelineLayout_)
+            .buildInto(computePipeline_)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "FoamBuffer: Failed to create compute pipeline, temporal foam disabled");
         return true;  // Allow system to work without temporal foam
     }
 
-    auto shaderStage = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*shaderModule)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(shaderStage)
-        .setLayout(**computePipelineLayout_);
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-        reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline);
-
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-
-    if (result == VK_SUCCESS) {
-        computePipeline_.emplace(*raiiDevice_, rawPipeline);
-    }
-
-    return result == VK_SUCCESS;
+    return true;
 }
 
 bool FoamBuffer::createDescriptorSets() {

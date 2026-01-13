@@ -5,6 +5,7 @@
 #include "CullCommon.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
+#include "ComputePipelineBuilder.h"
 #include "DescriptorManager.h"
 #include "UBOs.h"
 #include "VmaResources.h"
@@ -325,41 +326,13 @@ bool GrassSystem::createDisplacementPipeline() {
     }
     displacementPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
-    // Load compute shader
-    auto compShaderCode = ShaderLoader::readFile(getShaderPath() + "/grass_displacement.comp.spv");
-    if (!compShaderCode) {
-        SDL_Log("Failed to load displacement compute shader");
-        return false;
-    }
-
-    auto compShaderModule = ShaderLoader::createShaderModule(getDevice(), *compShaderCode);
-    if (!compShaderModule) {
-        SDL_Log("Failed to create displacement compute shader module");
-        return false;
-    }
-
-    vk::Device vkDevice(getDevice());
-
-    auto shaderStageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*compShaderModule)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(shaderStageInfo)
-        .setLayout(**displacementPipelineLayout_);
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(getDevice(), VK_NULL_HANDLE, 1,
-            reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-            nullptr, &rawPipeline) != VK_SUCCESS) {
-        vkDevice.destroyShaderModule(*compShaderModule);
+    if (!ComputePipelineBuilder(*raiiDevice_)
+            .setShader(getShaderPath() + "/grass_displacement.comp.spv")
+            .setPipelineLayout(**displacementPipelineLayout_)
+            .buildInto(displacementPipeline_)) {
         SDL_Log("Failed to create displacement compute pipeline");
         return false;
     }
-    displacementPipeline_.emplace(*raiiDevice_, rawPipeline);
-
-    vkDevice.destroyShaderModule(*compShaderModule);
 
     // Allocate per-frame displacement descriptor sets (double-buffered) using managed pool
     auto rawSets = getDescriptorPool()->allocate(**displacementDescriptorSetLayout_, getFramesInFlight());

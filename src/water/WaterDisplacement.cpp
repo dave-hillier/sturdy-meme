@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "VmaResources.h"
 #include "DescriptorManager.h"
+#include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL_log.h>
@@ -257,34 +258,16 @@ bool WaterDisplacement::createComputePipeline() {
         return false;
     }
 
-    // Load compute shader
-    auto shaderModule = ShaderLoader::loadShaderModule(device, "shaders/water_displacement.comp.spv");
-    if (!shaderModule) {
+    // Create compute pipeline - allow failure since system works without splashes
+    if (!ComputePipelineBuilder(*raiiDevice_)
+            .setShader("shaders/water_displacement.comp.spv")
+            .setPipelineLayout(**computePipelineLayout_)
+            .buildInto(computePipeline_)) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "WaterDisplacement: Compute shader not found, using fallback");
-        // Create a simple pass-through pipeline or return true to allow system to work without splashes
-        return true;
+        return true;  // Allow system to work without splashes
     }
 
-    auto shaderStage = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*shaderModule)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(shaderStage)
-        .setLayout(**computePipelineLayout_);
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-        reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline);
-
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-
-    if (result == VK_SUCCESS) {
-        computePipeline_.emplace(*raiiDevice_, rawPipeline);
-    }
-
-    return result == VK_SUCCESS;
+    return true;
 }
 
 bool WaterDisplacement::createDescriptorSets() {

@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "VmaResources.h"
 #include "DescriptorManager.h"
+#include "core/pipeline/ComputePipelineBuilder.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -211,36 +212,13 @@ bool WaterTileCull::createComputePipeline() {
     }
     computePipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
-    // Load compute shader
-    std::string shaderFile = shaderPath + "/water_tile_cull.comp.spv";
-    auto shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
-    if (!shaderModule) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load tile cull compute shader: %s", shaderFile.c_str());
-        return false;
-    }
-
-    VkPipelineShaderStageCreateInfo stageInfo{};
-    stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    stageInfo.module = *shaderModule;
-    stageInfo.pName = "main";
-
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = stageInfo;
-    pipelineInfo.layout = **computePipelineLayout_;
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    VkResult result = vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-                                                &pipelineInfo, nullptr, &rawPipeline);
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-
-    if (result != VK_SUCCESS) {
+    if (!ComputePipelineBuilder(*raiiDevice_)
+            .setShader(shaderPath + "/water_tile_cull.comp.spv")
+            .setPipelineLayout(**computePipelineLayout_)
+            .buildInto(computePipeline_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull compute pipeline");
         return false;
     }
-
-    computePipeline_.emplace(*raiiDevice_, rawPipeline);
 
     SDL_Log("WaterTileCull compute pipeline created");
 

@@ -2,6 +2,7 @@
 #include "TreeSystem.h"
 #include "TreeLODSystem.h"
 #include "ShaderLoader.h"
+#include "ComputePipelineBuilder.h"
 #include "Bindings.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
@@ -90,36 +91,14 @@ bool TreeBranchCulling::createCullPipeline() {
     }
     cullPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
-    std::string shaderPath = resourcePath_ + "/shaders/tree_branch_shadow_cull.comp.spv";
-    auto shaderModuleOpt = ShaderLoader::loadShaderModule(device_, shaderPath);
-    if (!shaderModuleOpt.has_value()) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "TreeBranchCulling: Cull shader not found: %s", shaderPath.c_str());
-        return false;
-    }
-    VkShaderModule computeShaderModule = shaderModuleOpt.value();
-
-    VkPipelineShaderStageCreateInfo shaderStageInfo{};
-    shaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    shaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    shaderStageInfo.module = computeShaderModule;
-    shaderStageInfo.pName = "main";
-
-    VkComputePipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    pipelineInfo.stage = shaderStageInfo;
-    pipelineInfo.layout = **cullPipelineLayout_;
-
-    VkPipeline rawPipeline;
-    VkResult result = vkCreateComputePipelines(device_, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &rawPipeline);
-    vkDestroyShaderModule(device_, computeShaderModule, nullptr);
-
-    if (result != VK_SUCCESS) {
+    if (!ComputePipelineBuilder(*raiiDevice_)
+            .setShader(resourcePath_ + "/shaders/tree_branch_shadow_cull.comp.spv")
+            .setPipelineLayout(**cullPipelineLayout_)
+            .buildInto(cullPipeline_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "TreeBranchCulling: Failed to create compute pipeline");
         return false;
     }
-    cullPipeline_.emplace(*raiiDevice_, rawPipeline);
 
     SDL_Log("TreeBranchCulling: Created branch shadow culling compute pipeline");
     return true;

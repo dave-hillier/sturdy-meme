@@ -213,18 +213,10 @@ bool CloudShadowSystem::createComputePipeline() {
         return false;
     }
 
-    // Create compute pipeline
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    ComputePipelineBuilder builder(device);
-    if (!builder.setShader(shaderPath + "/cloud_shadow.comp.spv")
-                .setPipelineLayout(**pipelineLayout_)
-                .build(rawPipeline)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow compute pipeline");
-        return false;
-    }
-    computePipeline_.emplace(*raiiDevice_, rawPipeline);
-
-    return true;
+    return ComputePipelineBuilder(*raiiDevice_)
+        .setShader(shaderPath + "/cloud_shadow.comp.spv")
+        .setPipelineLayout(**pipelineLayout_)
+        .buildInto(computePipeline_);
 }
 
 void CloudShadowSystem::updateWorldToShadowMatrix(const glm::vec3& sunDir, const glm::vec3& cameraPos) {

@@ -1,6 +1,7 @@
 #include "BilateralGridSystem.h"
 #include "ShaderLoader.h"
 #include "core/vulkan/VmaResources.h"
+#include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL.h>
@@ -296,35 +297,10 @@ bool BilateralGridSystem::createBuildPipeline() {
         return false;
     }
 
-    // Load shader
-    std::string shaderFile = shaderPath + "/bilateral_grid_build.comp.spv";
-    auto shaderModuleOpt = ShaderLoader::loadShaderModule(device, shaderFile);
-    if (!shaderModuleOpt) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "BilateralGridSystem: Failed to load build shader: %s", shaderFile.c_str());
-        return false;
-    }
-    vk::ShaderModule shaderModule(*shaderModuleOpt);
-
-    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(shaderModule)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(stageInfo)
-        .setLayout(**buildPipelineLayout_);
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, *shaderModuleOpt, nullptr);
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "BilateralGridSystem: Failed to create build pipeline");
-        return false;
-    }
-    buildPipeline_.emplace(*raiiDevice_, rawPipeline);
-    vkDestroyShaderModule(device, *shaderModuleOpt, nullptr);
-    return true;
+    return ComputePipelineBuilder(*raiiDevice_)
+        .setShader(shaderPath + "/bilateral_grid_build.comp.spv")
+        .setPipelineLayout(**buildPipelineLayout_)
+        .buildInto(buildPipeline_);
 }
 
 bool BilateralGridSystem::createBlurPipeline() {
@@ -337,34 +313,10 @@ bool BilateralGridSystem::createBlurPipeline() {
         return false;
     }
 
-    // Load shader
-    std::string shaderFile = shaderPath + "/bilateral_grid_blur.comp.spv";
-    auto shaderModuleOpt = ShaderLoader::loadShaderModule(device, shaderFile);
-    if (!shaderModuleOpt) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "BilateralGridSystem: Failed to load blur shader: %s", shaderFile.c_str());
-        return false;
-    }
-
-    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*shaderModuleOpt)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(stageInfo)
-        .setLayout(**blurPipelineLayout_);
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo), nullptr, &rawPipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, *shaderModuleOpt, nullptr);
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "BilateralGridSystem: Failed to create blur pipeline");
-        return false;
-    }
-    blurPipeline_.emplace(*raiiDevice_, rawPipeline);
-    vkDestroyShaderModule(device, *shaderModuleOpt, nullptr);
-    return true;
+    return ComputePipelineBuilder(*raiiDevice_)
+        .setShader(shaderPath + "/bilateral_grid_blur.comp.spv")
+        .setPipelineLayout(**blurPipelineLayout_)
+        .buildInto(blurPipeline_);
 }
 
 bool BilateralGridSystem::createDescriptorSets() {

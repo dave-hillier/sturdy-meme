@@ -3,6 +3,7 @@
 #include "DescriptorManager.h"
 #include "CommandBufferUtils.h"
 #include "core/vulkan/VmaResources.h"
+#include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL.h>
@@ -315,33 +316,13 @@ bool SSRSystem::createComputePipeline() {
         return false;
     }
 
-    // Load compute shader
-    std::string shaderFile = shaderPath + "/ssr.comp.spv";
-    auto shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
-    if (!shaderModule) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load SSR compute shader: %s", shaderFile.c_str());
-        return false;
-    }
-
-    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*shaderModule)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(stageInfo)
-        .setLayout(**computePipelineLayout_);
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-            reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-            nullptr, &rawPipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
+    if (!ComputePipelineBuilder(*raiiDevice_)
+            .setShader(shaderPath + "/ssr.comp.spv")
+            .setPipelineLayout(**computePipelineLayout_)
+            .buildInto(computePipeline_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR compute pipeline");
         return false;
     }
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-    computePipeline_.emplace(*raiiDevice_, rawPipeline);
 
     SDL_Log("SSR compute pipeline created");
     return true;
@@ -374,33 +355,13 @@ bool SSRSystem::createBlurPipeline() {
         return false;
     }
 
-    // Load blur compute shader
-    std::string shaderFile = shaderPath + "/ssr_blur.comp.spv";
-    auto shaderModule = ShaderLoader::loadShaderModule(device, shaderFile);
-    if (!shaderModule) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load SSR blur compute shader: %s", shaderFile.c_str());
-        return false;
-    }
-
-    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
-        .setStage(vk::ShaderStageFlagBits::eCompute)
-        .setModule(*shaderModule)
-        .setPName("main");
-
-    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
-        .setStage(stageInfo)
-        .setLayout(**blurPipelineLayout_);
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(device, VK_NULL_HANDLE, 1,
-            reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-            nullptr, &rawPipeline) != VK_SUCCESS) {
-        vkDestroyShaderModule(device, *shaderModule, nullptr);
+    if (!ComputePipelineBuilder(*raiiDevice_)
+            .setShader(shaderPath + "/ssr_blur.comp.spv")
+            .setPipelineLayout(**blurPipelineLayout_)
+            .buildInto(blurPipeline_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SSR blur compute pipeline");
         return false;
     }
-    vkDestroyShaderModule(device, *shaderModule, nullptr);
-    blurPipeline_.emplace(*raiiDevice_, rawPipeline);
 
     SDL_Log("SSR blur compute pipeline created");
     return true;
