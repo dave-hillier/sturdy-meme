@@ -97,6 +97,18 @@ public:
     // Get per-edge inset distances for available building area
     // Returns inset for each edge based on adjacent roads/walls/etc.
     std::vector<double> getAvailable() const;
+
+    // Filter buildings based on density at city fringe
+    // Faithful to mfcg.js WardGroup.filter (lines 13190-13259)
+    // Uses edge-type based density per vertex, interpolated to building centers
+    void filter();
+
+private:
+    // Get edge type density (mfcg.js: ROAD=0.3, WALL=0.5, CANAL=0.1, other=0)
+    double getEdgeDensity(size_t edgeIdx) const;
+
+    // Interpolate density at a point using vertex densities
+    double interpolateDensity(const geom::Point& p, const std::vector<double>& vertexDensities) const;
 };
 
 /**

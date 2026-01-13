@@ -12,6 +12,7 @@
 namespace town_generator {
 namespace building {
 
+// Forward declarations
 static bool isEdgeOnRoad(const geom::Point& v0, const geom::Point& v1,
                          const std::vector<City::Street>& roads);
 
@@ -136,6 +137,15 @@ void WardGroup::createGeometry() {
     double bisectorVariance = 16.0 * alleys.gridChaos;
 
     utils::Bisector bisector(available.vertexValues(), bisectorMinArea, bisectorVariance);
+
+    // Bisector callbacks (mfcg.js lines 13127-13131):
+    // - getGap: returns 1.2 (requires PolyBool.and for stripe subtraction - not implemented)
+    // - processCut: calls semiSmooth (causes crash due to split() handling variable-length results)
+    // - isAtomic: for non-urban, uses isBlockSized (requires blockM interpolation map)
+    //
+    // Using Bisector defaults (detectStraight, isSmallEnough) for now.
+    // Gap between buildings is achieved via BLOCK_INSET shrinking below.
+    (void)alleys;  // Used for bisectorMinArea/Variance above
 
     // Partition into building-sized lots
     auto buildingShapes = bisector.partition();
@@ -357,6 +367,156 @@ std::vector<double> WardGroup::getAvailable() const {
     }
 
     return insets;
+}
+
+double WardGroup::getEdgeDensity(size_t edgeIdx) const {
+    // Faithful to mfcg.js filter() edge type densities (lines 13203-13235)
+    // ROAD = 0.3, WALL = 0.5, CANAL = 0.1, other = 0
+    if (border.length() < 3 || !model || edgeIdx >= border.length()) {
+        return 0.0;
+    }
+
+    const geom::Point& v0 = border[edgeIdx];
+    const geom::Point& v1 = border[(edgeIdx + 1) % border.length()];
+
+    // Check wall
+    if (model->wall) {
+        int wallIdx = model->wall->shape.findEdge(v0, v1);
+        if (wallIdx == -1) wallIdx = model->wall->shape.findEdge(v1, v0);
+        if (wallIdx != -1) {
+            return 0.5;
+        }
+    }
+
+    // Check citadel
+    if (model->citadel) {
+        int citIdx = model->citadel->shape.findEdge(v0, v1);
+        if (citIdx == -1) citIdx = model->citadel->shape.findEdge(v1, v0);
+        if (citIdx != -1) {
+            return 0.5;
+        }
+    }
+
+    // Check canals
+    for (const auto& canal : model->canals) {
+        if (canal->containsEdge(v0, v1)) {
+            return 0.1;
+        }
+    }
+
+    // Check roads (arteries and streets)
+    if (isEdgeOnRoad(v0, v1, model->arteries) ||
+        isEdgeOnRoad(v0, v1, model->streets) ||
+        isEdgeOnRoad(v0, v1, model->roads)) {
+        return 0.3;
+    }
+
+    return 0.0;
+}
+
+double WardGroup::interpolateDensity(const geom::Point& p, const std::vector<double>& vertexDensities) const {
+    // Simplified interpolation using inverse distance weighting
+    // (Full MFCG uses barycentric interpolation within triangulated border)
+    if (vertexDensities.empty() || border.length() < 3) {
+        return 1.0;
+    }
+
+    double totalWeight = 0.0;
+    double weightedSum = 0.0;
+
+    for (size_t i = 0; i < border.length(); ++i) {
+        double dist = geom::Point::distance(p, border[i]);
+        if (dist < 0.001) {
+            // Very close to vertex, return its density
+            return vertexDensities[i];
+        }
+        double weight = 1.0 / (dist * dist);  // Inverse distance squared
+        weightedSum += weight * vertexDensities[i];
+        totalWeight += weight;
+    }
+
+    if (totalWeight > 0) {
+        return weightedSum / totalWeight;
+    }
+    return 1.0;
+}
+
+void WardGroup::filter() {
+    // Faithful to mfcg.js WardGroup.filter (lines 13190-13259)
+    // Filters buildings at city fringe based on edge-type density
+
+    if (border.length() < 3 || blocks.empty()) {
+        return;
+    }
+
+    // Step 1: Compute density per vertex (mfcg.js lines 13191-13240)
+    std::vector<double> vertexDensities;
+    vertexDensities.reserve(border.length());
+
+    for (size_t i = 0; i < border.length(); ++i) {
+        const geom::Point& v = border[i];
+
+        // Check if vertex is "inner" (all adjacent patches are withinCity or waterbody)
+        bool isInner = false;
+        for (const geom::Point& innerV : inner) {
+            if (innerV == v) {
+                isInner = true;
+                break;
+            }
+        }
+
+        if (isInner) {
+            vertexDensities.push_back(1.0);
+        } else {
+            // Get density from adjacent edges (previous and current)
+            size_t prevEdge = (i + border.length() - 1) % border.length();
+            double prevDensity = getEdgeDensity(prevEdge);
+            double currDensity = getEdgeDensity(i);
+            vertexDensities.push_back(std::max(prevDensity, currDensity));
+        }
+    }
+
+    // Step 2: Calculate threshold parameters (mfcg.js lines 13241-13243)
+    // f = sqrt(faces.length), k = 0.5 * f - 0.5
+    double f = std::sqrt(static_cast<double>(cells.size()));
+    double k = 0.5 * f - 0.5;
+
+    // Step 3: Filter lots in each block based on density threshold
+    for (auto& block : blocks) {
+        std::vector<geom::Polygon> filteredBuildings;
+
+        for (const auto& building : block->buildings) {
+            // Get building center
+            geom::Point center = building.centroid();
+
+            // Interpolate density at center
+            double density = interpolateDensity(center, vertexDensities);
+
+            if (std::isnan(density)) {
+                continue;  // Skip if density couldn't be calculated
+            }
+
+            // Calculate probability threshold (mfcg.js line 13248)
+            // n = density * f - k, then random() < n to keep
+            double threshold = density * f - k;
+
+            // Keep building if random value is below threshold
+            if (utils::Random::floatVal() < threshold) {
+                filteredBuildings.push_back(building);
+            }
+        }
+
+        block->buildings = std::move(filteredBuildings);
+    }
+
+    // Step 4: Remove empty blocks (mfcg.js lines 13251-13258)
+    std::vector<std::unique_ptr<Block>> filteredBlocks;
+    for (auto& block : blocks) {
+        if (!block->buildings.empty()) {
+            filteredBlocks.push_back(std::move(block));
+        }
+    }
+    blocks = std::move(filteredBlocks);
 }
 
 // Helper to check if an edge lies on any road in a set

@@ -665,9 +665,15 @@ std::vector<geom::Point> Ward::semiSmooth(
     // Smooths a corner (p0, p1, p2) into an arc if appropriate
 
     double dist02 = geom::Point::distance(p0, p2);
+
+    // Guard against degenerate cases
+    if (dist02 < 0.001) {
+        return {p0, p1, p2};
+    }
+
     double triArea = std::abs(geom::GeomUtils::triangleArea(p0, p1, p2));
 
-    // Skip if too thin
+    // Skip if too thin (mfcg.js line 13152: 1 > h / f || .01 > h / (f * f))
     if (triArea / dist02 < 1.0 || triArea / (dist02 * dist02) < 0.01) {
         return {p0, p2};
     }
@@ -676,6 +682,12 @@ std::vector<geom::Point> Ward::semiSmooth(
     geom::Point v12 = p2.subtract(p1);
     double len01 = v01.length();
     double len12 = v12.length();
+
+    // Guard against degenerate segments
+    if (len01 < 0.001 || len12 < 0.001) {
+        return {p0, p1, p2};
+    }
+
     double minLen = std::min(len01, len12);
 
     // Calculate angle-based probability

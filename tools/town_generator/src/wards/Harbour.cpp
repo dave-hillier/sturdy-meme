@@ -9,6 +9,29 @@
 namespace town_generator {
 namespace wards {
 
+// Helper to find neighbor cell that shares an edge starting at vertex v0
+// Faithful to mfcg.js model.getNeighbour(patch, f.origin)
+static building::Cell* getNeighbourForEdge(building::Cell* patch, const geom::Point& v0, const geom::Point& v1) {
+    if (!patch) return nullptr;
+
+    for (auto* neighbor : patch->neighbors) {
+        if (!neighbor) continue;
+
+        // Check if neighbor shares this edge (in either direction)
+        size_t nLen = neighbor->shape.length();
+        for (size_t j = 0; j < nLen; ++j) {
+            const geom::Point& n0 = neighbor->shape[j];
+            const geom::Point& n1 = neighbor->shape[(j + 1) % nLen];
+
+            // Edge match (either direction)
+            if ((n0 == v0 && n1 == v1) || (n0 == v1 && n1 == v0)) {
+                return neighbor;
+            }
+        }
+    }
+    return nullptr;
+}
+
 void Harbour::createGeometry() {
     // Faithful to mfcg.js Harbour.createGeometry (lines 12822-12865)
     // Creates piers along the longest water edge
@@ -27,7 +50,8 @@ void Harbour::createGeometry() {
     }
 
     // Find edges that border water (landing neighbors)
-    // mfcg.js lines 12829-12838
+    // mfcg.js lines 12829-12838: d = this.model.getNeighbour(this.patch, f.origin)
+    // if (null != d && d.landing) { ... }
     std::vector<std::pair<geom::Point, geom::Point>> waterEdges;
     size_t len = patch->shape.length();
 
@@ -35,9 +59,11 @@ void Harbour::createGeometry() {
         const geom::Point& v0 = patch->shape[i];
         const geom::Point& v1 = patch->shape[(i + 1) % len];
 
-        // Check if neighbor is a landing (water edge)
-        building::EdgeType edgeType = patch->getEdgeType(i);
-        if (edgeType == building::EdgeType::COAST) {
+        // Find neighbor that shares this edge (faithful to getNeighbour)
+        building::Cell* neighbor = getNeighbourForEdge(patch, v0, v1);
+
+        // Check if neighbor is a landing (water edge) - faithful to mfcg.js
+        if (neighbor && neighbor->landing) {
             // Check for canal intersection and adjust edge if needed (mfcg.js line 12835)
             geom::Point start = v0;
             geom::Point end = v1;
@@ -113,7 +139,7 @@ void Harbour::createGeometry() {
         double pierLength = 8.0;
         geom::Point pierEnd = pierBase.add(geom::Point(perpDir.x * pierLength, perpDir.y * pierLength));
 
-        // Create thin rectangle for rendering
+        // Create thin rectangle for rendering (C++ extension for visual representation)
         double pierWidth = 1.5;
         geom::Point widthVec(edgeDir.x / edgeLen * pierWidth / 2, edgeDir.y / edgeLen * pierWidth / 2);
 

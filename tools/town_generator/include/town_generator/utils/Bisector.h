@@ -102,6 +102,18 @@ private:
      * @return Processed cut line
      */
     std::vector<geom::Point> detectStraight(const std::vector<geom::Point>& cut);
+
+    /**
+     * Apply gap to split halves using stripe subtraction
+     * Faithful to mfcg.js: PolyCreate.stripe + PolyBool.and(half, revert(stripe))
+     * @param halves The two split polygon halves
+     * @param cutLine The cut line used for the split
+     * @return Modified halves with gap applied
+     */
+    std::vector<std::vector<geom::Point>> applyGap(
+        const std::vector<std::vector<geom::Point>>& halves,
+        const std::vector<geom::Point>& cutLine
+    );
 };
 
 } // namespace utils

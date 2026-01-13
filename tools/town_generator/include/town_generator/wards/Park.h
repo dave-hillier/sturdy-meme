@@ -7,28 +7,20 @@ namespace town_generator {
 namespace wards {
 
 /**
- * Park - Open green space with paths and features
+ * Park - Open green space with trees
  *
- * Faithful port from mfcg.js Park/Hf (green area generation).
+ * Faithful port from mfcg.js Park (lines 12985-13003).
  * Parks contain:
- * - Smoothed organic boundary
- * - Internal paths
- * - Optional structures (pavilion, fountain, benches)
- * - Tree spawn points for rendering
+ * - Smoothed organic boundary (Chaikin smoothing)
+ * - Tree spawn points for rendering (via Forester)
  */
 class Park : public Ward {
 public:
     // Smoothed green area boundary
     geom::Polygon greenArea;
 
-    // Internal paths through the park
-    std::vector<std::vector<geom::Point>> paths;
-
-    // Tree spawn points
+    // Tree spawn points (lazily initialized)
     std::vector<geom::Point> trees;
-
-    // Features (fountains, benches, etc.)
-    std::vector<geom::Polygon> features;
 
     Park() = default;
 
@@ -37,20 +29,15 @@ public:
     void createGeometry() override;
 
     // Spawn trees for rendering (faithful to mfcg.js spawnTrees)
-    std::vector<geom::Point> spawnTrees() const;
+    // Lazily initialized - returns cached trees or spawns new ones
+    std::vector<geom::Point> spawnTrees();
 
     bool operator==(const Park& other) const { return Ward::operator==(other); }
     bool operator!=(const Park& other) const { return !(*this == other); }
 
 private:
-    // Create wavy boundary for organic look
+    // Create wavy boundary for organic look (doubled vertices + Chaikin 3x)
     geom::Polygon createWavyBoundary(const geom::Polygon& shape);
-
-    // Create internal paths
-    void createPaths();
-
-    // Add park features (fountain, benches)
-    void addFeatures();
 };
 
 } // namespace wards

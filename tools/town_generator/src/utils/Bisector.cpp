@@ -287,7 +287,9 @@ std::vector<std::vector<geom::Point>> Bisector::makeCut(
 
         if (ratio < 2.0 * variance) {
             cuts.push_back(cutLine);
-            // Note: Gap application disabled - blocks are shrunk after subdivision instead
+            // Gap application via stripe subtraction requires proper polygon boolean ops
+            // For now, rely on post-subdivision shrinking in WardGroup.cpp (BLOCK_INSET)
+            // TODO: Implement proper PolyBool.and for faithful mfcg.js gap application
             return result;
         }
     }
@@ -382,7 +384,9 @@ std::vector<std::vector<geom::Point>> Bisector::makeCut(
         }
 
         cuts.push_back(processedCut);
-        // Note: Gap application disabled - blocks are shrunk after subdivision instead
+        // Gap application via stripe subtraction requires proper polygon boolean ops
+        // For now, rely on post-subdivision shrinking in WardGroup.cpp (BLOCK_INSET)
+        // TODO: Implement proper PolyBool.and for faithful mfcg.js gap application
         return result;
     }
 
@@ -477,6 +481,57 @@ std::vector<geom::Point> Bisector::detectStraight(const std::vector<geom::Point>
         }
     }
     return cut;
+}
+
+std::vector<std::vector<geom::Point>> Bisector::applyGap(
+    const std::vector<std::vector<geom::Point>>& halves,
+    const std::vector<geom::Point>& cutLine
+) {
+    // Faithful to mfcg.js Bisector gap application (lines 19562-19567, 19603-19608)
+    // Uses PolyCreate.stripe + PolyBool.and(half, revert(stripe))
+
+    if (!getGap || halves.size() < 2 || cutLine.size() < 2) {
+        return halves;
+    }
+
+    double gap = getGap(cutLine);
+    if (gap <= 0) {
+        return halves;
+    }
+
+    // Create stripe polygon along the cut line (mfcg.js: PolyCreate.stripe)
+    std::vector<geom::Point> stripePoly = geom::GeomUtils::stripe(cutLine, gap, 1.0);
+
+    if (stripePoly.size() < 3) {
+        return halves;
+    }
+
+    // Reverse the stripe for subtraction (mfcg.js: Z.revert(a))
+    std::vector<geom::Point> stripeReversed = geom::GeomUtils::reverse(stripePoly);
+
+    std::vector<std::vector<geom::Point>> result;
+
+    for (const auto& halfPts : halves) {
+        if (halfPts.size() < 3) {
+            result.push_back(halfPts);
+            continue;
+        }
+
+        // Boolean AND with reversed stripe (mfcg.js: PolyBool.and(b, Z.revert(a), !0))
+        // This effectively subtracts the stripe from the polygon
+        std::vector<geom::Point> clipped = geom::GeomUtils::polygonIntersection(
+            halfPts, stripeReversed, true  // subtract = true
+        );
+
+        if (clipped.size() >= 3) {
+            result.push_back(clipped);
+        } else {
+            // Fallback: if boolean operation fails, return original
+            result.push_back(halfPts);
+        }
+    }
+
+    return result;
 }
 
 } // namespace utils
