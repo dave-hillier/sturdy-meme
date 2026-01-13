@@ -268,6 +268,7 @@ add_executable(town_generator
     town_generator/src/geom/Segment.cpp
     town_generator/src/geom/Circle.cpp
     town_generator/src/geom/GeomUtils.cpp
+    town_generator/src/geom/PolyBool.cpp
     town_generator/src/geom/Polygon.cpp
     town_generator/src/geom/Graph.cpp
     town_generator/src/geom/Spline.cpp

@@ -10,6 +10,7 @@ set(GEOM_SOURCES
     src/geom/Segment.cpp
     src/geom/Circle.cpp
     src/geom/GeomUtils.cpp
+    src/geom/PolyBool.cpp
     src/geom/Polygon.cpp
     src/geom/Graph.cpp
     src/geom/Spline.cpp

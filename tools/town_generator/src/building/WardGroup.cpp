@@ -138,13 +138,15 @@ void WardGroup::createGeometry() {
 
     utils::Bisector bisector(available.vertexValues(), bisectorMinArea, bisectorVariance);
 
-    // Bisector callbacks (mfcg.js lines 13127-13131):
-    // - getGap: returns 1.2 (requires PolyBool.and for stripe subtraction - not implemented)
-    // - processCut: calls semiSmooth (causes crash due to split() handling variable-length results)
+    // Set getGap callback - faithful to mfcg.js (lines 13127-13129)
+    // Returns constant 1.2 unit gap between building blocks
+    bisector.getGap = [](const std::vector<geom::Point>&) -> double {
+        return 1.2;
+    };
+
+    // Additional callbacks not yet implemented:
+    // - processCut: calls semiSmooth (needs fix for variable-length results)
     // - isAtomic: for non-urban, uses isBlockSized (requires blockM interpolation map)
-    //
-    // Using Bisector defaults (detectStraight, isSmallEnough) for now.
-    // Gap between buildings is achieved via BLOCK_INSET shrinking below.
     (void)alleys;  // Used for bisectorMinArea/Variance above
 
     // Partition into building-sized lots
