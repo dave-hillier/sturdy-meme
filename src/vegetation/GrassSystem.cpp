@@ -8,6 +8,7 @@
 #include "DescriptorManager.h"
 #include "UBOs.h"
 #include "VmaResources.h"
+#include "core/vulkan/BarrierHelpers.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <cstring>
@@ -847,22 +848,7 @@ void GrassSystem::recordDisplacementUpdate(vk::CommandBuffer cmd, uint32_t frame
 
     // Transition displacement image to general layout if needed (first frame)
     // For subsequent frames, it should already be in GENERAL layout
-    auto imageBarrier = vk::ImageMemoryBarrier{}
-        .setSrcAccessMask(vk::AccessFlagBits(0))
-        .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite)
-        .setOldLayout(vk::ImageLayout::eUndefined)
-        .setNewLayout(vk::ImageLayout::eGeneral)
-        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setImage(displacementImage_)
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(VK_REMAINING_MIP_LEVELS)
-            .setBaseArrayLayer(0)
-            .setLayerCount(VK_REMAINING_ARRAY_LAYERS));
-    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
-                        {}, {}, {}, imageBarrier);
+    BarrierHelpers::imageToGeneral(cmd, displacementImage_);
 
     // Dispatch displacement update compute shader using per-frame descriptor set (double-buffered)
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, **displacementPipeline_);
@@ -874,22 +860,7 @@ void GrassSystem::recordDisplacementUpdate(vk::CommandBuffer cmd, uint32_t frame
     cmd.dispatch(GrassConstants::DISPLACEMENT_DISPATCH_SIZE, GrassConstants::DISPLACEMENT_DISPATCH_SIZE, 1);
 
     // Barrier: displacement compute write -> grass compute read
-    auto samplingBarrier = vk::ImageMemoryBarrier{}
-        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-        .setOldLayout(vk::ImageLayout::eGeneral)
-        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setImage(displacementImage_)
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
-    cmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
-                        {}, {}, {}, samplingBarrier);
+    BarrierHelpers::imageToShaderRead(cmd, displacementImage_, vk::PipelineStageFlagBits::eComputeShader);
 }
 
 void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameIndex, float time) {

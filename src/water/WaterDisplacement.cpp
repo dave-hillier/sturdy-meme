@@ -3,6 +3,7 @@
 #include "VmaResources.h"
 #include "DescriptorManager.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <algorithm>
@@ -397,22 +398,7 @@ void WaterDisplacement::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) 
 
     // Transition displacement map to general layout for compute write
     vk::CommandBuffer vkCmd(cmd);
-    auto barrier = vk::ImageMemoryBarrier{}
-        .setSrcAccessMask(vk::AccessFlags{})
-        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
-        .setOldLayout(vk::ImageLayout::eUndefined)
-        .setNewLayout(vk::ImageLayout::eGeneral)
-        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setImage(displacementMap)
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
-    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
-                          {}, {}, {}, barrier);
+    BarrierHelpers::imageToGeneral(vkCmd, displacementMap);
 
     // Bind compute pipeline
     vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, **computePipeline_);
@@ -437,23 +423,8 @@ void WaterDisplacement::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) 
     vkCmd.dispatch(groupsX, groupsY, 1);
 
     // Transition to shader read for water shader sampling
-    auto readBarrier = vk::ImageMemoryBarrier{}
-        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-        .setOldLayout(vk::ImageLayout::eGeneral)
-        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setImage(displacementMap)
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
-    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader,
-                          vk::PipelineStageFlagBits::eVertexShader | vk::PipelineStageFlagBits::eFragmentShader,
-                          {}, {}, {}, readBarrier);
+    BarrierHelpers::imageToShaderRead(vkCmd, displacementMap,
+        vk::PipelineStageFlagBits::eVertexShader | vk::PipelineStageFlagBits::eFragmentShader);
 }
 
 void WaterDisplacement::setWorldExtent(const glm::vec2& center, const glm::vec2& size) {

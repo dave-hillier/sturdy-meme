@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
 #include "VmaResources.h"
+#include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -352,15 +353,5 @@ void CloudShadowSystem::recordUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmd.dispatch(groupCountX, groupCountY, 1);
 
     // Transition shadow map to shader read for fragment shaders
-    auto samplingBarrier = vk::ImageMemoryBarrier{}
-        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-        .setOldLayout(vk::ImageLayout::eGeneral)
-        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setImage(shadowMap_.get())
-        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
-    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader,
-                          {}, {}, {}, samplingBarrier);
+    BarrierHelpers::imageToShaderRead(vkCmd, shadowMap_.get(), vk::PipelineStageFlagBits::eFragmentShader);
 }

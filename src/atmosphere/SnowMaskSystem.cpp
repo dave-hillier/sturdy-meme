@@ -5,6 +5,7 @@
 #include "PipelineBuilder.h"
 #include "VmaResources.h"
 #include "DescriptorManager.h"
+#include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <cstring>
@@ -309,17 +310,7 @@ void SnowMaskSystem::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmd.dispatch(workgroupCount, workgroupCount, 1);
 
     // Transition snow mask to shader read optimal for fragment shaders
-    auto samplingBarrier = vk::ImageMemoryBarrier{}
-        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-        .setOldLayout(vk::ImageLayout::eGeneral)
-        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setImage(snowMaskImage)
-        .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
-    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader,
-                          {}, {}, {}, samplingBarrier);
+    BarrierHelpers::imageToShaderRead(vkCmd, snowMaskImage, vk::PipelineStageFlagBits::eFragmentShader);
 
     // Mark first frame as done
     isFirstFrame = false;

@@ -116,6 +116,26 @@ inline void imageToColorAttachment(
 }
 
 /**
+ * Transition image from shader read-only back to general layout (for re-compute)
+ */
+inline void shaderReadToGeneral(
+        vk::CommandBuffer cmd,
+        vk::Image image,
+        vk::PipelineStageFlags srcStage = vk::PipelineStageFlagBits::eFragmentShader,
+        vk::ImageAspectFlags aspectMask = vk::ImageAspectFlagBits::eColor,
+        uint32_t mipLevels = 1) {
+
+    transitionImageLayout(cmd, image,
+        vk::ImageLayout::eShaderReadOnlyOptimal,
+        vk::ImageLayout::eGeneral,
+        srcStage,
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::AccessFlagBits::eShaderRead,
+        vk::AccessFlagBits::eShaderWrite,
+        aspectMask, 0, mipLevels);
+}
+
+/**
  * Compute shader write barrier (within compute, same image)
  * Use between compute passes that write then read the same image
  */

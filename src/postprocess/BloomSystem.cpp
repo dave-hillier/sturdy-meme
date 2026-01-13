@@ -3,6 +3,7 @@
 #include "VmaResources.h"
 #include "DescriptorManager.h"
 #include "core/ImageBuilder.h"
+#include "core/vulkan/BarrierHelpers.h"
 #include <vulkan/vulkan.hpp>
 #include <array>
 #include <algorithm>
@@ -438,27 +439,7 @@ void BloomSystem::recordBloomPass(VkCommandBuffer cmd, VkImageView hdrInput) {
             .update();
 
         // Transition current mip to color attachment for blending
-        {
-            auto barrier = vk::ImageMemoryBarrier{}
-                .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
-                .setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite)
-                .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-                .setNewLayout(vk::ImageLayout::eColorAttachmentOptimal)
-                .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .setImage(mipChain[i].image)
-                .setSubresourceRange(vk::ImageSubresourceRange{}
-                    .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                    .setBaseMipLevel(0)
-                    .setLevelCount(1)
-                    .setBaseArrayLayer(0)
-                    .setLayerCount(1));
-
-            vkCmd.pipelineBarrier(
-                vk::PipelineStageFlagBits::eFragmentShader,
-                vk::PipelineStageFlagBits::eColorAttachmentOutput,
-                {}, {}, {}, barrier);
-        }
+        BarrierHelpers::imageToColorAttachment(vkCmd, mipChain[i].image);
 
         // Begin render pass with LOAD operation to preserve downsampled content
         vk::Extent2D mipExtent{mipChain[i].extent.width, mipChain[i].extent.height};

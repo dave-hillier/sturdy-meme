@@ -1,6 +1,7 @@
 #include "FroxelSystem.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
+#include "core/vulkan/BarrierHelpers.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -414,22 +415,7 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
 
     // Current scattering volume (write target) - can discard previous contents
     vk::CommandBuffer vkCmd(cmd);
-    auto imageBarrier = vk::ImageMemoryBarrier{}
-        .setSrcAccessMask(vk::AccessFlagBits::eNone)
-        .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
-        .setOldLayout(vk::ImageLayout::eUndefined)
-        .setNewLayout(vk::ImageLayout::eGeneral)
-        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setImage(scatteringVolumes_[currentVolumeIdx].get())
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
-    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe, vk::PipelineStageFlagBits::eComputeShader,
-                          {}, {}, {}, imageBarrier);
+    BarrierHelpers::imageToGeneral(vkCmd, scatteringVolumes_[currentVolumeIdx].get());
 
     // History scattering volume (read source) - preserve data from previous frame
     if (isFirstFrame) {
@@ -480,22 +466,7 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
                               {}, {}, {}, toGeneralBarrier);
     } else {
         // Subsequent frames: history volume was written in previous frame
-        auto writeToReadBarrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eGeneral)
-            .setNewLayout(vk::ImageLayout::eGeneral)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(scatteringVolumes_[historyVolumeIdx].get())
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1));
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eComputeShader,
-                              {}, {}, {}, writeToReadBarrier);
+        BarrierHelpers::computeWriteToComputeRead(vkCmd, scatteringVolumes_[historyVolumeIdx].get());
     }
 
     // Integrated volume: transitions between GENERAL (for compute) and SHADER_READ_ONLY (for fragment)
@@ -547,22 +518,7 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
                               {}, {}, {}, integratedToGeneralBarrier);
     } else {
         // Subsequent frames: transition from SHADER_READ_ONLY_OPTIMAL
-        auto readToWriteBarrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setDstAccessMask(vk::AccessFlagBits::eShaderWrite)
-            .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setNewLayout(vk::ImageLayout::eGeneral)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(integratedVolume_.get())
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1));
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eComputeShader,
-                              {}, {}, {}, readToWriteBarrier);
+        BarrierHelpers::shaderReadToGeneral(vkCmd, integratedVolume_.get());
     }
 
     // Dispatch froxel update compute shader
@@ -592,20 +548,5 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmd.dispatch(groupsX, groupsY, 1);
 
     // Transition integrated volume to shader read for fragment sampling
-    auto computeToSamplingBarrier = vk::ImageMemoryBarrier{}
-        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-        .setOldLayout(vk::ImageLayout::eGeneral)
-        .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setImage(integratedVolume_.get())
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
-    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eComputeShader, vk::PipelineStageFlagBits::eFragmentShader,
-                          {}, {}, {}, computeToSamplingBarrier);
+    BarrierHelpers::imageToShaderRead(vkCmd, integratedVolume_.get(), vk::PipelineStageFlagBits::eFragmentShader);
 }
