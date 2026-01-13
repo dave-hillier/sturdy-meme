@@ -134,7 +134,9 @@ bool TreeRenderer::createDescriptorSetLayout() {
                .addBinding(Bindings::TREE_GFX_LEAF_INSTANCES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                            VK_SHADER_STAGE_VERTEX_BIT)
                .addBinding(Bindings::TREE_GFX_TREE_DATA, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                           VK_SHADER_STAGE_VERTEX_BIT);
+                           VK_SHADER_STAGE_VERTEX_BIT)
+               .addBinding(Bindings::TREE_GFX_SNOW_UBO, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                           VK_SHADER_STAGE_FRAGMENT_BIT);
 
     VkDescriptorSetLayout rawLeafLayout = leafBuilder.build();
     if (rawLeafLayout == VK_NULL_HANDLE) {
@@ -420,7 +422,8 @@ void TreeRenderer::updateLeafDescriptorSet(
     vk::ImageView leafAlbedo,
     vk::Sampler leafSampler,
     vk::Buffer leafInstanceBuffer,
-    vk::DeviceSize leafInstanceBufferSize) {
+    vk::DeviceSize leafInstanceBufferSize,
+    vk::Buffer snowBuffer) {
 
     // Skip redundant updates - descriptor bindings don't change per-frame
     std::string key = std::to_string(frameIndex) + ":" + leafType;
@@ -446,8 +449,14 @@ void TreeRenderer::updateLeafDescriptorSet(
           .writeImage(Bindings::TREE_GFX_SHADOW_MAP, shadowMapView, shadowSampler)
           .writeBuffer(Bindings::TREE_GFX_WIND_UBO, windBuffer, 0, VK_WHOLE_SIZE)
           .writeImage(Bindings::TREE_GFX_LEAF_ALBEDO, leafAlbedo, leafSampler)
-          .writeBuffer(Bindings::TREE_GFX_LEAF_INSTANCES, leafInstanceBuffer, 0, range, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-          .update();
+          .writeBuffer(Bindings::TREE_GFX_LEAF_INSTANCES, leafInstanceBuffer, 0, range, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+
+    // Add snow buffer for rain wetness effects
+    if (snowBuffer) {
+        writer.writeBuffer(Bindings::TREE_GFX_SNOW_UBO, snowBuffer, 0, VK_WHOLE_SIZE);
+    }
+
+    writer.update();
 
     // Mark as initialized to skip redundant updates
     initializedLeafDescriptors_.insert(key);
@@ -461,7 +470,8 @@ void TreeRenderer::updateCulledLeafDescriptorSet(
     vk::ImageView shadowMapView,
     vk::Sampler shadowSampler,
     vk::ImageView leafAlbedo,
-    vk::Sampler leafSampler) {
+    vk::Sampler leafSampler,
+    vk::Buffer snowBuffer) {
 
     // Skip if leaf culling system not available
     if (!leafCulling_) {
@@ -497,8 +507,14 @@ void TreeRenderer::updateCulledLeafDescriptorSet(
           .writeBuffer(Bindings::TREE_GFX_WIND_UBO, windBuffer, 0, VK_WHOLE_SIZE)
           .writeImage(Bindings::TREE_GFX_LEAF_ALBEDO, leafAlbedo, leafSampler)
           .writeBuffer(Bindings::TREE_GFX_LEAF_INSTANCES, outputBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-          .writeBuffer(Bindings::TREE_GFX_TREE_DATA, treeDataBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-          .update();
+          .writeBuffer(Bindings::TREE_GFX_TREE_DATA, treeDataBuffer, 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+
+    // Add snow buffer for rain wetness effects
+    if (snowBuffer) {
+        writer.writeBuffer(Bindings::TREE_GFX_SNOW_UBO, snowBuffer, 0, VK_WHOLE_SIZE);
+    }
+
+    writer.update();
 }
 
 vk::DescriptorSet TreeRenderer::getBranchDescriptorSet(uint32_t frameIndex, const std::string& barkType) const {

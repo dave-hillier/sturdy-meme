@@ -36,6 +36,12 @@
 #define BINDING_LIGHT_BUFFER            4   // Point/spot light array
 #define BINDING_SCENE_INSTANCE_BUFFER  18   // Scene object instance data (for batched rendering)
 
+// Weathering (composable material system - main rendering set)
+#define BINDING_WEATHERING_UBO         19   // Weathering parameters (wetness, dirt, moss)
+
+// Composed Material UBO (composable material system - any surface)
+#define BINDING_COMPOSED_MATERIAL_UBO  20   // Full composed material (surface + optional components)
+
 // =============================================================================
 // Skinned Mesh Descriptor Set (extends main set)
 // =============================================================================
@@ -103,12 +109,21 @@
 #define BINDING_TERRAIN_CAUSTICS       21   // Caustics texture for underwater lighting
 #define BINDING_TERRAIN_CAUSTICS_UBO   22   // Caustics parameters (water level, scale, speed, intensity)
 
+// Weathering UBO (terrain descriptor set - composable material system)
+#define BINDING_TERRAIN_WEATHERING_UBO 23   // Weathering parameters (wetness, dirt, moss)
+
+// Terrain Liquid UBO (terrain descriptor set - composable material system)
+#define BINDING_TERRAIN_LIQUID_UBO     29   // Puddles, streams, wet areas on terrain
+
+// Material Layer UBO (terrain descriptor set - composable material system)
+#define BINDING_TERRAIN_MATERIAL_LAYER_UBO 30  // Multi-layer terrain material blending
+
 // Virtual Texture bindings (terrain descriptor set)
-#define BINDING_VT_PAGE_TABLE          19   // VT indirection/page table texture (usampler2D)
-#define BINDING_VT_PHYSICAL_CACHE      20   // VT physical cache texture (sampler2D)
-#define BINDING_VT_FEEDBACK            21   // VT feedback buffer (SSBO)
-#define BINDING_VT_FEEDBACK_COUNTER    22   // VT feedback counter (SSBO)
-#define BINDING_VT_PARAMS_UBO          23   // VT parameters UBO
+#define BINDING_VT_PAGE_TABLE          24   // VT indirection/page table texture (usampler2D)
+#define BINDING_VT_PHYSICAL_CACHE      25   // VT physical cache texture (sampler2D)
+#define BINDING_VT_FEEDBACK            26   // VT feedback buffer (SSBO)
+#define BINDING_VT_FEEDBACK_COUNTER    27   // VT feedback counter (SSBO)
+#define BINDING_VT_PARAMS_UBO          28   // VT parameters UBO
 
 // =============================================================================
 // Grass Compute Shader Descriptor Set
@@ -199,6 +214,7 @@
 #define BINDING_TREE_GFX_LEAF_INSTANCES    9   // Leaf instance SSBO (world-space)
 #define BINDING_TREE_GFX_TREE_DATA        10   // Tree render data SSBO (transforms, tints)
 #define BINDING_TREE_GFX_BRANCH_SHADOW_INSTANCES 11  // Branch shadow instance SSBO (model matrices)
+#define BINDING_TREE_GFX_SNOW_UBO              12   // Snow UBO for tree wetness effects
 
 // Tree Impostor Descriptor Set
 #define BINDING_TREE_IMPOSTOR_UBO          0   // Scene uniforms
@@ -482,6 +498,8 @@ constexpr uint32_t METALLIC_MAP           = BINDING_METALLIC_MAP;
 constexpr uint32_t AO_MAP                 = BINDING_AO_MAP;
 constexpr uint32_t HEIGHT_MAP             = BINDING_HEIGHT_MAP;
 constexpr uint32_t WIND_UBO               = BINDING_WIND_UBO;
+constexpr uint32_t WEATHERING_UBO         = BINDING_WEATHERING_UBO;
+constexpr uint32_t COMPOSED_MATERIAL_UBO  = BINDING_COMPOSED_MATERIAL_UBO;
 
 // Grass/Leaf System
 constexpr uint32_t GRASS_INSTANCE_BUFFER  = BINDING_GRASS_INSTANCE_BUFFER;
@@ -525,6 +543,9 @@ constexpr uint32_t TERRAIN_TILE_ARRAY     = BINDING_TERRAIN_TILE_ARRAY;
 constexpr uint32_t TERRAIN_TILE_INFO      = BINDING_TERRAIN_TILE_INFO;
 constexpr uint32_t TERRAIN_CAUSTICS       = BINDING_TERRAIN_CAUSTICS;
 constexpr uint32_t TERRAIN_CAUSTICS_UBO   = BINDING_TERRAIN_CAUSTICS_UBO;
+constexpr uint32_t TERRAIN_WEATHERING_UBO = BINDING_TERRAIN_WEATHERING_UBO;
+constexpr uint32_t TERRAIN_LIQUID_UBO = BINDING_TERRAIN_LIQUID_UBO;
+constexpr uint32_t TERRAIN_MATERIAL_LAYER_UBO = BINDING_TERRAIN_MATERIAL_LAYER_UBO;
 
 // Virtual Texture
 constexpr uint32_t VT_PAGE_TABLE          = BINDING_VT_PAGE_TABLE;
@@ -614,6 +635,7 @@ constexpr uint32_t TREE_GFX_LEAF_ALBEDO   = BINDING_TREE_GFX_LEAF_ALBEDO;
 constexpr uint32_t TREE_GFX_LEAF_INSTANCES = BINDING_TREE_GFX_LEAF_INSTANCES;
 constexpr uint32_t TREE_GFX_TREE_DATA = BINDING_TREE_GFX_TREE_DATA;
 constexpr uint32_t TREE_GFX_BRANCH_SHADOW_INSTANCES = BINDING_TREE_GFX_BRANCH_SHADOW_INSTANCES;
+constexpr uint32_t TREE_GFX_SNOW_UBO       = BINDING_TREE_GFX_SNOW_UBO;
 
 // Tree Impostor
 constexpr uint32_t TREE_IMPOSTOR_UBO      = BINDING_TREE_IMPOSTOR_UBO;

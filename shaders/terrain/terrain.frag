@@ -13,6 +13,9 @@
 #include "../shadow_common.glsl"
 #include "../snow_common.glsl"
 #include "../cloud_shadow_common.glsl"
+#include "../terrain_liquid_common.glsl"
+#include "../material_layer_common.glsl"
+#include "../ubo_material_layer.glsl"
 
 // Virtual texturing support - define USE_VIRTUAL_TEXTURE to enable
 #ifdef USE_VIRTUAL_TEXTURE
@@ -76,6 +79,42 @@ layout(std140, binding = BINDING_TERRAIN_CAUSTICS_UBO) uniform CausticsUniforms 
     float causticsTime;            // Animation time
     float causticsEnabled;         // 0 = disabled, 1 = enabled
     float causticsPadding;         // Alignment padding
+};
+
+// Terrain liquid effects UBO (composable material system)
+layout(std140, binding = BINDING_TERRAIN_LIQUID_UBO) uniform TerrainLiquidUniforms {
+    // Global wetness
+    float liquidGlobalWetness;
+    float liquidPuddleThreshold;
+    float liquidMaxPuddleDepth;
+    float liquidPuddleEdgeSoftness;
+
+    // Puddle appearance
+    vec4 liquidPuddleWaterColor;
+    float liquidPuddleRoughness;
+    float liquidPuddleReflectivity;
+    float liquidPuddleRippleStrength;
+    float liquidPuddleRippleScale;
+
+    // Stream parameters
+    vec4 liquidStreamWaterColor;
+    vec2 liquidStreamFlowDirection;
+    float liquidStreamFlowSpeed;
+    float liquidStreamWidth;
+    float liquidStreamDepth;
+    float liquidStreamFoamIntensity;
+    float liquidStreamTurbulence;
+    float liquidStreamEnabled;
+
+    // Shore wetness
+    float liquidShoreWetnessRange;
+    float liquidShoreWaveHeight;
+    float liquidWaterLevel;
+    float liquidPadding1;
+
+    // Animation
+    float liquidTime;
+    float liquidPadding2[3];
 };
 
 // Far LOD grass parameters (where to start/end grass-to-terrain transition)
@@ -259,14 +298,40 @@ void main() {
     }
 
 #ifndef USE_VIRTUAL_TEXTURE
-    // Blend in rock color on steep slopes (only for non-VT mode; VT handles cliffs separately)
+    // === MATERIAL LAYER BLENDING (Composable Material System) ===
+    // Blend terrain materials based on configured layers or fallback to slope-based
     vec3 rockColor = vec3(0.4, 0.35, 0.3);
-    vec3 grassColor = albedo;
-    albedo = mix(grassColor, rockColor, smoothstep(0.3, 0.6, slope));
+    float rockRoughness = 0.95;
+    float grassRoughness = 0.8;
+
+    if (materialLayerUbo.numMaterialLayers > 0) {
+        // Use configured material layers from UBO
+        // Layer 0 is base (grass), layer 1 is rock overlay
+        float rockBlend = 0.0;
+
+        for (int i = 1; i < materialLayerUbo.numMaterialLayers && i < MAX_MATERIAL_LAYERS; i++) {
+            MaterialLayerData layerData;
+            layerData.params0 = materialLayerUbo.materialLayers[i].params0;
+            layerData.params1 = materialLayerUbo.materialLayers[i].params1;
+            layerData.params2 = materialLayerUbo.materialLayers[i].params2;
+            layerData.center = materialLayerUbo.materialLayers[i].center;
+            layerData.direction = materialLayerUbo.materialLayers[i].direction;
+
+            float layerBlend = calculateLayerBlendFactor(layerData, fragWorldPos, normal, 0.0);
+            rockBlend = max(rockBlend, layerBlend);
+        }
+
+        albedo = mix(albedo, rockColor, rockBlend);
+    } else {
+        // Fallback: use helper functions from material_layer_common.glsl
+        float rockBlend = getRockBlendFactor(normal);
+        albedo = mix(albedo, rockColor, rockBlend);
+    }
 #endif
 
-    // Material properties
-    float roughness = mix(0.8, 0.95, slope);  // Rougher on slopes
+    // Material properties - blend roughness based on rock coverage
+    float rockBlendForRoughness = getRockBlendFactor(normal);
+    float roughness = mix(grassRoughness, rockRoughness, rockBlendForRoughness);
     float metallic = 0.0;  // Terrain is non-metallic
 
     // === SNOW LAYER ===
@@ -320,6 +385,66 @@ void main() {
         albedo = blendSnowAlbedo(albedo, snow.snowColor.rgb, snowCoverage);
         // Snow is rougher than most terrain
         roughness = mix(roughness, snow.snowRoughness, snowCoverage);
+    }
+
+    // === TERRAIN LIQUID EFFECTS (Composable Material System) ===
+    // Apply puddles, wet surfaces, and streams from weather/environment
+    vec3 liquidReflection = vec3(0.0);
+    float liquidReflectionStrength = 0.0;
+
+    if (liquidGlobalWetness > 0.01) {
+        // Set up puddle parameters from UBO
+        PuddleParams puddleParams;
+        puddleParams.depth = liquidMaxPuddleDepth;
+        puddleParams.roughness = liquidPuddleRoughness;
+        puddleParams.waterColor = liquidPuddleWaterColor.rgb;
+        puddleParams.reflectivity = liquidPuddleReflectivity;
+        puddleParams.rippleStrength = liquidPuddleRippleStrength;
+        puddleParams.edgeSoftness = liquidPuddleEdgeSoftness;
+
+        // Set up stream parameters
+        TerrainStreamParams streamParams;
+        streamParams.flowDirection = liquidStreamFlowDirection;
+        streamParams.flowSpeed = liquidStreamFlowSpeed;
+        streamParams.flowWidth = liquidStreamWidth;
+        streamParams.depth = liquidStreamDepth;
+        streamParams.waterColor = liquidStreamWaterColor.rgb;
+        streamParams.foamIntensity = liquidStreamFoamIntensity;
+        streamParams.turbulence = liquidStreamTurbulence;
+
+        // Calculate height variation for puddle detection (use slope as proxy)
+        float heightVariation = slope;
+
+        // Sky color for reflections (simplified - use ambient)
+        vec3 skyColorForReflection = ubo.ambientColor.rgb * 2.0;
+
+        // View direction for fresnel
+        vec3 viewDir = normalize(ubo.cameraPosition.xyz - fragWorldPos);
+
+        // Apply terrain liquid effects
+        TerrainLiquidResult liquidResult = applyTerrainLiquidEffects(
+            albedo,
+            normal,
+            roughness,
+            metallic,
+            fragWorldPos,
+            liquidGlobalWetness,
+            heightVariation,           // puddleMask from terrain features
+            0.0,                        // streamMask (would come from data texture)
+            streamParams,
+            puddleParams,
+            viewDir,
+            skyColorForReflection,
+            liquidTime
+        );
+
+        // Apply results
+        albedo = liquidResult.albedo;
+        normal = liquidResult.normal;
+        roughness = liquidResult.roughness;
+        metallic = liquidResult.metallic;
+        liquidReflection = liquidResult.reflection;
+        liquidReflectionStrength = liquidResult.reflectionStrength;
     }
 
     // View direction
@@ -386,6 +511,12 @@ void main() {
 
     // Combine lighting (sun with shadows, moon without for soft night light)
     vec3 color = ambient + sunLight * shadow + moonLight;
+
+    // === TERRAIN LIQUID REFLECTIONS ===
+    // Add puddle/water reflections from composable material system
+    if (liquidReflectionStrength > 0.01) {
+        color = mix(color, liquidReflection, liquidReflectionStrength);
+    }
 
     // === UNDERWATER CAUSTICS (Phase 2) ===
     // Add animated light patterns to underwater terrain

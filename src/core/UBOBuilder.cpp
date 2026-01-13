@@ -186,7 +186,8 @@ SnowUBO UBOBuilder::buildSnowUBOData(const SnowConfig& config) const {
     snow.snowCascade2Params = cascadeParams[2];
     snow.snowMaxHeight = config.maxSnowHeight;
     snow.debugSnowDepth = config.showSnowDepthDebug ? 1.0f : 0.0f;
-    snow.snowPadding = glm::vec2(0.0f);
+    snow.rainWetness = 0.0f;  // Set by weather system in Renderer
+    snow.snowPadding = 0.0f;
 
     return snow;
 }

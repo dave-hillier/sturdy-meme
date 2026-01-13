@@ -916,6 +916,14 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     snowConfig.maxSnowHeight = MAX_SNOW_HEIGHT;
     SnowUBO snowUbo = systems_->uboBuilder().buildSnowUBOData(snowConfig);
 
+    // Set rain wetness from weather system (composable material system integration)
+    // Weather type 0 = rain, type 1 = snow - rain causes wetness on vegetation
+    if (systems_->weather().getWeatherType() == 0) {
+        snowUbo.rainWetness = systems_->weather().getIntensity();
+    } else {
+        snowUbo.rainWetness = 0.0f;
+    }
+
     CloudShadowUBO cloudShadowUbo = systems_->uboBuilder().buildCloudShadowUBOData();
 
     // State mutations - use GlobalBufferManager for buffer updates
@@ -1097,7 +1105,8 @@ bool Renderer::render(const Camera& camera) {
                 leafTex->getImageView(),
                 leafTex->getSampler(),
                 systems_->tree()->getLeafInstanceBuffer(),
-                systems_->tree()->getLeafInstanceBufferSize());
+                systems_->tree()->getLeafInstanceBufferSize(),
+                systems_->globalBuffers().snowBuffers.buffers[frame.frameIndex]);
         }
 
         // Update culled leaf descriptor sets (for GPU culling path)
@@ -1113,7 +1122,8 @@ bool Renderer::render(const Camera& camera) {
                     systems_->shadow().getShadowImageView(),
                     systems_->shadow().getShadowSampler(),
                     leafTex->getImageView(),
-                    leafTex->getSampler());
+                    leafTex->getSampler(),
+                    systems_->globalBuffers().snowBuffers.buffers[frame.frameIndex]);
             }
         }
         systems_->profiler().endCpuZone("SystemUpdates:TreeDesc");
@@ -1133,6 +1143,21 @@ bool Renderer::render(const Camera& camera) {
         systems_->profiler().beginCpuZone("SystemUpdates:Weather");
         systems_->weather().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.deltaTime, frame.time, systems_->wind());
         systems_->profiler().endCpuZone("SystemUpdates:Weather");
+    }
+
+    // Connect weather to terrain liquid effects (composable material system)
+    // Rain causes puddles and wet surfaces on terrain
+    {
+        float rainIntensity = systems_->weather().getIntensity();
+        uint32_t weatherType = systems_->weather().getWeatherType();
+        if (weatherType == 0 && rainIntensity > 0.0f) {
+            // Rain - enable terrain wetness
+            systems_->terrain().setLiquidWetness(rainIntensity);
+        } else if (weatherType == 0) {
+            // No rain - gradually dry out (handled by liquid system's natural state)
+            systems_->terrain().setLiquidWetness(0.0f);
+        }
+        // Note: Snow (type 1) doesn't cause wetness - it covers the ground instead
     }
 
     // Terrain system update

@@ -23,7 +23,8 @@ layout(binding = SNOW_UBO_BINDING) uniform SnowUBO {
     vec4 snowCascade2Params;     // xy = origin, z = size, w = texel size
     float snowMaxHeight;         // Maximum snow height in meters
     float debugSnowDepth;        // 1.0 = show depth visualization
-    vec2 snowPadding;
+    float rainWetness;           // Global rain wetness (0-1, from weather system)
+    float snowPadding;
 } snow;
 
 #endif // UBO_SNOW_GLSL
