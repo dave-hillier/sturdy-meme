@@ -204,10 +204,23 @@ vec4 evaluateMaterial(MaterialUBO mat, vec2 uv, vec3 worldPos, vec3 normal) {
   - Integration with LiquidComponent presets
 - Added BINDING_TERRAIN_LIQUID_UBO (29)
 
-### Phase 5: Generalize to All Renderables (Pending)
-- Extend MaterialRegistry to support component composition
-- Update scene object shaders to use unified material evaluation
-- Full composability across all surface types
+### Phase 5: Generalize to All Renderables ✓
+- Created `ComposedMaterialRegistry` class with RAII GPU resource management:
+  - `registerMaterial()` for composed materials with components
+  - `createGPUResources()` allocates per-frame UBOs
+  - `updateUBO()` / `updateAllUBOs()` for dirty tracking and upload
+  - `setGlobalWeather()` for weather override system
+  - Smart pointers (`std::unique_ptr<GPUBuffer>`) for automatic cleanup
+- Created `ComposedMaterialUBO` for GPU upload:
+  - std140-aligned struct packing all components
+  - `fromMaterial()` converts ComposedMaterial to GPU format
+  - `PackedSurfaceUBO` for minimal surface-only materials
+- Created `material_evaluate.glsl` unified shader:
+  - `MaterialInputs` / `MaterialResult` structures
+  - Component evaluators: surface, liquid, weathering, subsurface, emissive
+  - `evaluateMaterial()` main entry point
+  - Feature flag checks for conditional evaluation
+- Added `BINDING_COMPOSED_MATERIAL_UBO` (20) for shader binding
 
 ## Benefits
 

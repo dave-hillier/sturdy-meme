@@ -39,6 +39,9 @@
 // Weathering (composable material system - main rendering set)
 #define BINDING_WEATHERING_UBO         19   // Weathering parameters (wetness, dirt, moss)
 
+// Composed Material UBO (composable material system - any surface)
+#define BINDING_COMPOSED_MATERIAL_UBO  20   // Full composed material (surface + optional components)
+
 // =============================================================================
 // Skinned Mesh Descriptor Set (extends main set)
 // =============================================================================
@@ -492,6 +495,7 @@ constexpr uint32_t AO_MAP                 = BINDING_AO_MAP;
 constexpr uint32_t HEIGHT_MAP             = BINDING_HEIGHT_MAP;
 constexpr uint32_t WIND_UBO               = BINDING_WIND_UBO;
 constexpr uint32_t WEATHERING_UBO         = BINDING_WEATHERING_UBO;
+constexpr uint32_t COMPOSED_MATERIAL_UBO  = BINDING_COMPOSED_MATERIAL_UBO;
 
 // Grass/Leaf System
 constexpr uint32_t GRASS_INSTANCE_BUFFER  = BINDING_GRASS_INSTANCE_BUFFER;
