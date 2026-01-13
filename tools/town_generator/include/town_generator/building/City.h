@@ -130,6 +130,7 @@ private:
     void optimizeJunctions();
     void buildWalls();
     void buildDomains();     // Build horizon/shore edge classification (faithful to mfcg.js)
+    void disableCoastWallSegments();  // Disable wall segments along coast (needs shoreE)
     void buildStreets();
     void tidyUpRoads();
     void createWards();

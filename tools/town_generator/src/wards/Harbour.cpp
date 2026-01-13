@@ -69,7 +69,9 @@ void Harbour::createGeometry() {
 
         geom::Point edgeDir = edge.second.subtract(edge.first);
         edgeDir = edgeDir.norm(1.0);
-        geom::Point perpDir(-edgeDir.y, edgeDir.x);  // Points into water
+        // For CCW polygons, outward normal is (edgeDir.y, -edgeDir.x)
+        // This points INTO water (outward from land)
+        geom::Point perpDir(edgeDir.y, -edgeDir.x);
 
         double spacing = longestLen / (numPiers + 1);
 
@@ -93,11 +95,8 @@ void Harbour::createGeometry() {
         }
     }
 
-    // Create warehouses (faithful to MFCG)
-    AlleyParams params = AlleyParams::createUrban();
-    params.emptyProb = 0.05;  // 5% empty lots
-
-    createAlleys(block, params);
+    // MFCG harbors only have piers, no buildings
+    // (Reference: mfcg-clean/wards/Harbour.js - only creates piers array)
 
     // Add piers to geometry
     for (const auto& pier : piers) {

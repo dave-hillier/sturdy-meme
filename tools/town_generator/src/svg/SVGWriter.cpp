@@ -76,45 +76,22 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
     double minY = bounds.top - margin;
 
     // SVG header
-    svg << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     svg << "<svg xmlns=\"http://www.w3.org/2000/svg\" ";
     svg << "width=\"" << width * 4 << "\" height=\"" << height * 4 << "\" ";
     svg << "viewBox=\"" << minX << " " << minY << " " << width << " " << height << "\">\n";
+
+    // CSS styles for common attributes - reduces file size significantly
+    svg << "  <style>\n";
+    svg << "    .building { stroke: " << style.buildingStroke << "; stroke-width: " << style.buildingStrokeWidth << "; }\n";
+    svg << "    .special { fill: " << style.wallStroke << "; stroke: " << style.buildingStroke << "; stroke-width: " << style.buildingStrokeWidth << "; }\n";
+    svg << "    .road { fill: none; stroke-linecap: round; stroke-linejoin: round; }\n";
+    svg << "    .tower { fill: " << style.towerFill << "; }\n";
+    svg << "  </style>\n";
 
     // Background
     svg << "  <rect x=\"" << minX << "\" y=\"" << minY << "\" ";
     svg << "width=\"" << width << "\" height=\"" << height << "\" ";
     svg << "fill=\"" << style.backgroundColor << "\"/>\n";
-
-    // DIAGNOSTIC: Ward type ground colors (MFCG ward types only)
-    // This helps visualize which cells belong to which ward types
-    auto getWardGroundColor = [](const std::string& wardName) -> std::string {
-        if (wardName == "Alleys") return "#E8D4B8";      // Tan/beige for residential
-        if (wardName == "Market") return "#F5DEB3";      // Wheat for market
-        if (wardName == "Cathedral") return "#DDA0DD";   // Plum for cathedral
-        if (wardName == "Castle") return "#B0C4DE";      // Light steel blue for castle
-        if (wardName == "Park") return "#90EE90";        // Light green for park
-        if (wardName == "Farm") return "#98FB98";        // Pale green for farm
-        if (wardName == "Harbour") return "#87CEEB";     // Sky blue for harbour
-        if (wardName == "Wilderness") return "#228B22";  // Forest green for wilderness
-        return "#DCDCDC";  // Gainsboro (light gray) for unknown
-    };
-
-    svg << "  <g id=\"ward-ground-diagnostic\">\n";
-    for (const auto& cell : model.cells) {
-        if (cell->ward && !cell->waterbody) {
-            std::string wardName = cell->ward->getName();
-            std::string color = getWardGroundColor(wardName);
-            svg << "    <path d=\"" << polygonToPath(cell->shape) << "\" ";
-            svg << "fill=\"" << color << "\" stroke=\"#888\" stroke-width=\"0.2\" opacity=\"0.7\">\n";
-            svg << "      <title>" << wardName;
-            if (cell->withinWalls) svg << " (walled)";
-            if (cell->withinCity) svg << " (city)";
-            svg << "</title>\n";
-            svg << "    </path>\n";
-        }
-    }
-    svg << "  </g>\n";
 
     // Farm fields (green background for Farm wards) - rendered first, below water
     svg << "  <g id=\"farms\">\n";
@@ -156,47 +133,34 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
         svg << "  </g>\n";
     }
 
-    // Roads (outside walls) - solid dark lines
-    svg << "  <g id=\"roads\">\n";
+    // Roads (outside walls) - use CSS class for common attributes
+    svg << "  <g id=\"roads\" class=\"road\" stroke=\"" << style.roadStroke << "\" stroke-width=\"" << style.roadStrokeWidth << "\">\n";
     for (const auto& road : model.roads) {
-        svg << "    <path d=\"" << polylineToPath(road) << "\" ";
-        svg << "fill=\"none\" stroke=\"" << style.roadStroke << "\" ";
-        svg << "stroke-width=\"" << style.roadStrokeWidth << "\" ";
-        svg << "stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n";
+        svg << "    <path d=\"" << polylineToPath(road) << "\"/>\n";
     }
     svg << "  </g>\n";
 
-    // Arteries (main streets) - solid dark lines
-    svg << "  <g id=\"arteries\">\n";
+    // Arteries (main streets)
+    svg << "  <g id=\"arteries\" class=\"road\" stroke=\"" << style.arteryStroke << "\" stroke-width=\"" << style.arteryStrokeWidth << "\">\n";
     for (const auto& artery : model.arteries) {
-        svg << "    <path d=\"" << polylineToPath(artery) << "\" ";
-        svg << "fill=\"none\" stroke=\"" << style.arteryStroke << "\" ";
-        svg << "stroke-width=\"" << style.arteryStrokeWidth << "\" ";
-        svg << "stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n";
+        svg << "    <path d=\"" << polylineToPath(artery) << "\"/>\n";
     }
     svg << "  </g>\n";
 
     // Streets (secondary)
-    svg << "  <g id=\"streets\">\n";
+    svg << "  <g id=\"streets\" class=\"road\" stroke=\"" << style.streetStroke << "\" stroke-width=\"" << style.streetStrokeWidth << "\">\n";
     for (const auto& street : model.streets) {
-        svg << "    <path d=\"" << polylineToPath(street) << "\" ";
-        svg << "fill=\"none\" stroke=\"" << style.streetStroke << "\" ";
-        svg << "stroke-width=\"" << style.streetStrokeWidth << "\" ";
-        svg << "stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n";
+        svg << "    <path d=\"" << polylineToPath(street) << "\"/>\n";
     }
     svg << "  </g>\n";
 
     // Alleys (from individual wards)
-    svg << "  <g id=\"alleys\">\n";
-    // Render alleys from wards
+    svg << "  <g id=\"alleys\" class=\"road\" stroke=\"" << style.alleyStroke << "\" stroke-width=\"" << style.alleyStrokeWidth << "\">\n";
     for (const auto& ward : model.wards_) {
         std::string wardName = ward->getName();
         if (wardName == "Alleys") continue;  // Already rendered from WardGroups
         for (const auto& alley : ward->alleys) {
-            svg << "    <path d=\"" << polylineToPath(alley) << "\" ";
-            svg << "fill=\"none\" stroke=\"" << style.alleyStroke << "\" ";
-            svg << "stroke-width=\"" << style.alleyStrokeWidth << "\" ";
-            svg << "stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n";
+            svg << "    <path d=\"" << polylineToPath(alley) << "\"/>\n";
         }
     }
     svg << "  </g>\n";
@@ -261,14 +225,14 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
     size_t groupIdx = 0;
     for (const auto& group : model.wardGroups_) {
         std::string groupColor = getGroupColor(groupIdx);
+        // Use group element with fill attribute, CSS class for stroke
+        svg << "    <g class=\"building\" fill=\"" << groupColor << "\">\n";
         for (const auto& block : group->blocks) {
             for (const auto& building : block->buildings) {
-                svg << "    <path d=\"" << polygonToPath(building) << "\" ";
-                svg << "fill=\"" << groupColor << "\" ";
-                svg << "stroke=\"" << style.buildingStroke << "\" ";
-                svg << "stroke-width=\"" << style.buildingStrokeWidth << "\"/>\n";
+                svg << "      <path d=\"" << polygonToPath(building) << "\"/>\n";
             }
         }
+        svg << "    </g>\n";
         ++groupIdx;
     }
 
@@ -281,37 +245,31 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
         std::string wardName = ward->getName();
         if (wardName == "Alleys") continue;
 
+        if (ward->geometry.empty()) continue;
+
         std::string wardColor = getWardTint(wardName);
+        svg << "    <g class=\"building\" fill=\"" << wardColor << "\">\n";
         for (const auto& building : ward->geometry) {
             // Skip the church building - rendered separately as special
             if (ward->hasChurch() && &building == &ward->getChurch()) continue;
-
-            svg << "    <path d=\"" << polygonToPath(building) << "\" ";
-            svg << "fill=\"" << wardColor << "\" ";
-            svg << "stroke=\"" << style.buildingStroke << "\" ";
-            svg << "stroke-width=\"" << style.buildingStrokeWidth << "\"/>\n";
+            svg << "      <path d=\"" << polygonToPath(building) << "\"/>\n";
         }
+        svg << "    </g>\n";
     }
     svg << "  </g>\n";
 
     // Special buildings (churches, cathedrals, castles) - solid dark like mfcg.js
     // Reference: mfcg.js hd.drawSolids() fills with K.colorWall
-    svg << "  <g id=\"special-buildings\">\n";
+    svg << "  <g id=\"special-buildings\" class=\"special\">\n";
     for (const auto& ward : model.wards_) {
         // Churches from Alleys wards
         if (ward->hasChurch()) {
-            svg << "    <path d=\"" << polygonToPath(ward->getChurch()) << "\" ";
-            svg << "fill=\"" << style.wallStroke << "\" ";
-            svg << "stroke=\"" << style.buildingStroke << "\" ";
-            svg << "stroke-width=\"" << style.buildingStrokeWidth << "\"/>\n";
+            svg << "    <path d=\"" << polygonToPath(ward->getChurch()) << "\"/>\n";
         }
         // Cathedral and Castle wards - all geometry is special
         if (ward->isSpecialWard()) {
             for (const auto& building : ward->geometry) {
-                svg << "    <path d=\"" << polygonToPath(building) << "\" ";
-                svg << "fill=\"" << style.wallStroke << "\" ";
-                svg << "stroke=\"" << style.buildingStroke << "\" ";
-                svg << "stroke-width=\"" << style.buildingStrokeWidth << "\"/>\n";
+                svg << "    <path d=\"" << polygonToPath(building) << "\"/>\n";
             }
         }
     }
@@ -340,6 +298,11 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
 
         // Render wall segments, creating small gaps at gate positions
         for (size_t i = 0; i < n; ++i) {
+            // Skip disabled segments (e.g., segments bordering water or citadel)
+            if (i < wall->segments.size() && !wall->segments[i]) {
+                continue;
+            }
+
             size_t next = (i + 1) % n;
             const auto& p0 = wall->shape[i];
             const auto& p1 = wall->shape[next];
@@ -382,9 +345,8 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
 
         // Towers (filled circles)
         for (const auto& tower : wall->towers) {
-            svg << "    <circle cx=\"" << tower.x << "\" cy=\"" << tower.y << "\" ";
-            svg << "r=\"" << towerR << "\" ";
-            svg << "fill=\"" << style.towerFill << "\"/>\n";
+            svg << "    <circle class=\"tower\" cx=\"" << tower.x << "\" cy=\"" << tower.y << "\" ";
+            svg << "r=\"" << towerR << "\"/>\n";
         }
 
         // Gates: two flanking square towers at the ends of the gap (along the wall)
@@ -417,9 +379,8 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
             // Tower at the end of the incoming wall segment (offset back from gate)
             double t1x = pGate.x - dx1 * halfGap;
             double t1y = pGate.y - dy1 * halfGap;
-            svg << "    <rect x=\"" << (t1x - towerSize) << "\" y=\"" << (t1y - towerSize) << "\" ";
-            svg << "width=\"" << (towerSize * 2) << "\" height=\"" << (towerSize * 2) << "\" ";
-            svg << "fill=\"" << style.towerFill << "\"/>\n";
+            svg << "    <rect class=\"tower\" x=\"" << (t1x - towerSize) << "\" y=\"" << (t1y - towerSize) << "\" ";
+            svg << "width=\"" << (towerSize * 2) << "\" height=\"" << (towerSize * 2) << "\"/>\n";
 
             // Direction from gate to next vertex (outgoing wall segment)
             double dx2 = pNext.x - pGate.x;
@@ -430,9 +391,8 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
             // Tower at the start of the outgoing wall segment (offset forward from gate)
             double t2x = pGate.x + dx2 * halfGap;
             double t2y = pGate.y + dy2 * halfGap;
-            svg << "    <rect x=\"" << (t2x - towerSize) << "\" y=\"" << (t2y - towerSize) << "\" ";
-            svg << "width=\"" << (towerSize * 2) << "\" height=\"" << (towerSize * 2) << "\" ";
-            svg << "fill=\"" << style.towerFill << "\"/>\n";
+            svg << "    <rect class=\"tower\" x=\"" << (t2x - towerSize) << "\" y=\"" << (t2y - towerSize) << "\" ";
+            svg << "width=\"" << (towerSize * 2) << "\" height=\"" << (towerSize * 2) << "\"/>\n";
         }
     };
 
@@ -449,30 +409,6 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
         renderWall(model.citadel, true);
         svg << "  </g>\n";
     }
-
-    // DIAGNOSTIC: Legend for ward colors (MFCG ward types only)
-    svg << "  <g id=\"legend\" transform=\"translate(" << (minX + 10) << "," << (minY + 10) << ")\">\n";
-    svg << "    <rect x=\"0\" y=\"0\" width=\"120\" height=\"140\" fill=\"white\" stroke=\"#333\" stroke-width=\"0.5\" opacity=\"0.9\"/>\n";
-    svg << "    <text x=\"5\" y=\"15\" font-size=\"8\" font-weight=\"bold\">Ward Types</text>\n";
-
-    std::vector<std::pair<std::string, std::string>> legendItems = {
-        {"Alleys", "#E8D4B8"},
-        {"Market", "#F5DEB3"},
-        {"Cathedral", "#DDA0DD"},
-        {"Castle", "#B0C4DE"},
-        {"Park", "#90EE90"},
-        {"Farm", "#98FB98"},
-        {"Harbour", "#87CEEB"},
-        {"Wilderness", "#228B22"},
-    };
-
-    int y = 25;
-    for (const auto& item : legendItems) {
-        svg << "    <rect x=\"5\" y=\"" << y << "\" width=\"10\" height=\"10\" fill=\"" << item.second << "\" stroke=\"#888\" stroke-width=\"0.3\"/>\n";
-        svg << "    <text x=\"20\" y=\"" << (y + 8) << "\" font-size=\"6\">" << item.first << "</text>\n";
-        y += 13;
-    }
-    svg << "  </g>\n";
 
     svg << "</svg>\n";
 

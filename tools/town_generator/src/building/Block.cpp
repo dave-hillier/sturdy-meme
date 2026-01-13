@@ -22,58 +22,73 @@ geom::Point Block::getCenter() {
 }
 
 void Block::createLots() {
-    // Faithful to mfcg.js TwistedBlock.createLots (lines 158-177)
-    // Uses Bisector to subdivide the block shape into individual lots
+    // Frontage-based subdivision (faithful to mfcg-clean Block.js subdivideLots)
+    // Divides block along its longest edge (frontage) into rectangular lots
 
     lots.clear();
+    courtyard.clear();
 
     if (shape.length() < 3) {
         return;
     }
 
+    double area = std::abs(shape.square());
     double minSq = group ? group->alleys.minSq : 100.0;
-    double sizeChaos = group ? group->alleys.sizeChaos : 0.5;
+    double minFront = group ? group->alleys.minFront : 3.0;
 
-    // Use Bisector to partition block into lots
-    // Faithful to: new Bisector(a.shape, b.minSq, Math.max(4 * b.sizeChaos, 1.2))
-    double variance = std::max(4.0 * sizeChaos, 1.2);
-    utils::Bisector bisector(shape.vertexValues(), minSq, variance);
-    bisector.minTurnOffset = 0.5;  // Faithful to original
+    // If block is too small, treat as single lot
+    if (area < minSq) {
+        lots.push_back(shape);
+        return;
+    }
 
-    auto lotShapes = bisector.partition();
+    // Find longest edge for frontage
+    size_t frontIdx = 0;
+    double maxLen = 0;
+    size_t n = shape.length();
 
-    // Filter inner lots (lots that don't touch the block perimeter)
-    // are moved to courtyard
-    for (const auto& lotShape : lotShapes) {
-        if (lotShape.size() < 3) continue;
-
-        geom::Polygon lot(lotShape);
-
-        // Check if lot touches block perimeter
-        bool touchesPerimeter = false;
-        size_t blockLen = shape.length();
-
-        for (size_t i = 0; i < lot.length() && !touchesPerimeter; ++i) {
-            const geom::Point& lotP1 = lot[i];
-            const geom::Point& lotP2 = lot[(i + 1) % lot.length()];
-
-            for (size_t j = 0; j < blockLen; ++j) {
-                const geom::Point& blockP1 = shape[j];
-                const geom::Point& blockP2 = shape[(j + 1) % blockLen];
-
-                // Check if lot edge converges with block edge
-                if (geom::GeomUtils::converge(lotP1, lotP2, blockP1, blockP2)) {
-                    touchesPerimeter = true;
-                    break;
-                }
-            }
+    for (size_t i = 0; i < n; ++i) {
+        double len = geom::Point::distance(shape[i], shape[(i + 1) % n]);
+        if (len > maxLen) {
+            maxLen = len;
+            frontIdx = i;
         }
+    }
 
-        if (touchesPerimeter) {
-            lots.push_back(lot);
-        } else {
-            courtyard.push_back(lot);
-        }
+    const geom::Point& frontP1 = shape[frontIdx];
+    const geom::Point& frontP2 = shape[(frontIdx + 1) % n];
+    double frontLen = maxLen;
+
+    // If frontage too short for multiple lots, use whole block
+    if (frontLen < minFront * 2) {
+        lots.push_back(shape);
+        return;
+    }
+
+    // Calculate number of lots along frontage
+    int numLots = std::max(2, static_cast<int>(frontLen / minFront));
+
+    // Faithful to mfcg-clean Block.js subdivideLots - always use front/back interpolation
+    // The reference uses the same approach regardless of vertex count.
+    // For non-quadrilaterals, this approximates by picking edges at (frontIdx + 2) % n.
+
+    // Find back edge (opposite to front edge)
+    size_t backIdx = (frontIdx + 2) % n;
+    const geom::Point& backP1 = shape[backIdx];
+    const geom::Point& backP2 = shape[(backIdx + 1) % n];
+
+    // Create lots by interpolating along front and back edges
+    for (int i = 0; i < numLots; ++i) {
+        double t1 = static_cast<double>(i) / numLots;
+        double t2 = static_cast<double>(i + 1) / numLots;
+
+        geom::Point p1 = geom::GeomUtils::interpolate(frontP1, frontP2, t1);
+        geom::Point p2 = geom::GeomUtils::interpolate(frontP1, frontP2, t2);
+        // Back edge goes opposite direction
+        geom::Point p3 = geom::GeomUtils::interpolate(backP2, backP1, t2);
+        geom::Point p4 = geom::GeomUtils::interpolate(backP2, backP1, t1);
+
+        lots.push_back(geom::Polygon({p1, p2, p3, p4}));
     }
 
     // If no lots created, use the whole block as one lot

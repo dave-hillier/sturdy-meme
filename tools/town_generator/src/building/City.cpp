@@ -52,6 +52,7 @@ void City::build() {
     optimizeJunctions();
     buildWalls();
     buildDomains();  // Build horizon/shore edge classification
+    disableCoastWallSegments();  // Must be after buildDomains (needs shoreE)
     buildStreets();
 
     // Build canals/rivers if needed (faithful to mfcg.js buildCanals)
@@ -557,54 +558,8 @@ void City::buildWalls() {
     // Set wall reference only if walls are needed (wall == border for walled cities)
     if (wallsNeeded) {
         wall = border;
-
-        // Disable wall segments that border water or citadel
-        // (faithful to mfcg.js line 10830: if (d.data == Tc.COAST || d.twin.face.data == this.citadel))
-        for (size_t i = 0; i < wall->shape.length(); ++i) {
-            geom::PointPtr v0 = wall->shape.ptr(i);
-            geom::PointPtr v1 = wall->shape.ptr((i + 1) % wall->shape.length());
-
-            // Check if this edge borders water (any patch sharing this edge is waterbody)
-            bool bordersWater = false;
-            for (auto* patch : cells) {
-                if (patch->waterbody) {
-                    // Check if water patch shares this edge (in either direction)
-                    if ((patch->shape.containsPtr(v0) && patch->shape.containsPtr(v1))) {
-                        // Verify it's actually an adjacent edge
-                        int idx = patch->shape.indexOfPtr(v0);
-                        if (idx != -1) {
-                            size_t nextIdx = (idx + 1) % patch->shape.length();
-                            size_t prevIdx = (idx + patch->shape.length() - 1) % patch->shape.length();
-                            if (patch->shape.ptr(nextIdx) == v1 || patch->shape.ptr(prevIdx) == v1) {
-                                bordersWater = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Check if this edge borders citadel
-            bool bordersCitadel = false;
-            if (citadel) {
-                if (citadel->shape.containsPtr(v0) && citadel->shape.containsPtr(v1)) {
-                    int idx = citadel->shape.indexOfPtr(v0);
-                    if (idx != -1) {
-                        size_t nextIdx = (idx + 1) % citadel->shape.length();
-                        size_t prevIdx = (idx + citadel->shape.length() - 1) % citadel->shape.length();
-                        if (citadel->shape.ptr(nextIdx) == v1 || citadel->shape.ptr(prevIdx) == v1) {
-                            bordersCitadel = true;
-                        }
-                    }
-                }
-            }
-
-            if (bordersWater || bordersCitadel) {
-                wall->segments[i] = false;
-            }
-        }
-
-        wall->buildTowers();
+        // Note: segment disabling and tower building happen in disableCoastWallSegments()
+        // which is called after buildDomains() so shoreE is available
     }
 
     // Collect gates from border (always, even if unwalled) - these are already PointPtr
@@ -681,6 +636,72 @@ void City::buildDomains() {
             }
         }
     }
+}
+
+void City::disableCoastWallSegments() {
+    // Disable wall segments that border water (COAST edges) or citadel
+    // (faithful to mfcg.js line 10830: if (d.data == Tc.COAST || d.twin.face.data == this.citadel))
+    // This must be called after buildDomains() so shoreE is populated
+    if (!wall) return;
+
+    int disabledCount = 0;
+    for (size_t i = 0; i < wall->shape.length(); ++i) {
+        const geom::Point& v0 = wall->shape[i];
+        const geom::Point& v1 = wall->shape[(i + 1) % wall->shape.length()];
+
+        // Check if this wall edge is a COAST edge (land-water boundary)
+        // shoreE contains all edges between land and water cells
+        bool isCoastEdge = false;
+        for (const auto& shore : shoreE) {
+            // Check both orientations with coordinate tolerance
+            bool matchForward = (std::abs(shore.first.x - v0.x) < 0.5 &&
+                                 std::abs(shore.first.y - v0.y) < 0.5 &&
+                                 std::abs(shore.second.x - v1.x) < 0.5 &&
+                                 std::abs(shore.second.y - v1.y) < 0.5);
+            bool matchReverse = (std::abs(shore.first.x - v1.x) < 0.5 &&
+                                 std::abs(shore.first.y - v1.y) < 0.5 &&
+                                 std::abs(shore.second.x - v0.x) < 0.5 &&
+                                 std::abs(shore.second.y - v0.y) < 0.5);
+            if (matchForward || matchReverse) {
+                isCoastEdge = true;
+                break;
+            }
+        }
+
+        // Check if this edge borders citadel (coordinate comparison)
+        bool bordersCitadel = false;
+        if (citadel) {
+            int idx0 = -1, idx1 = -1;
+            for (size_t j = 0; j < citadel->shape.length(); ++j) {
+                if (std::abs(citadel->shape[j].x - v0.x) < 0.1 &&
+                    std::abs(citadel->shape[j].y - v0.y) < 0.1) {
+                    idx0 = static_cast<int>(j);
+                }
+                if (std::abs(citadel->shape[j].x - v1.x) < 0.1 &&
+                    std::abs(citadel->shape[j].y - v1.y) < 0.1) {
+                    idx1 = static_cast<int>(j);
+                }
+            }
+            if (idx0 != -1 && idx1 != -1) {
+                int diff = std::abs(idx0 - idx1);
+                int n = static_cast<int>(citadel->shape.length());
+                if (diff == 1 || diff == n - 1) {
+                    bordersCitadel = true;
+                }
+            }
+        }
+
+        if (isCoastEdge || bordersCitadel) {
+            wall->segments[i] = false;
+            disabledCount++;
+        }
+    }
+
+    SDL_Log("City: Disabled %d wall segments (COAST edges or citadel border), shoreE has %zu edges",
+            disabledCount, shoreE.size());
+
+    // Build towers after segments are finalized
+    wall->buildTowers();
 }
 
 void City::buildStreets() {

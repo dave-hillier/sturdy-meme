@@ -126,68 +126,49 @@ void WardGroup::createGeometry() {
         return;
     }
 
-    // Faithful to mfcg.js WardGroup.createGeometry (lines 762-777)
-    // Check if area is large enough to need subdivision
-    double threshold = alleys.minSq *
-        std::pow(2.0, alleys.sizeChaos * (2.0 * utils::Random::floatVal() - 1.0)) *
-        alleys.blockSize;
+    // Use Bisector to recursively subdivide into building footprints
+    // Faithful to TownGeneratorOS Ward.createAlleys() which uses Cutter.bisect recursively
+    // to create lots until they reach minSq size.
+    //
+    // The minSq parameter controls final building size (default 100 sq units)
+    // The variance controls how much size can vary
+    double bisectorMinArea = alleys.minSq;
+    double bisectorVariance = 16.0 * alleys.gridChaos;
 
-    std::vector<std::vector<geom::Point>> blockShapes;
+    utils::Bisector bisector(available.vertexValues(), bisectorMinArea, bisectorVariance);
 
-    if (availableArea > threshold) {
-        // Use Bisector to subdivide into blocks
-        // Faithful to mfcg.js createAlleys (lines 823-844)
-        double bisectorMinArea = alleys.minSq * alleys.blockSize;
-        double bisectorVariance = 16.0 * alleys.gridChaos;
+    // Partition into building-sized lots
+    auto buildingShapes = bisector.partition();
 
-        utils::Bisector bisector(available.vertexValues(), bisectorMinArea, bisectorVariance);
+    // Store cuts as alleys
+    alleyPaths = bisector.cuts;
 
-        // Set gap callback to create alleys between blocks
-        // Note: Disabled for now because polygonIntersection with subtract=true
-        // doesn't properly compute polygon subtraction (A - B)
-        // TODO: Implement proper polygon boolean subtraction
-        // bisector.getGap = [](const std::vector<geom::Point>&) {
-        //     return 1.2;  // Alley width
-        // };
-
-        // Partition into blocks
-        blockShapes = bisector.partition();
-
-        // Store cuts as alleys
-        alleyPaths = bisector.cuts;
-    } else {
-        // Small area - single block
-        blockShapes.push_back(available.vertexValues());
-    }
-
-    // Create Block objects from shapes
-    // Shrink each block slightly to create gaps between blocks (alley effect)
-    constexpr double BLOCK_INSET = 0.6;  // Half of ALLEY width (1.2)
+    // Create Block objects - one per building footprint
+    // (In this simplified model, each "block" is actually a single building)
+    constexpr double BLOCK_INSET = 0.3;  // Small inset for gaps between buildings
 
     blocks.clear();
-    for (const auto& shape : blockShapes) {
+    for (const auto& shape : buildingShapes) {
         if (shape.size() < 3) continue;
 
-        // Shrink the block to create alley gaps
-        geom::Polygon blockPoly(shape);
-        geom::Polygon shrunkBlock = blockPoly.bufferEq(-BLOCK_INSET);
-        if (shrunkBlock.length() < 3) {
-            // Block too small to shrink, use original
-            shrunkBlock = blockPoly;
+        geom::Polygon buildingPoly(shape);
+        double buildingArea = std::abs(buildingPoly.square());
+
+        // Skip very small shapes
+        if (buildingArea < alleys.minSq / 4) continue;
+
+        // Apply small inset for visual separation
+        geom::Polygon shrunkBuilding = buildingPoly.bufferEq(-BLOCK_INSET);
+        if (shrunkBuilding.length() < 3 || std::abs(shrunkBuilding.square()) < 1.0) {
+            shrunkBuilding = buildingPoly;
         }
 
-        double blockArea = std::abs(shrunkBlock.square());
+        // Create a block with this single building shape
+        auto block = std::make_unique<Block>(shrunkBuilding, this);
 
-        // Determine if this is a small block
-        // Faithful to mfcg.js: blocks smaller than threshold are "small"
-        double smallThreshold = alleys.minSq *
-            std::pow(2.0, alleys.sizeChaos * (2.0 * utils::Random::floatVal() - 1.0));
-        bool isSmall = blockArea < smallThreshold;
-
-        auto block = std::make_unique<Block>(shrunkBlock, this);
-        block->createLots();
-        block->createRects();
-        block->createBuildings();
+        // For bisector-generated shapes, use the shape directly as the building
+        // (no further subdivision needed since bisector already created building-sized lots)
+        block->buildings.push_back(shrunkBuilding);
 
         if (!block->buildings.empty()) {
             blocks.push_back(std::move(block));
