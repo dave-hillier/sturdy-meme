@@ -632,12 +632,12 @@ public:
 
 These systems maintain `std::vector` of instances instead of using ECS:
 
-| System | Current | Should Be |
-|--------|---------|-----------|
-| `TreeSystem::treeInstances_` | `vector<TreeInstanceData>` | ECS entities with `TreeInstance` component |
-| `RockSystem::rockInstances` | `vector<RockInstance>` | ECS entities with `RockInstance` component |
-| `DetritusSystem::instances_` | `vector<DetritusInstance>` | ECS entities with `DetritusInstance` component |
-| `TreeLODSystem::visibleImpostors_` | `vector<ImpostorInstanceGPU>` | Query ECS + `TreeLODState` component |
+| System | Status | Notes |
+|--------|--------|-------|
+| `RockSystem::rockInstances` | ✅ **Migrated** | Now creates ECS entities via `EnvironmentECS::createRock()` |
+| `DetritusSystem::instances_` | ✅ **Migrated** | Now creates ECS entities via `EnvironmentECS::createDetritus()` |
+| `TreeSystem::treeInstances_` | ⏳ Pending | Complex: procedural mesh generation per-tree |
+| `TreeLODSystem::visibleImpostors_` | ⏳ Pending | Depends on TreeSystem refactoring |
 
 **Current anti-pattern:**
 ```cpp
