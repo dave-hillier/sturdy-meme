@@ -634,10 +634,12 @@ These systems maintain `std::vector` of instances instead of using ECS:
 
 | System | Status | Notes |
 |--------|--------|-------|
-| `RockSystem::rockInstances` | ✅ **Migrated** | Now creates ECS entities via `EnvironmentECS::createRock()` |
-| `DetritusSystem::instances_` | ✅ **Migrated** | Now creates ECS entities via `EnvironmentECS::createDetritus()` |
+| `RockSystem` | ✅ **Refactored** | Uses `SceneObjectCollection` composition pattern |
+| `DetritusSystem` | ✅ **Refactored** | Uses `SceneObjectCollection` composition pattern |
 | `TreeSystem::treeInstances_` | ⏳ Pending | Complex: procedural mesh generation per-tree |
 | `TreeLODSystem::visibleImpostors_` | ⏳ Pending | Depends on TreeSystem refactoring |
+
+**Note**: RockSystem and DetritusSystem were refactored to use `SceneObjectCollection` (from the scene graph refactoring) rather than direct ECS entities. This provides a clean composition pattern with unified instance management, but instances are stored in the collection rather than as individual ECS entities. This approach was chosen for performance (batch rendering) and simplicity.
 
 **Current anti-pattern:**
 ```cpp
