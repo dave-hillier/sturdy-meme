@@ -1,10 +1,5 @@
 #include "AssetRegistry.h"
 #include <SDL_log.h>
-#include <algorithm>
-
-AssetRegistry::~AssetRegistry() {
-    cleanup();
-}
 
 void AssetRegistry::init(VkDevice device, VkPhysicalDevice physicalDevice,
                          VmaAllocator allocator, VkCommandPool commandPool,
@@ -18,24 +13,6 @@ void AssetRegistry::init(VkDevice device, VkPhysicalDevice physicalDevice,
     queue_ = queue;
 
     SDL_Log("AssetRegistry initialized");
-}
-
-void AssetRegistry::cleanup() {
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    // Destroy shaders (they're not reference counted, registry owns them)
-    for (auto& [path, module] : shaderCache_) {
-        if (module) {
-            vkDestroyShaderModule(device_, module, nullptr);
-        }
-    }
-    shaderCache_.clear();
-
-    // Clear caches - textures and meshes are freed when their shared_ptrs expire
-    textureCache_.clear();
-    meshCache_.clear();
-
-    SDL_Log("AssetRegistry cleaned up");
 }
 
 // ============================================================================
@@ -253,14 +230,18 @@ std::shared_ptr<Mesh> AssetRegistry::getMesh(const std::string& name) {
 // Shader Management
 // ============================================================================
 
-vk::ShaderModule AssetRegistry::loadShader(const std::string& path) {
+std::shared_ptr<AssetRegistry::ShaderModule> AssetRegistry::loadShader(const std::string& path) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     // Check cache first
     auto it = shaderCache_.find(path);
     if (it != shaderCache_.end()) {
-        shaderCacheHits_++;
-        return it->second;
+        if (auto shader = it->second.lock()) {
+            shaderCacheHits_++;
+            return shader;
+        }
+        // Weak ptr expired, remove stale entry
+        shaderCache_.erase(it);
     }
 
     // Load shader
@@ -268,23 +249,28 @@ vk::ShaderModule AssetRegistry::loadShader(const std::string& path) {
     if (!module) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "AssetRegistry: Failed to load shader: %s", path.c_str());
-        return VK_NULL_HANDLE;
+        return nullptr;
     }
 
-    shaderCache_[path] = *module;
+    // Wrap in RAII container - destructor will call vkDestroyShaderModule
+    auto shader = std::make_shared<ShaderModule>(*module, device_);
+    shaderCache_[path] = shader;
 
     SDL_Log("AssetRegistry: Loaded shader '%s'", path.c_str());
-    return *module;
+    return shader;
 }
 
-vk::ShaderModule AssetRegistry::getShader(const std::string& path) const {
+std::shared_ptr<AssetRegistry::ShaderModule> AssetRegistry::getShader(const std::string& path) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     auto it = shaderCache_.find(path);
     if (it != shaderCache_.end()) {
-        return it->second;
+        if (auto shader = it->second.lock()) {
+            return shader;
+        }
+        shaderCache_.erase(it);
     }
-    return VK_NULL_HANDLE;
+    return nullptr;
 }
 
 // ============================================================================
@@ -302,7 +288,9 @@ AssetRegistry::Stats AssetRegistry::getStats() const {
     for (const auto& [name, wp] : meshCache_) {
         if (!wp.expired()) stats.meshCount++;
     }
-    stats.shaderCount = shaderCache_.size();
+    for (const auto& [path, wp] : shaderCache_) {
+        if (!wp.expired()) stats.shaderCount++;
+    }
     stats.textureCacheHits = textureCacheHits_;
     stats.shaderCacheHits = shaderCacheHits_;
     return stats;
@@ -326,6 +314,16 @@ void AssetRegistry::pruneExpiredEntries() {
         if (it->second.expired()) {
             SDL_Log("AssetRegistry: Pruned expired mesh '%s'", it->first.c_str());
             it = meshCache_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Remove expired shader entries
+    for (auto it = shaderCache_.begin(); it != shaderCache_.end();) {
+        if (it->second.expired()) {
+            SDL_Log("AssetRegistry: Pruned expired shader '%s'", it->first.c_str());
+            it = shaderCache_.erase(it);
         } else {
             ++it;
         }

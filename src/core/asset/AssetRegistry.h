@@ -11,33 +11,66 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
-#include <vector>
-#include <optional>
 #include <mutex>
 
 /**
- * AssetRegistry - Centralized asset management with deduplication and caching
+ * AssetRegistry - Centralized asset management with deduplication and RAII
  *
- * The AssetRegistry provides:
- * - Path-based deduplication: Loading the same path twice returns the same shared_ptr
- * - Shared ownership: Assets use std::shared_ptr for automatic lifetime management
- * - Thread-safe loading: Mutex-protected for async loading compatibility
+ * All resources are managed via shared_ptr with automatic cleanup:
+ * - Textures and meshes use shared_ptr (freed when last reference released)
+ * - Shaders use shared_ptr with custom deleter (vkDestroyShaderModule)
+ * - Caches use weak_ptr for deduplication without preventing cleanup
  *
  * Usage:
  *   AssetRegistry registry;
- *   registry.init(initContext);
+ *   registry.init(device, physicalDevice, allocator, commandPool, queue);
  *
  *   // Load texture (second call returns cached shared_ptr)
  *   auto tex = registry.loadTexture("assets/textures/brick.png");
  *   auto tex2 = registry.loadTexture("assets/textures/brick.png"); // Same shared_ptr
  *
- *   // Use the texture
- *   VkImageView view = tex->getImageView();
- *
- *   // Texture is automatically freed when all shared_ptrs are released
+ *   // Resources automatically freed when all shared_ptrs are released
  */
 class AssetRegistry {
 public:
+    // RAII wrapper for VkShaderModule
+    struct ShaderModule {
+        vk::ShaderModule module;
+        VkDevice device;
+
+        ShaderModule(vk::ShaderModule m, VkDevice d) : module(m), device(d) {}
+        ~ShaderModule() {
+            if (module && device) {
+                vkDestroyShaderModule(device, module, nullptr);
+            }
+        }
+
+        // Non-copyable
+        ShaderModule(const ShaderModule&) = delete;
+        ShaderModule& operator=(const ShaderModule&) = delete;
+
+        // Movable
+        ShaderModule(ShaderModule&& other) noexcept
+            : module(other.module), device(other.device) {
+            other.module = VK_NULL_HANDLE;
+            other.device = VK_NULL_HANDLE;
+        }
+        ShaderModule& operator=(ShaderModule&& other) noexcept {
+            if (this != &other) {
+                if (module && device) {
+                    vkDestroyShaderModule(device, module, nullptr);
+                }
+                module = other.module;
+                device = other.device;
+                other.module = VK_NULL_HANDLE;
+                other.device = VK_NULL_HANDLE;
+            }
+            return *this;
+        }
+
+        operator vk::ShaderModule() const { return module; }
+    };
+
     // Configuration for texture loading
     struct TextureLoadConfig {
         bool useSRGB = true;
@@ -82,9 +115,9 @@ public:
     };
 
     AssetRegistry() = default;
-    ~AssetRegistry();
+    ~AssetRegistry() = default;  // RAII: all cleanup is automatic
 
-    // Non-copyable, non-movable (owns GPU resources)
+    // Non-copyable, non-movable
     AssetRegistry(const AssetRegistry&) = delete;
     AssetRegistry& operator=(const AssetRegistry&) = delete;
     AssetRegistry(AssetRegistry&&) = delete;
@@ -98,12 +131,6 @@ public:
               VmaAllocator allocator, VkCommandPool commandPool,
               VkQueue queue);
 
-    /**
-     * Cleanup all loaded assets.
-     * Call before destroying Vulkan context.
-     */
-    void cleanup();
-
     // ========================================================================
     // Texture Management
     // ========================================================================
@@ -116,7 +143,7 @@ public:
                                          const TextureLoadConfig& config = {});
 
     /**
-     * Create a solid color texture (not path-cached).
+     * Create a solid color texture.
      */
     std::shared_ptr<Texture> createSolidColorTexture(uint8_t r, uint8_t g,
                                                       uint8_t b, uint8_t a,
@@ -165,16 +192,17 @@ public:
 
     /**
      * Load a shader module from file with caching.
+     * Returns shared_ptr to RAII wrapper - shader destroyed when last ref released.
      */
-    vk::ShaderModule loadShader(const std::string& path);
+    std::shared_ptr<ShaderModule> loadShader(const std::string& path);
 
     /**
-     * Get shader module by path. Returns VK_NULL_HANDLE if not found.
+     * Get shader by path. Returns nullptr if not found or expired.
      */
-    vk::ShaderModule getShader(const std::string& path) const;
+    std::shared_ptr<ShaderModule> getShader(const std::string& path);
 
     // ========================================================================
-    // Statistics and Debugging
+    // Statistics
     // ========================================================================
 
     struct Stats {
@@ -189,7 +217,7 @@ public:
 
     /**
      * Remove expired weak references from caches.
-     * Call periodically to free memory from caches pointing to destroyed assets.
+     * Call periodically to free memory from stale cache entries.
      */
     void pruneExpiredEntries();
 
@@ -201,10 +229,10 @@ private:
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkQueue queue_ = VK_NULL_HANDLE;
 
-    // Asset caches - use weak_ptr to allow automatic cleanup when not referenced
+    // Asset caches - weak_ptr for deduplication without preventing cleanup
     std::unordered_map<std::string, std::weak_ptr<Texture>> textureCache_;
     std::unordered_map<std::string, std::weak_ptr<Mesh>> meshCache_;
-    std::unordered_map<std::string, vk::ShaderModule> shaderCache_;
+    std::unordered_map<std::string, std::weak_ptr<ShaderModule>> shaderCache_;
 
     // Statistics
     mutable size_t textureCacheHits_ = 0;
