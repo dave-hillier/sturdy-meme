@@ -6,8 +6,8 @@
 #include <unordered_map>
 #include <array>
 #include <optional>
-#include <mutex>
 #include <atomic>
+#include <cstdint>
 
 /**
  * GPU Profiler using Vulkan timestamp queries.
@@ -111,9 +111,11 @@ private:
 
     static constexpr uint32_t QUERIES_PER_ZONE = 2;  // Start + end timestamp
 
-    struct ZoneInfo {
-        uint32_t startQueryIndex;
-        uint32_t endQueryIndex;
+    // Lock-free zone recording slot
+    struct ZoneSlot {
+        std::atomic<uint32_t> startQueryIndex{UINT32_MAX};  // UINT32_MAX = unused
+        std::atomic<uint32_t> endQueryIndex{UINT32_MAX};
+        const char* name = nullptr;  // Set atomically with startQueryIndex
     };
 
     VkDevice device = VK_NULL_HANDLE;
@@ -124,16 +126,15 @@ private:
     uint32_t framesInFlight = 0;
     bool enabled = true;
 
-    // Current frame state
+    // Current frame state - lock-free zone tracking
     std::atomic<uint32_t> currentQueryIndex{0};
+    std::atomic<uint32_t> currentZoneSlot{0};  // Next available slot in zoneSlots_
     uint32_t currentFrameIndex = 0;
-    std::unordered_map<std::string, ZoneInfo> activeZones;
-    std::vector<std::string> currentFrameZoneOrder;
-    mutable std::mutex zoneMutex_;  // Protects activeZones and currentFrameZoneOrder for thread-safe zone tracking
+    std::vector<ZoneSlot> zoneSlots_;  // Pre-allocated, indexed by currentZoneSlot
 
     // Per-frame data for result collection
     std::unordered_map<uint32_t, uint32_t> frameQueryCounts;
-    std::unordered_map<uint32_t, std::vector<std::string>> frameZoneOrders;
+    std::unordered_map<uint32_t, uint32_t> frameZoneCounts;  // Number of zones recorded per frame
 
     // Results from previous frame
     FrameStats lastFrameStats;
