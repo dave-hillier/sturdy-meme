@@ -4,7 +4,7 @@
 #include "VmaResources.h"
 #include "core/ImageBuilder.h"
 #include "shaders/bindings.h"
-#include <SDL_log.h>
+#include <SDL3/SDL_log.h>
 #include <cmath>
 #include <array>
 #include <vulkan/vulkan.hpp>

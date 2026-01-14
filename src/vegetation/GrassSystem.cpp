@@ -227,15 +227,19 @@ bool GrassSystem::createDisplacementResources() {
     // Create displacement texture (RG16F, using unified constant for size)
     {
         ManagedImage image;
+        VkImageView rawView = VK_NULL_HANDLE;
         if (!ImageBuilder(getAllocator())
                 .setExtent(GrassConstants::DISPLACEMENT_TEXTURE_SIZE, GrassConstants::DISPLACEMENT_TEXTURE_SIZE)
                 .setFormat(VK_FORMAT_R16G16_SFLOAT)
                 .setUsage(VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
-                .build(getDevice(), image, displacementImageView_)) {
+                .build(static_cast<VkDevice>(getDevice()), image, rawView)) {
             SDL_Log("Failed to create displacement image");
             return false;
         }
-        image.releaseToRaw(displacementImage_, displacementAllocation_);
+        displacementImageView_ = rawView;
+        VkImage rawImage = VK_NULL_HANDLE;
+        image.releaseToRaw(rawImage, displacementAllocation_);
+        displacementImage_ = rawImage;
     }
 
     // Create sampler for grass compute shader to sample displacement
