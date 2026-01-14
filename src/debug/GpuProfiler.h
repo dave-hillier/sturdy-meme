@@ -8,6 +8,7 @@
 #include <optional>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 
 /**
  * GPU Profiler using Vulkan timestamp queries.
@@ -130,7 +131,7 @@ private:
     std::atomic<uint32_t> currentQueryIndex{0};
     std::atomic<uint32_t> currentZoneSlot{0};  // Next available slot in zoneSlots_
     uint32_t currentFrameIndex = 0;
-    std::vector<ZoneSlot> zoneSlots_;  // Pre-allocated, indexed by currentZoneSlot
+    std::unique_ptr<ZoneSlot[]> zoneSlots_;  // Pre-allocated, indexed by currentZoneSlot
 
     // Per-frame data for result collection
     std::unordered_map<uint32_t, uint32_t> frameQueryCounts;

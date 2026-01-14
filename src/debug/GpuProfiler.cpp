@@ -117,7 +117,7 @@ bool GpuProfiler::initInternal(VkDevice dev, VkPhysicalDevice physicalDevice,
     }
 
     // Pre-allocate zone slots for lock-free recording
-    zoneSlots_.resize(maxZones);
+    zoneSlots_ = std::make_unique<ZoneSlot[]>(maxZones);
 
     SDL_Log("GPU Profiler initialized: %d zones max, %d frames in flight", maxZones, framesInFlight);
     return true;
@@ -133,7 +133,7 @@ void GpuProfiler::cleanup() {
         }
     }
     queryPools.clear();
-    zoneSlots_.clear();
+    zoneSlots_.reset();
     device = VK_NULL_HANDLE;
 }
 
@@ -148,10 +148,10 @@ void GpuProfiler::beginFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
     currentZoneSlot.store(0, std::memory_order_relaxed);
 
     // Reset zone slots (mark as unused)
-    for (auto& slot : zoneSlots_) {
-        slot.startQueryIndex.store(UINT32_MAX, std::memory_order_relaxed);
-        slot.endQueryIndex.store(UINT32_MAX, std::memory_order_relaxed);
-        slot.name = nullptr;
+    for (uint32_t i = 0; i < maxZones; ++i) {
+        zoneSlots_[i].startQueryIndex.store(UINT32_MAX, std::memory_order_relaxed);
+        zoneSlots_[i].endQueryIndex.store(UINT32_MAX, std::memory_order_relaxed);
+        zoneSlots_[i].name = nullptr;
     }
 
     currentFrameIndex = frameIndex;
