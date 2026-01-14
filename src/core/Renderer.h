@@ -270,7 +270,6 @@ private:
     // Build render resources snapshot for pipeline stages
     RenderResources buildRenderResources(uint32_t swapchainImageIndex) const;
 
-    SDL_Window* window = nullptr;
     std::string resourcePath;
     Config config_;  // Renderer configuration
 

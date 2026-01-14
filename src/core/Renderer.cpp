@@ -92,7 +92,6 @@ Renderer::~Renderer() {
 bool Renderer::initInternal(const InitInfo& info) {
     INIT_PROFILE_PHASE("Renderer");
 
-    window = info.window;
     resourcePath = info.resourcePath;
     config_ = info.config;
 
@@ -110,14 +109,14 @@ bool Renderer::initInternal(const InitInfo& info) {
             // Only call initDevice if device isn't already initialized
             // (LoadingRenderer may have already completed device init)
             if (!vulkanContext_->isDeviceReady()) {
-                if (!vulkanContext_->initDevice(window)) {
+                if (!vulkanContext_->initDevice(info.window)) {
                     SDL_Log("Failed to complete Vulkan device initialization");
                     return false;
                 }
             }
         } else {
             vulkanContext_ = std::make_unique<VulkanContext>();
-            if (!vulkanContext_->init(window)) {
+            if (!vulkanContext_->init(info.window)) {
                 SDL_Log("Failed to initialize Vulkan context");
                 return false;
             }
