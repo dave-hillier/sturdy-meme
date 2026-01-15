@@ -12,6 +12,9 @@
 
 class BloomSystem {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     // Legacy InitInfo - kept for backward compatibility during migration
     struct InitInfo {
         VkDevice device;
@@ -49,9 +52,9 @@ public:
     void setIntensity(float i) { intensity = i; }
     float getIntensity() const { return intensity; }
 
-private:
-    BloomSystem() = default;  // Private: use factory
+    explicit BloomSystem(ConstructToken) {}
 
+private:
     bool initInternal(const InitInfo& info);
     void cleanup();
 

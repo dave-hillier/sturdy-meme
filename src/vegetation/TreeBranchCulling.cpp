@@ -9,7 +9,7 @@
 #include <cstring>
 
 std::unique_ptr<TreeBranchCulling> TreeBranchCulling::create(const InitInfo& info) {
-    auto culling = std::unique_ptr<TreeBranchCulling>(new TreeBranchCulling());
+    auto culling = std::make_unique<TreeBranchCulling>(ConstructToken{});
     if (!culling->init(info)) {
         return nullptr;
     }

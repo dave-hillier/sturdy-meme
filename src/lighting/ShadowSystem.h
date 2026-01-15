@@ -28,6 +28,9 @@ struct ShadowPushConstants {
 
 class ShadowSystem {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     // Configuration for shadow system initialization
     struct InitInfo {
         VkDevice device;
@@ -111,9 +114,9 @@ public:
                               const DrawCallback& skinnedDrawCallback,
                               const std::vector<Light>& visibleLights);
 
-private:
-    ShadowSystem() = default;  // Private: use factory
+    explicit ShadowSystem(ConstructToken) {}
 
+private:
     bool initInternal(const InitInfo& info);
     void cleanup();
 

@@ -11,7 +11,7 @@
 #include <numeric>
 
 std::unique_ptr<TreeLeafCulling> TreeLeafCulling::create(const InitInfo& info) {
-    auto culling = std::unique_ptr<TreeLeafCulling>(new TreeLeafCulling());
+    auto culling = std::make_unique<TreeLeafCulling>(ConstructToken{});
     if (!culling->init(info)) {
         return nullptr;
     }

@@ -15,7 +15,7 @@
 #include <vulkan/vulkan.hpp>
 
 std::unique_ptr<TreeImpostorAtlas> TreeImpostorAtlas::create(const InitInfo& info) {
-    auto atlas = std::unique_ptr<TreeImpostorAtlas>(new TreeImpostorAtlas());
+    auto atlas = std::make_unique<TreeImpostorAtlas>(ConstructToken{});
     if (!atlas->initInternal(info)) {
         return nullptr;
     }

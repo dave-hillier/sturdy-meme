@@ -12,7 +12,7 @@
 #include <algorithm>
 
 std::unique_ptr<HiZSystem> HiZSystem::create(const InitInfo& info) {
-    auto system = std::unique_ptr<HiZSystem>(new HiZSystem());
+    auto system = std::make_unique<HiZSystem>(ConstructToken{});
     if (!system->initInternal(info)) {
         return nullptr;
     }

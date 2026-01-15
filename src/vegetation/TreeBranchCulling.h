@@ -64,6 +64,9 @@ static_assert(sizeof(BranchMeshGroupGPU) == 32, "BranchMeshGroupGPU must be 32 b
 // Reduces per-tree draw calls to per-archetype indirect draws
 class TreeBranchCulling {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     struct InitInfo {
         VkDevice device;
         VkPhysicalDevice physicalDevice;
@@ -116,8 +119,9 @@ public:
 
     VkDevice getDevice() const { return device_; }
 
+    explicit TreeBranchCulling(ConstructToken) {}
+
 private:
-    TreeBranchCulling() = default;
     bool init(const InitInfo& info);
 
     bool createCullPipeline();

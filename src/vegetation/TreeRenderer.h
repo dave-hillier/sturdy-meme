@@ -53,6 +53,9 @@ struct TreeBranchShadowInstancedPushConstants {
 
 class TreeRenderer {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     struct InitInfo {
         const vk::raii::Device* raiiDevice = nullptr;
         vk::Device device;
@@ -176,8 +179,9 @@ public:
 
     vk::Device getDevice() const { return device_; }
 
+    explicit TreeRenderer(ConstructToken) {}
+
 private:
-    TreeRenderer() = default;
     bool initInternal(const InitInfo& info);
     bool createPipelines(const InitInfo& info);
     bool createDescriptorSetLayout();

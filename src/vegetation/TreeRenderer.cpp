@@ -10,7 +10,7 @@
 #include <algorithm>
 
 std::unique_ptr<TreeRenderer> TreeRenderer::create(const InitInfo& info) {
-    auto renderer = std::unique_ptr<TreeRenderer>(new TreeRenderer());
+    auto renderer = std::make_unique<TreeRenderer>(ConstructToken{});
     if (!renderer->initInternal(info)) {
         return nullptr;
     }

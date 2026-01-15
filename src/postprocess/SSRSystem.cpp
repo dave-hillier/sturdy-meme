@@ -12,7 +12,7 @@
 #include <cstring>
 
 std::unique_ptr<SSRSystem> SSRSystem::create(const InitInfo& info) {
-    auto system = std::unique_ptr<SSRSystem>(new SSRSystem());
+    auto system = std::make_unique<SSRSystem>(ConstructToken{});
     if (!system->initInternal(info)) {
         return nullptr;
     }

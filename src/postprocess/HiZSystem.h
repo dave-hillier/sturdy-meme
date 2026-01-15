@@ -64,6 +64,9 @@ struct HiZPyramidPushConstants {
 // Generates a depth pyramid from the depth buffer and uses it to cull objects
 class HiZSystem {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     struct InitInfo {
         VkDevice device;
         VmaAllocator allocator;
@@ -141,9 +144,9 @@ public:
     };
     CullingStats getStats() const { return stats; }
 
-private:
-    HiZSystem() = default;  // Private: use factory
+    explicit HiZSystem(ConstructToken) {}
 
+private:
     bool initInternal(const InitInfo& info);
     void cleanup();
 

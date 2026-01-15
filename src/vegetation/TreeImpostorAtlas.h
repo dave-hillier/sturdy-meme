@@ -16,6 +16,9 @@
 
 class TreeImpostorAtlas {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     struct InitInfo {
         const vk::raii::Device* raiiDevice;  // vulkan-hpp RAII device
         VkDevice device;
@@ -69,8 +72,9 @@ public:
     VkDescriptorSet getPreviewDescriptorSet(uint32_t archetypeIndex);
     VkDescriptorSet getNormalPreviewDescriptorSet(uint32_t archetypeIndex);
 
+    explicit TreeImpostorAtlas(ConstructToken) {}
+
 private:
-    TreeImpostorAtlas() = default;
     bool initInternal(const InitInfo& info);
 
     // Pipeline and resource creation (implemented in TreeImpostorAtlasCapture.cpp)

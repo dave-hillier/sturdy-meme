@@ -45,6 +45,9 @@ struct SortedTreeEntry {
  */
 class TreeSpatialIndex {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     struct InitInfo {
         VkDevice device;
         VmaAllocator allocator;
@@ -116,8 +119,9 @@ public:
                !sortedTreeBuffers_.empty() && sortedTreeBuffers_[0] != VK_NULL_HANDLE;
     }
 
+    explicit TreeSpatialIndex(ConstructToken) {}
+
 private:
-    TreeSpatialIndex() = default;
     bool initInternal(const InitInfo& info);
     void cleanup();
 

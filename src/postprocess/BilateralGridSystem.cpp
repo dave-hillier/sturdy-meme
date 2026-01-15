@@ -31,7 +31,7 @@ struct BilateralBlurUniforms {
 };
 
 std::unique_ptr<BilateralGridSystem> BilateralGridSystem::create(const InitInfo& info) {
-    auto system = std::unique_ptr<BilateralGridSystem>(new BilateralGridSystem());
+    auto system = std::make_unique<BilateralGridSystem>(ConstructToken{});
     if (!system->initInternal(info)) {
         return nullptr;
     }
