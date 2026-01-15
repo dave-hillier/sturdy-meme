@@ -669,15 +669,17 @@ bool Renderer::createRenderPass() {
 
 bool Renderer::createDepthResources() {
     DepthResources depth;
+    vk::Extent2D extent{vulkanContext_->getVkSwapchainExtent().width,
+                        vulkanContext_->getVkSwapchainExtent().height};
     if (!::createDepthResources(
-            vulkanContext_->getVkDevice(), vulkanContext_->getAllocator(),
-            vulkanContext_->getVkSwapchainExtent(), depthFormat, depth)) {
+            vulkanContext_->getRaiiDevice(), vulkanContext_->getAllocator(),
+            extent, static_cast<vk::Format>(depthFormat), depth)) {
         return false;
     }
-    depthImage_ = ManagedImage::fromRaw(vulkanContext_->getAllocator(), depth.image, depth.allocation);
-    depthImageView_.emplace(vulkanContext_->getRaiiDevice(), depth.view);
-    // Wrap raw sampler in vk::raii::Sampler (takes ownership)
-    depthSampler_.emplace(vulkanContext_->getRaiiDevice(), depth.sampler);
+    // Move RAII resources from temporary DepthResources to member fields
+    depthImage_ = std::move(depth.image);
+    depthImageView_ = std::move(depth.view);
+    depthSampler_ = std::move(depth.sampler);
     return true;
 }
 
@@ -1567,19 +1569,19 @@ void Renderer::destroyFramebuffers() {
 bool Renderer::recreateDepthResources(VkExtent2D newExtent) {
     destroyDepthImageAndView();
 
-    VkImage rawImage = VK_NULL_HANDLE;
-    VmaAllocation rawAllocation = VK_NULL_HANDLE;
-    VkImageView rawView = VK_NULL_HANDLE;
+    vk::Extent2D extent{newExtent.width, newExtent.height};
+    VmaImage newImage;
+    std::optional<vk::raii::ImageView> newView;
 
     if (!::createDepthImageAndView(
-        vulkanContext_->getVkDevice(), vulkanContext_->getAllocator(),
-        newExtent, depthFormat,
-        rawImage, rawAllocation, rawView)) {
+        vulkanContext_->getRaiiDevice(), vulkanContext_->getAllocator(),
+        extent, static_cast<vk::Format>(depthFormat),
+        newImage, newView)) {
         return false;
     }
 
-    depthImage_ = ManagedImage::fromRaw(vulkanContext_->getAllocator(), rawImage, rawAllocation);
-    depthImageView_.emplace(vulkanContext_->getRaiiDevice(), rawView);
+    depthImage_ = std::move(newImage);
+    depthImageView_ = std::move(newView);
     return true;
 }
 
