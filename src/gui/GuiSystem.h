@@ -17,6 +17,9 @@ class Camera;
 
 class GuiSystem {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     /**
      * Factory: Create and initialize GUI system.
      * Returns nullptr on failure.
@@ -53,8 +56,9 @@ public:
     PlayerSettings& getPlayerSettings() { return playerSettings; }
     const PlayerSettings& getPlayerSettings() const { return playerSettings; }
 
+    explicit GuiSystem(ConstructToken) {}
+
 private:
-    GuiSystem();  // Private: use factory
     bool initInternal(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice,
                       VkDevice device, uint32_t graphicsQueueFamily, VkQueue graphicsQueue,
                       VkRenderPass renderPass, uint32_t imageCount);

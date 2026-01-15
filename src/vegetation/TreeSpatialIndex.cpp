@@ -6,7 +6,7 @@
 #include <cmath>
 
 std::unique_ptr<TreeSpatialIndex> TreeSpatialIndex::create(const InitInfo& info) {
-    auto index = std::unique_ptr<TreeSpatialIndex>(new TreeSpatialIndex());
+    auto index = std::make_unique<TreeSpatialIndex>(ConstructToken{});
     if (!index->initInternal(info)) {
         return nullptr;
     }

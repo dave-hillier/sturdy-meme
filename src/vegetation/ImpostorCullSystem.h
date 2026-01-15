@@ -68,6 +68,9 @@ struct ImpostorOutputData {
  */
 class ImpostorCullSystem {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     struct InitInfo {
         const vk::raii::Device* raiiDevice = nullptr;
         VkDevice device;
@@ -174,8 +177,9 @@ public:
     // Initialize static descriptor set bindings (call once after buffers are created)
     void initializeDescriptorSets();
 
+    explicit ImpostorCullSystem(ConstructToken) {}
+
 private:
-    ImpostorCullSystem() = default;
     bool initInternal(const InitInfo& info);
     void cleanup();
 

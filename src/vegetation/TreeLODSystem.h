@@ -44,6 +44,9 @@ struct ImpostorInstanceGPU {
 
 class TreeLODSystem {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     struct InitInfo {
         const vk::raii::Device* raiiDevice;  // vulkan-hpp RAII device
         VkDevice device;
@@ -162,8 +165,9 @@ public:
     };
     const DebugInfo& getDebugInfo() const { return debugInfo_; }
 
+    explicit TreeLODSystem(ConstructToken) {}
+
 private:
-    TreeLODSystem() = default;
     bool initInternal(const InitInfo& info);
     bool createPipeline();
     bool createShadowPipeline();

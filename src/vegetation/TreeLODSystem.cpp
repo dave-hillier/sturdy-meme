@@ -15,7 +15,7 @@
 #include <limits>
 
 std::unique_ptr<TreeLODSystem> TreeLODSystem::create(const InitInfo& info) {
-    auto system = std::unique_ptr<TreeLODSystem>(new TreeLODSystem());
+    auto system = std::make_unique<TreeLODSystem>(ConstructToken{});
     if (!system->initInternal(info)) {
         return nullptr;
     }

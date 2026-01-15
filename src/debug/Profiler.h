@@ -20,6 +20,9 @@
  */
 class Profiler : public IProfilerControl {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     /**
      * Factory: Create a profiler instance.
      * Always returns valid profiler - GPU may be disabled if init fails,
@@ -27,7 +30,7 @@ public:
      */
     static std::unique_ptr<Profiler> create(VkDevice device, VkPhysicalDevice physicalDevice,
                                              uint32_t framesInFlight) {
-        auto profiler = std::unique_ptr<Profiler>(new Profiler());
+        auto profiler = std::make_unique<Profiler>(ConstructToken{});
         auto gpu = GpuProfiler::create(device, physicalDevice, framesInFlight);
         if (gpu) {
             profiler->gpuProfiler_ = std::move(*gpu);
@@ -35,6 +38,8 @@ public:
         // CPU profiling always works, so we return valid profiler even if GPU fails
         return profiler;
     }
+
+    explicit Profiler(ConstructToken) {}
 
     ~Profiler() {
         gpuProfiler_.reset();
@@ -334,8 +339,6 @@ public:
     const FlamegraphCapture& getInitFlamegraph() const { return initFlamegraph_; }
 
 private:
-    Profiler() = default;  // Private: use factory
-
     std::optional<GpuProfiler> gpuProfiler_;
     CpuProfiler cpuProfiler;
 

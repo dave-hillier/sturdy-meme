@@ -30,6 +30,9 @@
 
 class SSRSystem {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     struct InitInfo {
         VkDevice device;
         VkPhysicalDevice physicalDevice;
@@ -118,9 +121,9 @@ public:
     bool isBlurEnabled() const { return blurEnabled; }
     float getBlurRadius() const { return blurRadius; }
 
-private:
-    SSRSystem() = default;  // Private: use factory
+    explicit SSRSystem(ConstructToken) {}
 
+private:
     bool initInternal(const InitInfo& info);
     void cleanup();
 

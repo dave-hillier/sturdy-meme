@@ -12,7 +12,7 @@
 #include <SDL3/SDL.h>
 
 std::unique_ptr<BloomSystem> BloomSystem::create(const InitInfo& info) {
-    auto system = std::unique_ptr<BloomSystem>(new BloomSystem());
+    auto system = std::make_unique<BloomSystem>(ConstructToken{});
     if (!system->initInternal(info)) {
         return nullptr;
     }

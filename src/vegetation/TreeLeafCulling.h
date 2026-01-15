@@ -132,6 +132,9 @@ struct TreeRenderDataGPU {
 // Encapsulates all tree leaf culling compute pipelines and buffers
 class TreeLeafCulling {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     struct InitInfo {
         const vk::raii::Device* raiiDevice = nullptr;
         VkDevice device;
@@ -200,8 +203,9 @@ public:
 
     VkDevice getDevice() const { return device_; }
 
+    explicit TreeLeafCulling(ConstructToken) {}
+
 private:
-    TreeLeafCulling() = default;
     bool init(const InitInfo& info);
 
     bool createLeafCullPipeline();

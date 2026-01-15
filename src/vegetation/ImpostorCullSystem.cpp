@@ -11,7 +11,7 @@
 #include <cstring>
 
 std::unique_ptr<ImpostorCullSystem> ImpostorCullSystem::create(const InitInfo& info) {
-    auto system = std::unique_ptr<ImpostorCullSystem>(new ImpostorCullSystem());
+    auto system = std::make_unique<ImpostorCullSystem>(ConstructToken{});
     if (!system->initInternal(info)) {
         return nullptr;
     }

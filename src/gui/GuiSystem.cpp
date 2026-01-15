@@ -53,15 +53,12 @@ static void checkVkResult(VkResult err) {
     }
 }
 
-// Private constructor
-GuiSystem::GuiSystem() = default;
-
 // Factory
 std::unique_ptr<GuiSystem> GuiSystem::create(SDL_Window* window, VkInstance instance,
                                               VkPhysicalDevice physicalDevice, VkDevice device,
                                               uint32_t graphicsQueueFamily, VkQueue graphicsQueue,
                                               VkRenderPass renderPass, uint32_t imageCount) {
-    auto gui = std::unique_ptr<GuiSystem>(new GuiSystem());
+    auto gui = std::make_unique<GuiSystem>(ConstructToken{});
     if (!gui->initInternal(window, instance, physicalDevice, device, graphicsQueueFamily,
                            graphicsQueue, renderPass, imageCount)) {
         return nullptr;

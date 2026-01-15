@@ -25,18 +25,23 @@
  */
 class GlobalBufferManager {
 public:
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+
     /**
      * Factory: Create and initialize buffer manager.
      * Returns nullptr on failure.
      */
     static std::unique_ptr<GlobalBufferManager> create(VmaAllocator allocator, VkPhysicalDevice physicalDevice,
                                                         uint32_t frameCount, uint32_t maxBones = 128) {
-        auto manager = std::unique_ptr<GlobalBufferManager>(new GlobalBufferManager());
+        auto manager = std::make_unique<GlobalBufferManager>(ConstructToken{});
         if (!manager->initInternal(allocator, physicalDevice, frameCount, maxBones)) {
             return nullptr;
         }
         return manager;
     }
+
+    explicit GlobalBufferManager(ConstructToken) {}
 
     ~GlobalBufferManager() {
         cleanup();
@@ -64,8 +69,6 @@ public:
     uint32_t getMaxBoneMatrices() const { return maxBoneMatrices_; }
 
 private:
-    GlobalBufferManager() = default;
-
     bool initInternal(VmaAllocator allocator, VkPhysicalDevice physicalDevice,
                       uint32_t frameCount, uint32_t maxBones) {
         allocator_ = allocator;
