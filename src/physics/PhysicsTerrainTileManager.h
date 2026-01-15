@@ -4,6 +4,8 @@
 #include <unordered_map>
 #include <vector>
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include "PhysicsSystem.h"
 
 class TerrainTileCache;
@@ -56,8 +58,8 @@ private:
     };
     std::vector<TileRequest> calculateRequiredTiles(const glm::vec3& position) const;
 
-    PhysicsWorld* physics_ = nullptr;
-    TerrainTileCache* tileCache_ = nullptr;
+    std::optional<std::reference_wrapper<PhysicsWorld>> physics_;
+    std::optional<std::reference_wrapper<TerrainTileCache>> tileCache_;
     Config config_;
 
     std::unordered_map<uint64_t, PhysicsTileEntry> loadedTiles_;

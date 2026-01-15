@@ -21,7 +21,6 @@ AsyncStartupLoader::~AsyncStartupLoader() {
 }
 
 bool AsyncStartupLoader::init(const InitInfo& info) {
-    vulkanContext_ = info.vulkanContext;
     loadingRenderer_ = info.loadingRenderer;
     resourcePath_ = info.resourcePath;
 

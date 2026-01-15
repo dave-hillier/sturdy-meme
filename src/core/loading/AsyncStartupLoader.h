@@ -121,7 +121,6 @@ private:
     // Helper to build full path
     std::string buildPath(const std::string& relativePath) const;
 
-    VulkanContext* vulkanContext_ = nullptr;
     LoadingRenderer* loadingRenderer_ = nullptr;
     std::string resourcePath_;
 
