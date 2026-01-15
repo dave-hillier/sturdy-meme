@@ -116,8 +116,11 @@ bool GpuProfiler::initInternal(VkDevice dev, VkPhysicalDevice physicalDevice,
         }
     }
 
-    // Pre-allocate zone slots for lock-free recording
-    zoneSlots_ = std::make_unique<ZoneSlot[]>(maxZones);
+    // Pre-allocate zone slots for lock-free recording (one array per frame in flight)
+    zoneSlots_.resize(framesInFlight);
+    for (uint32_t i = 0; i < framesInFlight; ++i) {
+        zoneSlots_[i] = std::make_unique<ZoneSlot[]>(maxZones);
+    }
 
     SDL_Log("GPU Profiler initialized: %d zones max, %d frames in flight", maxZones, framesInFlight);
     return true;
@@ -133,7 +136,7 @@ void GpuProfiler::cleanup() {
         }
     }
     queryPools.clear();
-    zoneSlots_.reset();
+    zoneSlots_.clear();
     device = VK_NULL_HANDLE;
 }
 
@@ -147,14 +150,15 @@ void GpuProfiler::beginFrame(VkCommandBuffer cmd, uint32_t frameIndex) {
     currentQueryIndex.store(0, std::memory_order_relaxed);
     currentZoneSlot.store(0, std::memory_order_relaxed);
 
-    // Reset zone slots (mark as unused)
-    for (uint32_t i = 0; i < maxZones; ++i) {
-        zoneSlots_[i].startQueryIndex.store(UINT32_MAX, std::memory_order_relaxed);
-        zoneSlots_[i].endQueryIndex.store(UINT32_MAX, std::memory_order_relaxed);
-        zoneSlots_[i].name = nullptr;
-    }
-
     currentFrameIndex = frameIndex;
+
+    // Reset zone slots for this frame (mark as unused)
+    ZoneSlot* slots = zoneSlots_[frameIndex].get();
+    for (uint32_t i = 0; i < maxZones; ++i) {
+        slots[i].startQueryIndex.store(UINT32_MAX, std::memory_order_relaxed);
+        slots[i].endQueryIndex.store(UINT32_MAX, std::memory_order_relaxed);
+        slots[i].name = nullptr;
+    }
 
     vk::CommandBuffer vkCmd(cmd);
 
@@ -194,7 +198,7 @@ void GpuProfiler::beginZone(VkCommandBuffer cmd, const char* zoneName) {
     uint32_t queryIdx = currentQueryIndex.fetch_add(1, std::memory_order_relaxed);
 
     // Store zone info - the slot is exclusively ours after fetch_add
-    ZoneSlot& slot = zoneSlots_[slotIdx];
+    ZoneSlot& slot = zoneSlots_[currentFrameIndex][slotIdx];
     slot.name = zoneName;
     slot.startQueryIndex.store(queryIdx, std::memory_order_release);  // Release so endZone sees name
 
@@ -211,10 +215,11 @@ void GpuProfiler::endZone(VkCommandBuffer cmd, const char* zoneName) {
     // Find the zone slot by name - lock-free linear scan
     // This is O(n) but n is small (typically < 20 zones per frame)
     uint32_t numSlots = currentZoneSlot.load(std::memory_order_acquire);
+    ZoneSlot* frameSlots = zoneSlots_[currentFrameIndex].get();
     ZoneSlot* foundSlot = nullptr;
 
     for (uint32_t i = 0; i < numSlots && i < maxZones; ++i) {
-        ZoneSlot& slot = zoneSlots_[i];
+        ZoneSlot& slot = frameSlots[i];
         // Check if slot is initialized and name matches
         if (slot.startQueryIndex.load(std::memory_order_acquire) != UINT32_MAX &&
             slot.name != nullptr &&
@@ -285,9 +290,10 @@ void GpuProfiler::collectResults(uint32_t frameIndex) {
     lastFrameStats.zones.clear();
     zoneNames.clear();
 
-    // Calculate per-zone timings from zone slots
+    // Calculate per-zone timings from zone slots for this frame
+    const ZoneSlot* frameSlots = zoneSlots_[frameIndex].get();
     for (uint32_t i = 0; i < zoneCount && i < maxZones; ++i) {
-        const ZoneSlot& slot = zoneSlots_[i];
+        const ZoneSlot& slot = frameSlots[i];
         uint32_t startIdx = slot.startQueryIndex.load(std::memory_order_relaxed);
         uint32_t endIdx = slot.endQueryIndex.load(std::memory_order_relaxed);
 

@@ -129,9 +129,11 @@ private:
 
     // Current frame state - lock-free zone tracking
     std::atomic<uint32_t> currentQueryIndex{0};
-    std::atomic<uint32_t> currentZoneSlot{0};  // Next available slot in zoneSlots_
+    std::atomic<uint32_t> currentZoneSlot{0};  // Next available slot in current frame's zoneSlots
     uint32_t currentFrameIndex = 0;
-    std::unique_ptr<ZoneSlot[]> zoneSlots_;  // Pre-allocated, indexed by currentZoneSlot
+
+    // Per-frame zone slot storage (one array per frame in flight)
+    std::vector<std::unique_ptr<ZoneSlot[]>> zoneSlots_;  // [frameIndex][slotIndex]
 
     // Per-frame data for result collection
     std::unordered_map<uint32_t, uint32_t> frameQueryCounts;
