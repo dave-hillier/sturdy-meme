@@ -197,19 +197,15 @@ bool OceanFFT::initInternal(const InitContext& ctx, const OceanParams& oceanPara
 }
 
 void OceanFFT::cleanup() {
-    if (device == VK_NULL_HANDLE) return;
+    if (!raiiDevice_) return;
 
-    vk::Device vkDevice(device);
-    vkDevice.waitIdle();
+    raiiDevice_->waitIdle();
 
     // Clear cascades (RAII handles cleanup)
     cascades.clear();
 
-    // Destroy descriptor pool
-    if (descriptorPool != VK_NULL_HANDLE) {
-        vkDevice.destroyDescriptorPool(descriptorPool);
-        descriptorPool = VK_NULL_HANDLE;
-    }
+    // Destroy descriptor pool (RAII)
+    descriptorPool_.reset();
 
     // Clear UBOs (RAII handles cleanup)
     spectrumUBOs.clear();
@@ -325,21 +321,39 @@ bool OceanFFT::createComputePipelines() {
     // Spectrum Generation Pipeline
     // =========================================================================
     {
-        VkDescriptorSetLayout rawDescLayout = DescriptorManager::LayoutBuilder(device)
-            .addBinding(Bindings::OCEAN_SPECTRUM_H0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_SPECTRUM_OMEGA, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_SPECTRUM_PARAMS, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-        if (rawDescLayout == VK_NULL_HANDLE) {
-            return false;
-        }
-        spectrumDescLayout_.emplace(*raiiDevice_, rawDescLayout);
+        std::array<vk::DescriptorSetLayoutBinding, 3> spectrumBindings = {
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_SPECTRUM_H0)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_SPECTRUM_OMEGA)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_SPECTRUM_PARAMS)
+                .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        };
 
-        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, **spectrumDescLayout_);
-        if (rawPipelineLayout == VK_NULL_HANDLE) {
+        auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}.setBindings(spectrumBindings);
+        try {
+            spectrumDescLayout_.emplace(*raiiDevice_, layoutInfo);
+        } catch (const vk::SystemError& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create spectrum descriptor layout: %s", e.what());
             return false;
         }
-        spectrumPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
+
+        auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}.setSetLayouts(**spectrumDescLayout_);
+        try {
+            spectrumPipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
+        } catch (const vk::SystemError& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create spectrum pipeline layout: %s", e.what());
+            return false;
+        }
 
         if (!ComputePipelineBuilder(*raiiDevice_)
                 .setShader(shaderPath + "/ocean_spectrum.comp.spv")
@@ -353,30 +367,56 @@ bool OceanFFT::createComputePipelines() {
     // Time Evolution Pipeline
     // =========================================================================
     {
-        VkDescriptorSetLayout rawDescLayout = DescriptorManager::LayoutBuilder(device)
-            .addBinding(Bindings::OCEAN_HKT_DY, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_HKT_DX, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_HKT_DZ, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_H0_INPUT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_OMEGA_INPUT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-        if (rawDescLayout == VK_NULL_HANDLE) {
+        std::array<vk::DescriptorSetLayoutBinding, 5> timeBindings = {
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_HKT_DY)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_HKT_DX)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_HKT_DZ)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_H0_INPUT)
+                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_OMEGA_INPUT)
+                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        };
+
+        auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}.setBindings(timeBindings);
+        try {
+            timeEvolutionDescLayout_.emplace(*raiiDevice_, layoutInfo);
+        } catch (const vk::SystemError& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create time evolution descriptor layout: %s", e.what());
             return false;
         }
-        timeEvolutionDescLayout_.emplace(*raiiDevice_, rawDescLayout);
 
-        // Push constants for time and parameters
         auto pushRange = vk::PushConstantRange{}
             .setStageFlags(vk::ShaderStageFlagBits::eCompute)
             .setOffset(0)
             .setSize(sizeof(OceanTimeEvolutionPushConstants));
 
-        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, **timeEvolutionDescLayout_,
-            {*reinterpret_cast<const VkPushConstantRange*>(&pushRange)});
-        if (rawPipelineLayout == VK_NULL_HANDLE) {
+        auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}
+            .setSetLayouts(**timeEvolutionDescLayout_)
+            .setPushConstantRanges(pushRange);
+        try {
+            timeEvolutionPipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
+        } catch (const vk::SystemError& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create time evolution pipeline layout: %s", e.what());
             return false;
         }
-        timeEvolutionPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
         if (!ComputePipelineBuilder(*raiiDevice_)
                 .setShader(shaderPath + "/ocean_time_evolution.comp.spv")
@@ -390,27 +430,41 @@ bool OceanFFT::createComputePipelines() {
     // FFT Pipeline
     // =========================================================================
     {
-        VkDescriptorSetLayout rawDescLayout = DescriptorManager::LayoutBuilder(device)
-            .addBinding(Bindings::OCEAN_FFT_INPUT, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_FFT_OUTPUT, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-        if (rawDescLayout == VK_NULL_HANDLE) {
+        std::array<vk::DescriptorSetLayoutBinding, 2> fftBindings = {
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_FFT_INPUT)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_FFT_OUTPUT)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        };
+
+        auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}.setBindings(fftBindings);
+        try {
+            fftDescLayout_.emplace(*raiiDevice_, layoutInfo);
+        } catch (const vk::SystemError& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create FFT descriptor layout: %s", e.what());
             return false;
         }
-        fftDescLayout_.emplace(*raiiDevice_, rawDescLayout);
 
-        // Push constants: stage, direction, resolution, inverse
         auto pushRange = vk::PushConstantRange{}
             .setStageFlags(vk::ShaderStageFlagBits::eCompute)
             .setOffset(0)
             .setSize(sizeof(OceanFFTPushConstants));
 
-        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, **fftDescLayout_,
-            {*reinterpret_cast<const VkPushConstantRange*>(&pushRange)});
-        if (rawPipelineLayout == VK_NULL_HANDLE) {
+        auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}
+            .setSetLayouts(**fftDescLayout_)
+            .setPushConstantRanges(pushRange);
+        try {
+            fftPipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
+        } catch (const vk::SystemError& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create FFT pipeline layout: %s", e.what());
             return false;
         }
-        fftPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
         if (!ComputePipelineBuilder(*raiiDevice_)
                 .setShader(shaderPath + "/ocean_fft.comp.spv")
@@ -424,31 +478,61 @@ bool OceanFFT::createComputePipelines() {
     // Displacement Generation Pipeline
     // =========================================================================
     {
-        VkDescriptorSetLayout rawDescLayout = DescriptorManager::LayoutBuilder(device)
-            .addBinding(Bindings::OCEAN_DISP_DY, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_DISP_DX, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_DISP_DZ, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_DISP_OUTPUT, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_NORMAL_OUTPUT, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .addBinding(Bindings::OCEAN_FOAM_OUTPUT, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT)
-            .build();
-        if (rawDescLayout == VK_NULL_HANDLE) {
+        std::array<vk::DescriptorSetLayoutBinding, 6> dispBindings = {
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_DISP_DY)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_DISP_DX)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_DISP_DZ)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_DISP_OUTPUT)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_NORMAL_OUTPUT)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+            vk::DescriptorSetLayoutBinding{}
+                .setBinding(Bindings::OCEAN_FOAM_OUTPUT)
+                .setDescriptorType(vk::DescriptorType::eStorageImage)
+                .setDescriptorCount(1)
+                .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        };
+
+        auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}.setBindings(dispBindings);
+        try {
+            displacementDescLayout_.emplace(*raiiDevice_, layoutInfo);
+        } catch (const vk::SystemError& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create displacement descriptor layout: %s", e.what());
             return false;
         }
-        displacementDescLayout_.emplace(*raiiDevice_, rawDescLayout);
 
-        // Push constants
         auto pushRange = vk::PushConstantRange{}
             .setStageFlags(vk::ShaderStageFlagBits::eCompute)
             .setOffset(0)
             .setSize(sizeof(OceanDisplacementPushConstants));
 
-        VkPipelineLayout rawPipelineLayout = DescriptorManager::createPipelineLayout(device, **displacementDescLayout_,
-            {*reinterpret_cast<const VkPushConstantRange*>(&pushRange)});
-        if (rawPipelineLayout == VK_NULL_HANDLE) {
+        auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}
+            .setSetLayouts(**displacementDescLayout_)
+            .setPushConstantRanges(pushRange);
+        try {
+            displacementPipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
+        } catch (const vk::SystemError& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create displacement pipeline layout: %s", e.what());
             return false;
         }
-        displacementPipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
         if (!ComputePipelineBuilder(*raiiDevice_)
                 .setShader(shaderPath + "/ocean_displacement.comp.spv")
@@ -468,8 +552,6 @@ bool OceanFFT::createDescriptorSets() {
     uint32_t setsPerCascade = 4;  // spectrum, time evolution, fft (reuse), displacement
     uint32_t totalSets = cascadeCount * setsPerCascade + cascadeCount * 12;  // Extra FFT sets for ping-pong
 
-    vk::Device vkDevice(device);
-
     // Create descriptor pool
     std::array<vk::DescriptorPoolSize, 3> poolSizes = {
         vk::DescriptorPoolSize{}
@@ -488,7 +570,7 @@ bool OceanFFT::createDescriptorSets() {
         .setPoolSizes(poolSizes);
 
     try {
-        descriptorPool = vkDevice.createDescriptorPool(poolInfo);
+        descriptorPool_.emplace(*raiiDevice_, poolInfo);
     } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "OceanFFT: Failed to create descriptor pool: %s", e.what());
         return false;
@@ -518,7 +600,7 @@ bool OceanFFT::createDescriptorSets() {
         {
             vk::DescriptorSetLayout spectrumLayout(**spectrumDescLayout_);
             auto allocInfo = vk::DescriptorSetAllocateInfo{}
-                .setDescriptorPool(descriptorPool)
+                .setDescriptorPool(**descriptorPool_)
                 .setSetLayouts(spectrumLayout);
 
             try {
@@ -540,7 +622,7 @@ bool OceanFFT::createDescriptorSets() {
         {
             vk::DescriptorSetLayout timeLayout(**timeEvolutionDescLayout_);
             auto allocInfo = vk::DescriptorSetAllocateInfo{}
-                .setDescriptorPool(descriptorPool)
+                .setDescriptorPool(**descriptorPool_)
                 .setSetLayouts(timeLayout);
 
             try {
@@ -564,7 +646,7 @@ bool OceanFFT::createDescriptorSets() {
         {
             vk::DescriptorSetLayout dispLayout(**displacementDescLayout_);
             auto allocInfo = vk::DescriptorSetAllocateInfo{}
-                .setDescriptorPool(descriptorPool)
+                .setDescriptorPool(**descriptorPool_)
                 .setSetLayouts(dispLayout);
 
             try {
@@ -840,7 +922,7 @@ void OceanFFT::recordFFT(VkCommandBuffer cmd, Cascade& cascade,
     VkDescriptorSet fftDescSet;
     vk::DescriptorSetLayout fftLayout(**fftDescLayout_);
     auto allocInfo = vk::DescriptorSetAllocateInfo{}
-        .setDescriptorPool(descriptorPool)
+        .setDescriptorPool(**descriptorPool_)
         .setSetLayouts(fftLayout);
 
     try {

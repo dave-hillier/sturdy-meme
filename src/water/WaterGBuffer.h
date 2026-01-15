@@ -72,9 +72,9 @@ public:
     VkExtent2D getExtent() const { return gbufferExtent; }
 
     // Get G-buffer textures for sampling in composite pass
-    VkImageView getDataImageView() const { return dataImageView; }
-    VkImageView getNormalImageView() const { return normalImageView; }
-    VkImageView getDepthImageView() const { return depthImageView; }
+    VkImageView getDataImageView() const { return dataImageView_ ? **dataImageView_ : VK_NULL_HANDLE; }
+    VkImageView getNormalImageView() const { return normalImageView_ ? **normalImageView_ : VK_NULL_HANDLE; }
+    VkImageView getDepthImageView() const { return depthImageView_ ? **depthImageView_ : VK_NULL_HANDLE; }
     VkSampler getSampler() const { return sampler_ ? **sampler_ : VK_NULL_HANDLE; }
 
     // Get pipeline resources
@@ -125,15 +125,15 @@ private:
 
     // G-buffer images
     VkImage dataImage = VK_NULL_HANDLE;
-    VkImageView dataImageView = VK_NULL_HANDLE;
+    std::optional<vk::raii::ImageView> dataImageView_;
     VmaAllocation dataAllocation = VK_NULL_HANDLE;
 
     VkImage normalImage = VK_NULL_HANDLE;
-    VkImageView normalImageView = VK_NULL_HANDLE;
+    std::optional<vk::raii::ImageView> normalImageView_;
     VmaAllocation normalAllocation = VK_NULL_HANDLE;
 
     VkImage depthImage = VK_NULL_HANDLE;
-    VkImageView depthImageView = VK_NULL_HANDLE;
+    std::optional<vk::raii::ImageView> depthImageView_;
     VmaAllocation depthAllocation = VK_NULL_HANDLE;
 
     // Render pass and framebuffer (RAII-managed)

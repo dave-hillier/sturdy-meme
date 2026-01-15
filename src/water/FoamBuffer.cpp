@@ -4,6 +4,7 @@
 #include "DescriptorManager.h"
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/ImageBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -66,17 +67,12 @@ bool FoamBuffer::initInternal(const InitInfo& info) {
 }
 
 void FoamBuffer::cleanup() {
-    if (device == VK_NULL_HANDLE) return;
+    if (!raiiDevice_) return;
 
-    vkDeviceWaitIdle(device);
-
-    // Destroy descriptor pool
-    if (descriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-        descriptorPool = VK_NULL_HANDLE;
-    }
+    raiiDevice_->waitIdle();
 
     // RAII wrappers handle cleanup automatically - just reset them
+    descriptorPool_.reset();
     descriptorSetLayout_.reset();
     computePipeline_.reset();
     computePipelineLayout_.reset();
@@ -84,10 +80,7 @@ void FoamBuffer::cleanup() {
 
     // Destroy foam buffers
     for (int i = 0; i < 2; i++) {
-        if (foamBufferView[i] != VK_NULL_HANDLE) {
-            vkDestroyImageView(device, foamBufferView[i], nullptr);
-            foamBufferView[i] = VK_NULL_HANDLE;
-        }
+        foamBufferView_[i].reset();
         if (foamBuffer[i] != VK_NULL_HANDLE) {
             vmaDestroyImage(allocator, foamBuffer[i], foamAllocation[i]);
             foamBuffer[i] = VK_NULL_HANDLE;
@@ -99,46 +92,25 @@ void FoamBuffer::cleanup() {
     wakeUniformBuffers_.clear();
     wakeUniformMapped.clear();
 
+    device = VK_NULL_HANDLE;
+    raiiDevice_ = nullptr;
     SDL_Log("FoamBuffer: Destroyed");
 }
 
 bool FoamBuffer::createFoamBuffers() {
     // Create two foam buffers for ping-pong
     for (int i = 0; i < 2; i++) {
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = VK_FORMAT_R16_SFLOAT;
-        imageInfo.extent = {resolution, resolution, 1};
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &foamBuffer[i], &foamAllocation[i], nullptr) != VK_SUCCESS) {
+        ManagedImage image;
+        if (!ImageBuilder(allocator)
+                .setExtent(resolution, resolution)
+                .setFormat(VK_FORMAT_R16_SFLOAT)
+                .setUsage(VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+                .setGpuOnly()
+                .build(*raiiDevice_, image, foamBufferView_[i])) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create foam buffer %d", i);
             return false;
         }
-
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = foamBuffer[i];
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_R16_SFLOAT;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
-
-        if (vkCreateImageView(device, &viewInfo, nullptr, &foamBufferView[i]) != VK_SUCCESS) {
-            return false;
-        }
+        image.releaseToRaw(foamBuffer[i], foamAllocation[i]);
     }
 
     // Create sampler using factory
@@ -173,42 +145,42 @@ bool FoamBuffer::createWakeBuffers() {
 
 bool FoamBuffer::createComputePipeline() {
     // Descriptor set layout
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+    std::array<vk::DescriptorSetLayoutBinding, 4> bindings = {
+        // Binding 0: Current foam buffer (storage image, read/write)
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(0)
+            .setDescriptorType(vk::DescriptorType::eStorageImage)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+        // Binding 1: Previous foam buffer (sampled image, read)
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(1)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+        // Binding 2: Flow map (sampled image, for advection)
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(2)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+        // Binding 3: Wake sources uniform buffer (Phase 16)
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(3)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+    };
 
-    // Binding 0: Current foam buffer (storage image, read/write)
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
+        .setBindings(bindings);
 
-    // Binding 1: Previous foam buffer (sampled image, read)
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 2: Flow map (sampled image, for advection)
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 3: Wake sources uniform buffer (Phase 16)
-    bindings[3].binding = 3;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-
-    VkDescriptorSetLayout rawLayout = VK_NULL_HANDLE;
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &rawLayout) != VK_SUCCESS) {
+    try {
+        descriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create foam descriptor set layout: %s", e.what());
         return false;
     }
-    descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
     // Pipeline layout using builder
     if (!PipelineLayoutBuilder(*raiiDevice_)
@@ -235,35 +207,44 @@ bool FoamBuffer::createDescriptorSets() {
     // Create descriptor pool (need 2 sets for ping-pong, times frames in flight)
     uint32_t setCount = framesInFlight * 2;  // 2 for ping-pong per frame
 
-    std::array<VkDescriptorPoolSize, 3> poolSizes{};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[0].descriptorCount = setCount;
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = setCount * 2;  // prev foam + flow map
-    poolSizes[2].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[2].descriptorCount = setCount;  // wake uniform buffer
+    std::array<vk::DescriptorPoolSize, 3> poolSizes = {
+        vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eStorageImage)
+            .setDescriptorCount(setCount),
+        vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(setCount * 2),  // prev foam + flow map
+        vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(setCount)  // wake uniform buffer
+    };
 
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = setCount;
+    auto poolInfo = vk::DescriptorPoolCreateInfo{}
+        .setPoolSizes(poolSizes)
+        .setMaxSets(setCount);
 
-    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
+    try {
+        descriptorPool_.emplace(*raiiDevice_, poolInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create foam descriptor pool: %s", e.what());
         return false;
     }
 
     // Allocate descriptor sets (2 per frame for ping-pong)
-    std::vector<VkDescriptorSetLayout> layouts(setCount, **descriptorSetLayout_);
+    std::vector<vk::DescriptorSetLayout> layouts(setCount, **descriptorSetLayout_);
 
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = setCount;
-    allocInfo.pSetLayouts = layouts.data();
+    auto allocInfo = vk::DescriptorSetAllocateInfo{}
+        .setDescriptorPool(**descriptorPool_)
+        .setSetLayouts(layouts);
 
-    descriptorSets.resize(setCount);
-    if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+    try {
+        auto allocatedSets = vk::Device(device).allocateDescriptorSets(allocInfo);
+        descriptorSets.resize(setCount);
+        for (uint32_t i = 0; i < setCount; ++i) {
+            descriptorSets[i] = allocatedSets[i];
+        }
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate foam descriptor sets: %s", e.what());
         return false;
     }
 
@@ -289,8 +270,8 @@ void FoamBuffer::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, float d
 
     // Update descriptor set using SetWriter
     DescriptorManager::SetWriter(device, descriptorSets[descSetIndex])
-        .writeStorageImage(0, foamBufferView[writeBuffer])
-        .writeImage(1, foamBufferView[readBuffer], **sampler_)
+        .writeStorageImage(0, **foamBufferView_[writeBuffer])
+        .writeImage(1, **foamBufferView_[readBuffer], **sampler_)
         .writeImage(2, flowMapView, flowMapSampler)
         .writeBuffer(3, wakeUniformBuffers_[frameIndex].get(), 0, sizeof(WakeUniformData))
         .update();

@@ -84,7 +84,7 @@ public:
     void recordCompute(VkCommandBuffer cmd, uint32_t frameIndex);
 
     // Get displacement map for sampling in water shader
-    VkImageView getDisplacementMapView() const { return displacementMapView; }
+    VkImageView getDisplacementMapView() const { return displacementMapView_ ? **displacementMapView_ : VK_NULL_HANDLE; }
     VkSampler getSampler() const { return sampler_ ? **sampler_ : VK_NULL_HANDLE; }
 
     // Get descriptor set for water shader binding
@@ -131,12 +131,12 @@ private:
 
     // Displacement map (R16F - single channel height)
     VkImage displacementMap = VK_NULL_HANDLE;
-    VkImageView displacementMapView = VK_NULL_HANDLE;
+    std::optional<vk::raii::ImageView> displacementMapView_;
     VmaAllocation displacementAllocation = VK_NULL_HANDLE;
 
     // Previous frame displacement (for temporal blending)
     VkImage prevDisplacementMap = VK_NULL_HANDLE;
-    VkImageView prevDisplacementMapView = VK_NULL_HANDLE;
+    std::optional<vk::raii::ImageView> prevDisplacementMapView_;
     VmaAllocation prevDisplacementAllocation = VK_NULL_HANDLE;
 
     // Sampler (RAII-managed)
@@ -146,7 +146,7 @@ private:
     std::optional<vk::raii::Pipeline> computePipeline_;
     std::optional<vk::raii::PipelineLayout> computePipelineLayout_;
     std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    std::optional<vk::raii::DescriptorPool> descriptorPool_;
     std::vector<VkDescriptorSet> descriptorSets;
 
     // Particle buffer (SSBO, RAII-managed)

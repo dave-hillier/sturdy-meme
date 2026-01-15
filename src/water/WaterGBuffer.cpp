@@ -89,9 +89,9 @@ bool WaterGBuffer::initInternal(const InitInfo& info) {
 }
 
 void WaterGBuffer::cleanup() {
-    if (device == VK_NULL_HANDLE) return;
+    if (!raiiDevice_) return;
 
-    vkDeviceWaitIdle(device);
+    raiiDevice_->waitIdle();
 
     // RAII wrappers handle cleanup automatically - just reset them
     pipeline_.reset();
@@ -121,7 +121,9 @@ void WaterGBuffer::resize(VkExtent2D newFullResExtent) {
 
     SDL_Log("WaterGBuffer: Resizing to %dx%d", gbufferExtent.width, gbufferExtent.height);
 
-    vkDeviceWaitIdle(device);
+    if (raiiDevice_) {
+        raiiDevice_->waitIdle();
+    }
 
     // Destroy old framebuffer (RAII reset)
     framebuffer_.reset();
@@ -140,7 +142,7 @@ bool WaterGBuffer::createImages() {
                 .setExtent(gbufferExtent.width, gbufferExtent.height)
                 .setFormat(VK_FORMAT_R8G8B8A8_UNORM)
                 .setUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
-                .build(device, image, dataImageView)) {
+                .build(*raiiDevice_, image, dataImageView_)) {
             return false;
         }
         image.releaseToRaw(dataImage, dataAllocation);
@@ -153,7 +155,7 @@ bool WaterGBuffer::createImages() {
                 .setExtent(gbufferExtent.width, gbufferExtent.height)
                 .setFormat(VK_FORMAT_R16G16B16A16_SFLOAT)
                 .setUsage(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
-                .build(device, image, normalImageView)) {
+                .build(*raiiDevice_, image, normalImageView_)) {
             return false;
         }
         image.releaseToRaw(normalImage, normalAllocation);
@@ -166,7 +168,7 @@ bool WaterGBuffer::createImages() {
                 .setExtent(gbufferExtent.width, gbufferExtent.height)
                 .setFormat(VK_FORMAT_D32_SFLOAT)
                 .setUsage(VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)
-                .build(device, image, depthImageView, VK_IMAGE_ASPECT_DEPTH_BIT)) {
+                .build(*raiiDevice_, image, depthImageView_, vk::ImageAspectFlagBits::eDepth)) {
             return false;
         }
         image.releaseToRaw(depthImage, depthAllocation);
@@ -176,30 +178,21 @@ bool WaterGBuffer::createImages() {
 }
 
 void WaterGBuffer::destroyImages() {
-    if (dataImageView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, dataImageView, nullptr);
-        dataImageView = VK_NULL_HANDLE;
-    }
+    dataImageView_.reset();
     if (dataImage != VK_NULL_HANDLE) {
         vmaDestroyImage(allocator, dataImage, dataAllocation);
         dataImage = VK_NULL_HANDLE;
         dataAllocation = VK_NULL_HANDLE;
     }
 
-    if (normalImageView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, normalImageView, nullptr);
-        normalImageView = VK_NULL_HANDLE;
-    }
+    normalImageView_.reset();
     if (normalImage != VK_NULL_HANDLE) {
         vmaDestroyImage(allocator, normalImage, normalAllocation);
         normalImage = VK_NULL_HANDLE;
         normalAllocation = VK_NULL_HANDLE;
     }
 
-    if (depthImageView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, depthImageView, nullptr);
-        depthImageView = VK_NULL_HANDLE;
-    }
+    depthImageView_.reset();
     if (depthImage != VK_NULL_HANDLE) {
         vmaDestroyImage(allocator, depthImage, depthAllocation);
         depthImage = VK_NULL_HANDLE;
@@ -209,110 +202,104 @@ void WaterGBuffer::destroyImages() {
 
 bool WaterGBuffer::createRenderPass() {
     // Attachment descriptions
-    std::array<VkAttachmentDescription, 3> attachments{};
-
-    // Data attachment (RGBA8)
-    attachments[0].format = VK_FORMAT_R8G8B8A8_UNORM;
-    attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    // Normal attachment (RGBA16F)
-    attachments[1].format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[1].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    // Depth attachment (D32F)
-    attachments[2].format = VK_FORMAT_D32_SFLOAT;
-    attachments[2].samples = VK_SAMPLE_COUNT_1_BIT;
-    attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachments[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[2].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    std::array<vk::AttachmentDescription, 3> attachments = {
+        // Data attachment (RGBA8)
+        vk::AttachmentDescription{}
+            .setFormat(vk::Format::eR8G8B8A8Unorm)
+            .setSamples(vk::SampleCountFlagBits::e1)
+            .setLoadOp(vk::AttachmentLoadOp::eClear)
+            .setStoreOp(vk::AttachmentStoreOp::eStore)
+            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+            .setInitialLayout(vk::ImageLayout::eUndefined)
+            .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal),
+        // Normal attachment (RGBA16F)
+        vk::AttachmentDescription{}
+            .setFormat(vk::Format::eR16G16B16A16Sfloat)
+            .setSamples(vk::SampleCountFlagBits::e1)
+            .setLoadOp(vk::AttachmentLoadOp::eClear)
+            .setStoreOp(vk::AttachmentStoreOp::eStore)
+            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+            .setInitialLayout(vk::ImageLayout::eUndefined)
+            .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal),
+        // Depth attachment (D32F)
+        vk::AttachmentDescription{}
+            .setFormat(vk::Format::eD32Sfloat)
+            .setSamples(vk::SampleCountFlagBits::e1)
+            .setLoadOp(vk::AttachmentLoadOp::eClear)
+            .setStoreOp(vk::AttachmentStoreOp::eStore)
+            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+            .setInitialLayout(vk::ImageLayout::eUndefined)
+            .setFinalLayout(vk::ImageLayout::eDepthStencilReadOnlyOptimal)
+    };
 
     // Subpass
-    std::array<VkAttachmentReference, 2> colorRefs{};
-    colorRefs[0].attachment = 0;
-    colorRefs[0].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorRefs[1].attachment = 1;
-    colorRefs[1].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    std::array<vk::AttachmentReference, 2> colorRefs = {
+        vk::AttachmentReference{0, vk::ImageLayout::eColorAttachmentOptimal},
+        vk::AttachmentReference{1, vk::ImageLayout::eColorAttachmentOptimal}
+    };
 
-    VkAttachmentReference depthRef{};
-    depthRef.attachment = 2;
-    depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    vk::AttachmentReference depthRef{2, vk::ImageLayout::eDepthStencilAttachmentOptimal};
 
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = static_cast<uint32_t>(colorRefs.size());
-    subpass.pColorAttachments = colorRefs.data();
-    subpass.pDepthStencilAttachment = &depthRef;
+    auto subpass = vk::SubpassDescription{}
+        .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
+        .setColorAttachments(colorRefs)
+        .setPDepthStencilAttachment(&depthRef);
 
     // Subpass dependencies
-    std::array<VkSubpassDependency, 2> dependencies{};
+    std::array<vk::SubpassDependency, 2> dependencies = {
+        vk::SubpassDependency{}
+            .setSrcSubpass(VK_SUBPASS_EXTERNAL)
+            .setDstSubpass(0)
+            .setSrcStageMask(vk::PipelineStageFlagBits::eFragmentShader)
+            .setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests)
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite),
+        vk::SubpassDependency{}
+            .setSrcSubpass(0)
+            .setDstSubpass(VK_SUBPASS_EXTERNAL)
+            .setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eLateFragmentTests)
+            .setDstStageMask(vk::PipelineStageFlagBits::eFragmentShader)
+            .setSrcAccessMask(vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+    };
 
-    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependencies[0].dstSubpass = 0;
-    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    auto renderPassInfo = vk::RenderPassCreateInfo{}
+        .setAttachments(attachments)
+        .setSubpasses(subpass)
+        .setDependencies(dependencies);
 
-    dependencies[1].srcSubpass = 0;
-    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
-    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    VkRenderPassCreateInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-    renderPassInfo.pAttachments = attachments.data();
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
-    renderPassInfo.pDependencies = dependencies.data();
-
-    VkRenderPass rawRenderPass = VK_NULL_HANDLE;
-    if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &rawRenderPass) != VK_SUCCESS) {
+    try {
+        renderPass_.emplace(*raiiDevice_, renderPassInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create render pass: %s", e.what());
         return false;
     }
-    renderPass_.emplace(*raiiDevice_, rawRenderPass);
     return true;
 }
 
 bool WaterGBuffer::createFramebuffer() {
-    std::array<VkImageView, 3> attachments = {
-        dataImageView,
-        normalImageView,
-        depthImageView
+    std::array<vk::ImageView, 3> attachments = {
+        **dataImageView_,
+        **normalImageView_,
+        **depthImageView_
     };
 
-    VkFramebufferCreateInfo framebufferInfo{};
-    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = **renderPass_;
-    framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-    framebufferInfo.pAttachments = attachments.data();
-    framebufferInfo.width = gbufferExtent.width;
-    framebufferInfo.height = gbufferExtent.height;
-    framebufferInfo.layers = 1;
+    auto framebufferInfo = vk::FramebufferCreateInfo{}
+        .setRenderPass(**renderPass_)
+        .setAttachments(attachments)
+        .setWidth(gbufferExtent.width)
+        .setHeight(gbufferExtent.height)
+        .setLayers(1);
 
-    VkFramebuffer rawFramebuffer = VK_NULL_HANDLE;
-    if (vkCreateFramebuffer(device, &framebufferInfo, nullptr, &rawFramebuffer) != VK_SUCCESS) {
+    try {
+        framebuffer_.emplace(*raiiDevice_, framebufferInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create framebuffer: %s", e.what());
         return false;
     }
-    framebuffer_.emplace(*raiiDevice_, rawFramebuffer);
     return true;
 }
 
@@ -368,67 +355,57 @@ void WaterGBuffer::clear(VkCommandBuffer cmd) {
 }
 
 bool WaterGBuffer::createDescriptorSetLayout() {
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
+    std::array<vk::DescriptorSetLayoutBinding, 4> bindings = {
+        // Binding 0: Main UBO
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(0)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment),
+        // Binding 1: Water UBO
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(1)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment),
+        // Binding 3: Terrain height map
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(3)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eFragment),
+        // Binding 4: Flow map
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(4)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eFragment)
+    };
 
-    // Binding 0: Main UBO
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[0].pImmutableSamplers = nullptr;
+    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
+        .setBindings(bindings);
 
-    // Binding 1: Water UBO
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[1].pImmutableSamplers = nullptr;
-
-    // Binding 3: Terrain height map
-    bindings[2].binding = 3;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[2].pImmutableSamplers = nullptr;
-
-    // Binding 4: Flow map
-    bindings[3].binding = 4;
-    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[3].pImmutableSamplers = nullptr;
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-
-    VkDescriptorSetLayout rawLayout = VK_NULL_HANDLE;
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &rawLayout) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create descriptor set layout");
+    try {
+        descriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create descriptor set layout: %s", e.what());
         return false;
     }
-    descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
     SDL_Log("WaterGBuffer: Descriptor set layout created");
     return true;
 }
 
 bool WaterGBuffer::createPipelineLayout() {
-    VkDescriptorSetLayout rawLayout = **descriptorSetLayout_;
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &rawLayout;
-    pipelineLayoutInfo.pushConstantRangeCount = 0;
-    pipelineLayoutInfo.pPushConstantRanges = nullptr;
+    auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayouts(**descriptorSetLayout_);
 
-    VkPipelineLayout rawPipelineLayout = VK_NULL_HANDLE;
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &rawPipelineLayout) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create pipeline layout");
+    try {
+        pipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "WaterGBuffer: Failed to create pipeline layout: %s", e.what());
         return false;
     }
-    pipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
     SDL_Log("WaterGBuffer: Pipeline layout created");
     return true;

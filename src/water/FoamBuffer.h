@@ -92,7 +92,7 @@ public:
                        VkImageView flowMapView, VkSampler flowMapSampler);
 
     // Get foam buffer for sampling in water shader
-    VkImageView getFoamBufferView() const { return foamBufferView[currentBuffer]; }
+    VkImageView getFoamBufferView() const { return foamBufferView_[currentBuffer] ? **foamBufferView_[currentBuffer] : VK_NULL_HANDLE; }
     VkSampler getSampler() const { return sampler_ ? **sampler_ : VK_NULL_HANDLE; }
 
     // Configuration
@@ -155,7 +155,7 @@ private:
     // Double-buffered foam maps (ping-pong for blur)
     // R16F format - single channel foam intensity
     VkImage foamBuffer[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-    VkImageView foamBufferView[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
+    std::optional<vk::raii::ImageView> foamBufferView_[2];
     VmaAllocation foamAllocation[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
     int currentBuffer = 0;  // Which buffer to read from
 
@@ -166,7 +166,7 @@ private:
     std::optional<vk::raii::Pipeline> computePipeline_;
     std::optional<vk::raii::PipelineLayout> computePipelineLayout_;
     std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    std::optional<vk::raii::DescriptorPool> descriptorPool_;
     std::vector<VkDescriptorSet> descriptorSets;
 
     // Phase 16: Wake system

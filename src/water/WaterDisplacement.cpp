@@ -67,17 +67,12 @@ bool WaterDisplacement::initInternal(const InitInfo& info) {
 }
 
 void WaterDisplacement::cleanup() {
-    if (device == VK_NULL_HANDLE) return;
+    if (!raiiDevice_) return;
 
-    vkDeviceWaitIdle(device);
-
-    // Destroy descriptor pool
-    if (descriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-        descriptorPool = VK_NULL_HANDLE;
-    }
+    raiiDevice_->waitIdle();
 
     // RAII wrappers handle cleanup automatically - just reset them
+    descriptorPool_.reset();
     descriptorSetLayout_.reset();
     computePipeline_.reset();
     computePipelineLayout_.reset();
@@ -89,27 +84,23 @@ void WaterDisplacement::cleanup() {
     // RAII-managed sampler
     sampler_.reset();
 
-    // Destroy displacement maps
-    if (displacementMapView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, displacementMapView, nullptr);
-        displacementMapView = VK_NULL_HANDLE;
-    }
+    // Destroy displacement maps (RAII-managed image views)
+    displacementMapView_.reset();
     if (displacementMap != VK_NULL_HANDLE) {
         vmaDestroyImage(allocator, displacementMap, displacementAllocation);
         displacementMap = VK_NULL_HANDLE;
         displacementAllocation = VK_NULL_HANDLE;
     }
 
-    if (prevDisplacementMapView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, prevDisplacementMapView, nullptr);
-        prevDisplacementMapView = VK_NULL_HANDLE;
-    }
+    prevDisplacementMapView_.reset();
     if (prevDisplacementMap != VK_NULL_HANDLE) {
         vmaDestroyImage(allocator, prevDisplacementMap, prevDisplacementAllocation);
         prevDisplacementMap = VK_NULL_HANDLE;
         prevDisplacementAllocation = VK_NULL_HANDLE;
     }
 
+    device = VK_NULL_HANDLE;
+    raiiDevice_ = nullptr;
     SDL_Log("WaterDisplacement: Destroyed");
 }
 
@@ -122,7 +113,7 @@ bool WaterDisplacement::createDisplacementMap() {
                 .setFormat(VK_FORMAT_R16_SFLOAT)
                 .setUsage(VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
                 .setGpuOnly()
-                .build(device, image, displacementMapView)) {
+                .build(*raiiDevice_, image, displacementMapView_)) {
             return false;
         }
         image.releaseToRaw(displacementMap, displacementAllocation);
@@ -136,7 +127,7 @@ bool WaterDisplacement::createDisplacementMap() {
                 .setFormat(VK_FORMAT_R16_SFLOAT)
                 .setUsage(VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
                 .setGpuOnly()
-                .build(device, image, prevDisplacementMapView)) {
+                .build(*raiiDevice_, image, prevDisplacementMapView_)) {
             return false;
         }
         image.releaseToRaw(prevDisplacementMap, prevDisplacementAllocation);
@@ -173,36 +164,36 @@ bool WaterDisplacement::createParticleBuffer() {
 
 bool WaterDisplacement::createComputePipeline() {
     // Descriptor set layout
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+    std::array<vk::DescriptorSetLayoutBinding, 3> bindings = {
+        // Binding 0: Current displacement map (storage image, write)
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(0)
+            .setDescriptorType(vk::DescriptorType::eStorageImage)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+        // Binding 1: Previous displacement map (sampled image, read)
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(1)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute),
+        // Binding 2: Particle buffer (SSBO)
+        vk::DescriptorSetLayoutBinding{}
+            .setBinding(2)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+    };
 
-    // Binding 0: Current displacement map (storage image, write)
-    bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    bindings[0].descriptorCount = 1;
-    bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
+        .setBindings(bindings);
 
-    // Binding 1: Previous displacement map (sampled image, read)
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    // Binding 2: Particle buffer (SSBO)
-    bindings[2].binding = 2;
-    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
-
-    VkDescriptorSetLayout rawLayout = VK_NULL_HANDLE;
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &rawLayout) != VK_SUCCESS) {
+    try {
+        descriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create displacement descriptor set layout: %s", e.what());
         return false;
     }
-    descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
     // Pipeline layout using builder
     if (!PipelineLayoutBuilder(*raiiDevice_)
@@ -227,43 +218,52 @@ bool WaterDisplacement::createComputePipeline() {
 
 bool WaterDisplacement::createDescriptorSets() {
     // Create descriptor pool
-    std::array<VkDescriptorPoolSize, 3> poolSizes{};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[0].descriptorCount = framesInFlight;
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = framesInFlight;
-    poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[2].descriptorCount = framesInFlight;
+    std::array<vk::DescriptorPoolSize, 3> poolSizes = {
+        vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eStorageImage)
+            .setDescriptorCount(framesInFlight),
+        vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(framesInFlight),
+        vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(framesInFlight)
+    };
 
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = framesInFlight;
+    auto poolInfo = vk::DescriptorPoolCreateInfo{}
+        .setPoolSizes(poolSizes)
+        .setMaxSets(framesInFlight);
 
-    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
+    try {
+        descriptorPool_.emplace(*raiiDevice_, poolInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create displacement descriptor pool: %s", e.what());
         return false;
     }
 
     // Allocate descriptor sets
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, **descriptorSetLayout_);
+    std::vector<vk::DescriptorSetLayout> layouts(framesInFlight, **descriptorSetLayout_);
 
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = framesInFlight;
-    allocInfo.pSetLayouts = layouts.data();
+    auto allocInfo = vk::DescriptorSetAllocateInfo{}
+        .setDescriptorPool(**descriptorPool_)
+        .setSetLayouts(layouts);
 
-    descriptorSets.resize(framesInFlight);
-    if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+    try {
+        auto allocatedSets = vk::Device(device).allocateDescriptorSets(allocInfo);
+        descriptorSets.resize(framesInFlight);
+        for (uint32_t i = 0; i < framesInFlight; ++i) {
+            descriptorSets[i] = allocatedSets[i];
+        }
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate displacement descriptor sets: %s", e.what());
         return false;
     }
 
     // Update descriptor sets
     for (uint32_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, descriptorSets[i])
-            .writeStorageImage(0, displacementMapView)
-            .writeImage(1, prevDisplacementMapView, **sampler_)
+            .writeStorageImage(0, **displacementMapView_)
+            .writeImage(1, **prevDisplacementMapView_, **sampler_)
             .writeBuffer(2, particleBuffers_[i].get(), 0, sizeof(SplashParticle) * MAX_PARTICLES, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .update();
     }

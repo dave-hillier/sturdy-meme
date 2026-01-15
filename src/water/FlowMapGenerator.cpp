@@ -1,6 +1,7 @@
 #include "FlowMapGenerator.h"
 #include "VmaResources.h"
 #include "CommandBufferUtils.h"
+#include "core/ImageBuilder.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <cstring>
@@ -41,14 +42,10 @@ bool FlowMapGenerator::initInternal(const InitInfo& info) {
 }
 
 void FlowMapGenerator::cleanup() {
-    if (device == VK_NULL_HANDLE) return;
+    if (!raiiDevice_) return;
 
     flowMapSampler_.reset();
-
-    if (flowMapView != VK_NULL_HANDLE) {
-        vkDestroyImageView(device, flowMapView, nullptr);
-        flowMapView = VK_NULL_HANDLE;
-    }
+    flowMapView_.reset();
 
     if (flowMapImage != VK_NULL_HANDLE) {
         vmaDestroyImage(allocator, flowMapImage, flowMapAllocation);
@@ -56,6 +53,8 @@ void FlowMapGenerator::cleanup() {
         flowMapAllocation = VK_NULL_HANDLE;
     }
 
+    device = VK_NULL_HANDLE;
+    raiiDevice_ = nullptr;
     flowData.clear();
     signedDistanceField.clear();
 }
@@ -63,10 +62,9 @@ void FlowMapGenerator::cleanup() {
 bool FlowMapGenerator::createImage(uint32_t resolution) {
     // Clean up existing image if resolution changed
     if (flowMapImage != VK_NULL_HANDLE && currentResolution != resolution) {
-        vkDestroyImageView(device, flowMapView, nullptr);
+        flowMapView_.reset();
         vmaDestroyImage(allocator, flowMapImage, flowMapAllocation);
         flowMapImage = VK_NULL_HANDLE;
-        flowMapView = VK_NULL_HANDLE;
     }
 
     if (flowMapImage != VK_NULL_HANDLE) {
@@ -75,45 +73,18 @@ bool FlowMapGenerator::createImage(uint32_t resolution) {
 
     currentResolution = resolution;
 
-    // Create image
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    imageInfo.extent = {resolution, resolution, 1};
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo,
-                       &flowMapImage, &flowMapAllocation, nullptr) != VK_SUCCESS) {
+    // Create image and view using ImageBuilder
+    ManagedImage image;
+    if (!ImageBuilder(allocator)
+            .setExtent(resolution, resolution)
+            .setFormat(VK_FORMAT_R8G8B8A8_UNORM)
+            .asTexture()
+            .setGpuOnly()
+            .build(*raiiDevice_, image, flowMapView_)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create flow map image");
         return false;
     }
-
-    // Create image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = flowMapImage;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-
-    if (vkCreateImageView(device, &viewInfo, nullptr, &flowMapView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create flow map view");
-        return false;
-    }
+    image.releaseToRaw(flowMapImage, flowMapAllocation);
 
     SDL_Log("Flow map created: %ux%u", resolution, resolution);
     return true;
