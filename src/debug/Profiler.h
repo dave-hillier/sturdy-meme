@@ -4,6 +4,8 @@
 #include "CpuProfiler.h"
 #include "InitProfiler.h"
 #include "Flamegraph.h"
+#include "QueueSubmitDiagnostics.h"
+#include "CommandCapture.h"
 #include "interfaces/IProfilerControl.h"
 #include <memory>
 #include <optional>
@@ -338,9 +340,23 @@ public:
     const GpuFlamegraphHistory& getGpuFlamegraphHistory() const { return gpuFlamegraphHistory_; }
     const FlamegraphCapture& getInitFlamegraph() const { return initFlamegraph_; }
 
+    // Queue submit diagnostics access
+    QueueSubmitDiagnostics& getQueueSubmitDiagnostics() { return queueSubmitDiag_; }
+    const QueueSubmitDiagnostics& getQueueSubmitDiagnostics() const { return queueSubmitDiag_; }
+
+    // Command capture access
+    CommandCapture& getCommandCapture() { return commandCapture_; }
+    const CommandCapture& getCommandCapture() const { return commandCapture_; }
+
 private:
     std::optional<GpuProfiler> gpuProfiler_;
     CpuProfiler cpuProfiler;
+
+    // Queue submit diagnostics
+    QueueSubmitDiagnostics queueSubmitDiag_;
+
+    // Command capture for detailed per-frame analysis
+    CommandCapture commandCapture_;
 
     // Flamegraph capture storage
     CpuFlamegraphHistory cpuFlamegraphHistory_;
