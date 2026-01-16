@@ -1875,7 +1875,8 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
     }
 
     // Render woodland detritus (fallen branches - uses its own descriptor sets)
-    if (systems_->detritus() && !detritusDescriptorSets.empty()) {
+    // Bounds check: frameIndex must be within range, not just non-empty
+    if (systems_->detritus() && frameIndex < detritusDescriptorSets.size()) {
         VkDescriptorSet detritusDescSet = detritusDescriptorSets[frameIndex];
         for (const auto& detritus : systems_->detritus()->getSceneObjects()) {
             renderObject(detritus, detritusDescSet);

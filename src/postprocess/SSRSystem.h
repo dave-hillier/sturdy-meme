@@ -47,7 +47,8 @@ public:
     };
 
     // Push constants for SSR compute shader
-    struct SSRPushConstants {
+    // alignas(16) required for SIMD operations on glm::mat4
+    struct alignas(16) SSRPushConstants {
         glm::mat4 viewMatrix;
         glm::mat4 projMatrix;
         glm::mat4 invViewMatrix;
