@@ -12,7 +12,7 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
-#include "scene/SceneObjectCollection.h"
+#include "scene/SceneMaterial.h"
 #include "scene/SceneObjectInstance.h"
 #include "scene/DeterministicRandom.h"
 #include <optional>
@@ -63,22 +63,26 @@ public:
     DetritusSystem& operator=(DetritusSystem&&) = delete;
 
     // Get scene objects for rendering (integrated with existing pipeline)
-    const std::vector<Renderable>& getSceneObjects() const { return collection_.getSceneObjects(); }
-    std::vector<Renderable>& getSceneObjects() { return collection_.getSceneObjects(); }
+    const std::vector<Renderable>& getSceneObjects() const { return material_.getSceneObjects(); }
+    std::vector<Renderable>& getSceneObjects() { return material_.getSceneObjects(); }
+
+    // Access the underlying material for unified scene collection
+    SceneMaterial& getMaterial() { return material_; }
+    const SceneMaterial& getMaterial() const { return material_; }
 
     // Access to textures for descriptor set binding
-    Texture& getBarkTexture() { return *collection_.getDiffuseTexture(); }
-    Texture& getBarkNormalMap() { return *collection_.getNormalTexture(); }
+    Texture& getBarkTexture() { return *material_.getDiffuseTexture(); }
+    Texture& getBarkNormalMap() { return *material_.getNormalTexture(); }
 
     // Get count for statistics
-    size_t getDetritusCount() const { return collection_.getInstanceCount(); }
-    size_t getMeshVariationCount() const { return collection_.getMeshVariationCount(); }
+    size_t getDetritusCount() const { return material_.getInstanceCount(); }
+    size_t getMeshVariationCount() const { return material_.getMeshVariationCount(); }
 
     // Get instances for physics integration (returns unified SceneObjectInstance)
-    const std::vector<SceneObjectInstance>& getInstances() const { return collection_.getInstances(); }
+    const std::vector<SceneObjectInstance>& getInstances() const { return material_.getInstances(); }
 
     // Get meshes for physics collision shapes
-    const std::vector<Mesh>& getMeshes() const { return collection_.getMeshes(); }
+    const std::vector<Mesh>& getMeshes() const { return material_.getMeshes(); }
 
 private:
     DetritusSystem() = default;  // Private: use factory
@@ -93,6 +97,6 @@ private:
     DetritusConfig config_;
     BranchGenerator generator_;
 
-    // Scene object collection (composition pattern)
-    SceneObjectCollection collection_;
+    // Scene material (composition pattern)
+    SceneMaterial material_;
 };

@@ -11,7 +11,7 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
-#include "scene/SceneObjectCollection.h"
+#include "scene/SceneMaterial.h"
 #include "scene/SceneObjectInstance.h"
 #include "scene/DeterministicRandom.h"
 #include <optional>
@@ -60,22 +60,26 @@ public:
     RockSystem& operator=(RockSystem&&) = delete;
 
     // Get scene objects for rendering (integrated with existing pipeline)
-    const std::vector<Renderable>& getSceneObjects() const { return collection_.getSceneObjects(); }
-    std::vector<Renderable>& getSceneObjects() { return collection_.getSceneObjects(); }
+    const std::vector<Renderable>& getSceneObjects() const { return material_.getSceneObjects(); }
+    std::vector<Renderable>& getSceneObjects() { return material_.getSceneObjects(); }
+
+    // Access the underlying material for unified scene collection
+    SceneMaterial& getMaterial() { return material_; }
+    const SceneMaterial& getMaterial() const { return material_; }
 
     // Access to textures for descriptor set binding
-    Texture& getRockTexture() { return *collection_.getDiffuseTexture(); }
-    Texture& getRockNormalMap() { return *collection_.getNormalTexture(); }
+    Texture& getRockTexture() { return *material_.getDiffuseTexture(); }
+    Texture& getRockNormalMap() { return *material_.getNormalTexture(); }
 
     // Get rock count for statistics
-    size_t getRockCount() const { return collection_.getInstanceCount(); }
-    size_t getMeshVariationCount() const { return collection_.getMeshVariationCount(); }
+    size_t getRockCount() const { return material_.getInstanceCount(); }
+    size_t getMeshVariationCount() const { return material_.getMeshVariationCount(); }
 
     // Get rock instances for physics integration (returns unified SceneObjectInstance)
-    const std::vector<SceneObjectInstance>& getRockInstances() const { return collection_.getInstances(); }
+    const std::vector<SceneObjectInstance>& getRockInstances() const { return material_.getInstances(); }
 
     // Get rock meshes for physics collision shapes
-    const std::vector<Mesh>& getRockMeshes() const { return collection_.getMeshes(); }
+    const std::vector<Mesh>& getRockMeshes() const { return material_.getMeshes(); }
 
 private:
     RockSystem() = default;  // Private: use factory
@@ -89,6 +93,6 @@ private:
 
     RockConfig config_;
 
-    // Scene object collection (composition pattern)
-    SceneObjectCollection collection_;
+    // Scene material (composition pattern)
+    SceneMaterial material_;
 };

@@ -21,6 +21,7 @@
 #include "SnowMaskSystem.h"
 #include "VolumetricSnowSystem.h"
 #include "RockSystem.h"
+#include "scene/SceneMaterial.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
@@ -237,7 +238,15 @@ void RendererSystems::setCatmullClark(std::unique_ptr<CatmullClarkSystem> system
 }
 
 void RendererSystems::setRock(std::unique_ptr<RockSystem> system) {
+    // Unregister old material if exists
+    if (rockSystem_) {
+        sceneCollection_.unregisterMaterial(&rockSystem_->getMaterial());
+    }
     rockSystem_ = std::move(system);
+    // Register new material
+    if (rockSystem_) {
+        sceneCollection_.registerMaterial(&rockSystem_->getMaterial());
+    }
 }
 
 void RendererSystems::setTree(std::unique_ptr<TreeSystem> system) {
@@ -257,7 +266,15 @@ void RendererSystems::setImpostorCull(std::unique_ptr<ImpostorCullSystem> system
 }
 
 void RendererSystems::setDetritus(std::unique_ptr<DetritusSystem> system) {
+    // Unregister old material if exists
+    if (detritusSystem_) {
+        sceneCollection_.unregisterMaterial(&detritusSystem_->getMaterial());
+    }
     detritusSystem_ = std::move(system);
+    // Register new material
+    if (detritusSystem_) {
+        sceneCollection_.registerMaterial(&detritusSystem_->getMaterial());
+    }
 }
 
 void RendererSystems::setScene(std::unique_ptr<SceneManager> system) {

@@ -20,23 +20,23 @@ DetritusSystem::~DetritusSystem() {
 bool DetritusSystem::initInternal(const InitInfo& info, const DetritusConfig& cfg) {
     config_ = cfg;
 
-    // Initialize the collection with Vulkan context
-    SceneObjectCollection::InitInfo collectionInfo;
-    collectionInfo.device = info.device;
-    collectionInfo.allocator = info.allocator;
-    collectionInfo.commandPool = info.commandPool;
-    collectionInfo.graphicsQueue = info.graphicsQueue;
-    collectionInfo.physicalDevice = info.physicalDevice;
-    collectionInfo.resourcePath = info.resourcePath;
-    collectionInfo.getTerrainHeight = info.getTerrainHeight;
-    collectionInfo.terrainSize = info.terrainSize;
+    // Initialize the material with Vulkan context
+    SceneMaterial::InitInfo materialInfo;
+    materialInfo.device = info.device;
+    materialInfo.allocator = info.allocator;
+    materialInfo.commandPool = info.commandPool;
+    materialInfo.graphicsQueue = info.graphicsQueue;
+    materialInfo.physicalDevice = info.physicalDevice;
+    materialInfo.resourcePath = info.resourcePath;
+    materialInfo.getTerrainHeight = info.getTerrainHeight;
+    materialInfo.terrainSize = info.terrainSize;
 
-    SceneObjectCollection::MaterialProperties matProps;
+    SceneMaterial::MaterialProperties matProps;
     matProps.roughness = config_.materialRoughness;
     matProps.metallic = config_.materialMetallic;
     matProps.castsShadow = true;
 
-    collection_.init(collectionInfo, matProps);
+    material_.init(materialInfo, matProps);
 
     if (!loadTextures(info)) {
         SDL_Log("DetritusSystem: Failed to load textures");
@@ -52,13 +52,13 @@ bool DetritusSystem::initInternal(const InitInfo& info, const DetritusConfig& cf
     createSceneObjects();
 
     SDL_Log("DetritusSystem: Initialized with %zu pieces (%zu mesh variations)",
-            collection_.getInstanceCount(), collection_.getMeshVariationCount());
+            material_.getInstanceCount(), material_.getMeshVariationCount());
 
     return true;
 }
 
 void DetritusSystem::cleanup() {
-    collection_.cleanup();
+    material_.cleanup();
 }
 
 bool DetritusSystem::loadTextures(const InitInfo& info) {
@@ -70,7 +70,7 @@ bool DetritusSystem::loadTextures(const InitInfo& info) {
         SDL_Log("DetritusSystem: Failed to load bark texture: %s", texturePath.c_str());
         return false;
     }
-    collection_.setDiffuseTexture(std::move(barkTexture));
+    material_.setDiffuseTexture(std::move(barkTexture));
 
     std::string normalPath = info.resourcePath + "/textures/bark/oak_normal_1k.jpg";
     auto barkNormalMap = Texture::loadFromFile(normalPath, info.allocator, info.device, info.commandPool,
@@ -79,7 +79,7 @@ bool DetritusSystem::loadTextures(const InitInfo& info) {
         SDL_Log("DetritusSystem: Failed to load bark normal map: %s", normalPath.c_str());
         return false;
     }
-    collection_.setNormalTexture(std::move(barkNormalMap));
+    material_.setNormalTexture(std::move(barkNormalMap));
 
     return true;
 }
@@ -147,7 +147,7 @@ bool DetritusSystem::createBranchMeshes(const InitInfo& info) {
                 meshIdx, radius, length, forkAngle, gnarliness);
     }
 
-    collection_.setMeshes(std::move(meshes));
+    material_.setMeshes(std::move(meshes));
     return true;
 }
 
@@ -228,7 +228,7 @@ void DetritusSystem::generatePlacements(const InitInfo& info) {
         }
     }
 
-    collection_.setInstances(std::move(instances));
+    material_.setInstances(std::move(instances));
     SDL_Log("DetritusSystem: Placed %d pieces near %d trees (max %d)",
             placed, numTrees, maxTotalDetritus);
 }
@@ -236,5 +236,5 @@ void DetritusSystem::generatePlacements(const InitInfo& info) {
 void DetritusSystem::createSceneObjects() {
     // No transform modification needed - the rotation already includes
     // pitch to lay branches flat on the ground
-    collection_.rebuildSceneObjects();
+    material_.rebuildSceneObjects();
 }

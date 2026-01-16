@@ -15,18 +15,19 @@
 #include "RenderableBuilder.h"
 
 /**
- * SceneObjectCollection - Composition-based container for instanced scene objects
+ * SceneMaterial - Represents a material with textures, properties, mesh variations, and instances
  *
- * Manages the common lifecycle of:
- * - Multiple mesh variations
+ * Manages the complete rendering data for a material type:
+ * - Multiple mesh variations (e.g., different rock shapes)
  * - Diffuse and normal textures
  * - Instance transforms (position, rotation, scale, mesh variation)
  * - Renderable generation for the rendering pipeline
+ * - Material properties (roughness, metallic, shadow casting)
  *
  * This class uses composition rather than inheritance. Systems like RockSystem
- * and DetritusSystem own a SceneObjectCollection and delegate common operations to it.
+ * and DetritusSystem own a SceneMaterial and delegate common operations to it.
  */
-class SceneObjectCollection {
+class SceneMaterial {
 public:
     struct InitInfo {
         VkDevice device;
@@ -47,14 +48,14 @@ public:
         static MaterialProperties defaults() { return {0.7f, 0.0f, true}; }
     };
 
-    SceneObjectCollection() = default;
-    ~SceneObjectCollection();
+    SceneMaterial() = default;
+    ~SceneMaterial();
 
     // Non-copyable, non-movable (owns GPU resources)
-    SceneObjectCollection(const SceneObjectCollection&) = delete;
-    SceneObjectCollection& operator=(const SceneObjectCollection&) = delete;
-    SceneObjectCollection(SceneObjectCollection&&) = delete;
-    SceneObjectCollection& operator=(SceneObjectCollection&&) = delete;
+    SceneMaterial(const SceneMaterial&) = delete;
+    SceneMaterial& operator=(const SceneMaterial&) = delete;
+    SceneMaterial(SceneMaterial&&) = delete;
+    SceneMaterial& operator=(SceneMaterial&&) = delete;
 
     /**
      * Initialize with Vulkan context for resource management
@@ -62,7 +63,7 @@ public:
     void init(const InitInfo& info, const MaterialProperties& matProps = MaterialProperties::defaults());
 
     /**
-     * Set the meshes for this collection (transfers ownership)
+     * Set the meshes for this material (transfers ownership)
      * Caller should have already uploaded meshes to GPU
      */
     void setMeshes(std::vector<Mesh>&& meshes);
@@ -78,7 +79,7 @@ public:
     void setNormalTexture(std::unique_ptr<Texture> texture);
 
     /**
-     * Add an instance to the collection
+     * Add an instance to the material
      */
     void addInstance(const SceneObjectInstance& instance);
 

@@ -19,23 +19,23 @@ RockSystem::~RockSystem() {
 bool RockSystem::initInternal(const InitInfo& info, const RockConfig& cfg) {
     config_ = cfg;
 
-    // Initialize the collection with Vulkan context
-    SceneObjectCollection::InitInfo collectionInfo;
-    collectionInfo.device = info.device;
-    collectionInfo.allocator = info.allocator;
-    collectionInfo.commandPool = info.commandPool;
-    collectionInfo.graphicsQueue = info.graphicsQueue;
-    collectionInfo.physicalDevice = info.physicalDevice;
-    collectionInfo.resourcePath = info.resourcePath;
-    collectionInfo.getTerrainHeight = info.getTerrainHeight;
-    collectionInfo.terrainSize = info.terrainSize;
+    // Initialize the material with Vulkan context
+    SceneMaterial::InitInfo materialInfo;
+    materialInfo.device = info.device;
+    materialInfo.allocator = info.allocator;
+    materialInfo.commandPool = info.commandPool;
+    materialInfo.graphicsQueue = info.graphicsQueue;
+    materialInfo.physicalDevice = info.physicalDevice;
+    materialInfo.resourcePath = info.resourcePath;
+    materialInfo.getTerrainHeight = info.getTerrainHeight;
+    materialInfo.terrainSize = info.terrainSize;
 
-    SceneObjectCollection::MaterialProperties matProps;
+    SceneMaterial::MaterialProperties matProps;
     matProps.roughness = config_.materialRoughness;
     matProps.metallic = config_.materialMetallic;
     matProps.castsShadow = true;
 
-    collection_.init(collectionInfo, matProps);
+    material_.init(materialInfo, matProps);
 
     if (!loadTextures(info)) {
         SDL_Log("RockSystem: Failed to load textures");
@@ -51,13 +51,13 @@ bool RockSystem::initInternal(const InitInfo& info, const RockConfig& cfg) {
     createSceneObjects();
 
     SDL_Log("RockSystem: Initialized with %zu rocks (%zu mesh variations)",
-            collection_.getInstanceCount(), collection_.getMeshVariationCount());
+            material_.getInstanceCount(), material_.getMeshVariationCount());
 
     return true;
 }
 
 void RockSystem::cleanup() {
-    collection_.cleanup();
+    material_.cleanup();
 }
 
 bool RockSystem::loadTextures(const InitInfo& info) {
@@ -69,7 +69,7 @@ bool RockSystem::loadTextures(const InitInfo& info) {
         SDL_Log("RockSystem: Failed to load rock texture: %s", texturePath.c_str());
         return false;
     }
-    collection_.setDiffuseTexture(std::move(rockTexture));
+    material_.setDiffuseTexture(std::move(rockTexture));
 
     std::string normalPath = info.resourcePath + "/assets/textures/industrial/concrete_1_norm.jpg";
     auto rockNormalMap = Texture::loadFromFile(normalPath, info.allocator, info.device, info.commandPool,
@@ -78,7 +78,7 @@ bool RockSystem::loadTextures(const InitInfo& info) {
         SDL_Log("RockSystem: Failed to load rock normal map: %s", normalPath.c_str());
         return false;
     }
-    collection_.setNormalTexture(std::move(rockNormalMap));
+    material_.setNormalTexture(std::move(rockNormalMap));
 
     return true;
 }
@@ -98,7 +98,7 @@ bool RockSystem::createRockMeshes(const InitInfo& info) {
         meshes[i].upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
     }
 
-    collection_.setMeshes(std::move(meshes));
+    material_.setMeshes(std::move(meshes));
     return true;
 }
 
@@ -192,13 +192,13 @@ void RockSystem::generateRockPlacements(const InitInfo& info) {
         placed++;
     }
 
-    collection_.setInstances(std::move(instances));
+    material_.setInstances(std::move(instances));
     SDL_Log("RockSystem: Placed %d rocks in %d attempts", placed, attempts);
 }
 
 void RockSystem::createSceneObjects() {
     // Use transform modifier to add tilt and sink rocks into ground
-    collection_.rebuildSceneObjects([](const SceneObjectInstance& instance, const glm::mat4& baseTransform) {
+    material_.rebuildSceneObjects([](const SceneObjectInstance& instance, const glm::mat4& baseTransform) {
         glm::mat4 transform = baseTransform;
 
         // Add slight random tilt for natural appearance
