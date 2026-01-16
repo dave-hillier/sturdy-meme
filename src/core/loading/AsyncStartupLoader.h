@@ -5,6 +5,7 @@
 #include <memory>
 #include <functional>
 #include <string>
+#include <optional>
 
 class VulkanContext;
 class LoadingRenderer;
@@ -121,7 +122,7 @@ private:
     // Helper to build full path
     std::string buildPath(const std::string& relativePath) const;
 
-    LoadingRenderer* loadingRenderer_ = nullptr;
+    std::optional<std::reference_wrapper<LoadingRenderer>> loadingRenderer_;
     std::string resourcePath_;
 
     std::unique_ptr<LoadJobQueue> jobQueue_;

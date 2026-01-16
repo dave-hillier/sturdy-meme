@@ -21,12 +21,12 @@ bool SceneBuilder::initInternal(const InitInfo& info) {
     storedAllocator = info.allocator;
     storedDevice = info.device;
     sceneOrigin = info.sceneOrigin;
-    assetRegistry_ = info.assetRegistry;
 
-    if (!assetRegistry_) {
+    if (!info.assetRegistry) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SceneBuilder: AssetRegistry is required");
         return false;
     }
+    assetRegistry_.emplace(*info.assetRegistry);
 
     if (!createMeshes(info)) return false;
     if (!loadTextures(info)) return false;
@@ -214,14 +214,14 @@ bool SceneBuilder::loadTextures(const InitInfo& info) {
 
     // Crate textures
     std::string texturePath = info.resourcePath + "/assets/textures/crates/crate1/crate1_diffuse.png";
-    crateTexture_ = assetRegistry_->loadTexture(texturePath, srgbConfig);
+    crateTexture_ = assetRegistry_->get().loadTexture(texturePath, srgbConfig);
     if (!crateTexture_) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load texture: %s", texturePath.c_str());
         return false;
     }
 
     std::string crateNormalPath = info.resourcePath + "/assets/textures/crates/crate1/crate1_normal.png";
-    crateNormal_ = assetRegistry_->loadTexture(crateNormalPath, linearConfig);
+    crateNormal_ = assetRegistry_->get().loadTexture(crateNormalPath, linearConfig);
     if (!crateNormal_) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load crate normal map: %s", crateNormalPath.c_str());
         return false;
@@ -229,14 +229,14 @@ bool SceneBuilder::loadTextures(const InitInfo& info) {
 
     // Ground/grass textures
     std::string grassTexturePath = info.resourcePath + "/assets/textures/grass/grass/grass01.jpg";
-    groundTexture_ = assetRegistry_->loadTexture(grassTexturePath, srgbConfig);
+    groundTexture_ = assetRegistry_->get().loadTexture(grassTexturePath, srgbConfig);
     if (!groundTexture_) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load grass texture: %s", grassTexturePath.c_str());
         return false;
     }
 
     std::string grassNormalPath = info.resourcePath + "/assets/textures/grass/grass/grass01_n.jpg";
-    groundNormal_ = assetRegistry_->loadTexture(grassNormalPath, linearConfig);
+    groundNormal_ = assetRegistry_->get().loadTexture(grassNormalPath, linearConfig);
     if (!groundNormal_) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load grass normal map: %s", grassNormalPath.c_str());
         return false;
@@ -244,28 +244,28 @@ bool SceneBuilder::loadTextures(const InitInfo& info) {
 
     // Metal textures
     std::string metalTexturePath = info.resourcePath + "/assets/textures/industrial/metal_1.jpg";
-    metalTexture_ = assetRegistry_->loadTexture(metalTexturePath, srgbConfig);
+    metalTexture_ = assetRegistry_->get().loadTexture(metalTexturePath, srgbConfig);
     if (!metalTexture_) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load metal texture: %s", metalTexturePath.c_str());
         return false;
     }
 
     std::string metalNormalPath = info.resourcePath + "/assets/textures/industrial/metal_1_norm.jpg";
-    metalNormal_ = assetRegistry_->loadTexture(metalNormalPath, linearConfig);
+    metalNormal_ = assetRegistry_->get().loadTexture(metalNormalPath, linearConfig);
     if (!metalNormal_) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load metal normal map: %s", metalNormalPath.c_str());
         return false;
     }
 
     // Create default black emissive map for objects without emissive textures
-    defaultEmissive_ = assetRegistry_->createSolidColorTexture(0, 0, 0, 255, "default_emissive");
+    defaultEmissive_ = assetRegistry_->get().createSolidColorTexture(0, 0, 0, 255, "default_emissive");
     if (!defaultEmissive_) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create default emissive map");
         return false;
     }
 
     // Create white texture for vertex-colored objects (like glTF characters)
-    whiteTexture_ = assetRegistry_->createSolidColorTexture(255, 255, 255, 255, "white");
+    whiteTexture_ = assetRegistry_->get().createSolidColorTexture(255, 255, 255, 255, "white");
     if (!whiteTexture_) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create white texture");
         return false;

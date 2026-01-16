@@ -132,7 +132,11 @@ void Camera::setThirdPersonTarget(const glm::vec3& target) {
 }
 
 void Camera::setThirdPersonTargetNode(SceneNode* targetNode) {
-    thirdPersonTargetNode_ = targetNode;
+    if (targetNode) {
+        thirdPersonTargetNode_.emplace(*targetNode);
+    } else {
+        thirdPersonTargetNode_.reset();
+    }
 }
 
 void Camera::orbitYaw(float delta) {
@@ -159,7 +163,7 @@ void Camera::updateThirdPerson(float deltaTime) {
 
     // If following a scene node, get its world position
     if (thirdPersonTargetNode_) {
-        thirdPersonTarget_ = thirdPersonTargetNode_->getWorldPosition();
+        thirdPersonTarget_ = thirdPersonTargetNode_->get().getWorldPosition();
     }
 
     // Exponential smoothing formula: smoothed += (target - smoothed) * (1 - exp(-speed * deltaTime))
