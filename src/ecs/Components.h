@@ -272,3 +272,40 @@ struct Health {
 struct NameTag {
     std::string name;
 };
+
+// ============================================================================
+// Scene Object Components (Unified Scene Management)
+// ============================================================================
+
+// Forward declare Renderable to avoid circular includes
+struct Renderable;
+
+// Tag for all scene objects (enables unified iteration)
+struct SceneObjectTag {};
+
+// Pointer to the actual Renderable data (owned by SceneBuilder or SceneObjectCollection)
+// This bridges ECS with existing rendering infrastructure
+struct RenderablePtr {
+    Renderable* renderable = nullptr;
+};
+
+// Source identifier - tracks where this entity's renderable comes from
+// Useful for debugging and selective updates
+struct RenderableSource {
+    enum class Type {
+        SceneBuilder,       // Individual objects from SceneBuilder
+        SceneObjectCollection,  // Instanced objects (rocks, detritus, etc.)
+        TreeSystem,         // Tree renderables
+        Custom              // Dynamically created
+    };
+    Type type = Type::Custom;
+    size_t collectionIndex = 0;  // Index within the source collection
+};
+
+// Tag for objects that should be frustum culled
+struct FrustumCullable {};
+
+// Tag for instanced objects (many copies of same mesh)
+struct InstancedObject {
+    size_t instanceIndex = 0;  // Index within instance buffer
+};

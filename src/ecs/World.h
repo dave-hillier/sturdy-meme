@@ -224,6 +224,100 @@ public:
         patrolSystem(registry_, deltaTime);
     }
 
+    // ========================================================================
+    // Scene Object Management (Unified)
+    // ========================================================================
+
+    // Create a scene object entity from a Renderable pointer
+    // The Renderable is owned externally (by SceneBuilder or SceneObjectCollection)
+    entt::entity createSceneObject(Renderable* renderable,
+                                    RenderableSource::Type sourceType,
+                                    size_t sourceIndex = 0) {
+        auto entity = registry_.create();
+        registry_.emplace<SceneObjectTag>(entity);
+        registry_.emplace<RenderablePtr>(entity, RenderablePtr{renderable});
+        registry_.emplace<RenderableSource>(entity, RenderableSource{sourceType, sourceIndex});
+        registry_.emplace<FrustumCullable>(entity);
+        return entity;
+    }
+
+    // Create scene object with transform component (for physics-driven objects)
+    entt::entity createSceneObjectWithTransform(Renderable* renderable,
+                                                 const glm::vec3& position,
+                                                 RenderableSource::Type sourceType,
+                                                 size_t sourceIndex = 0) {
+        auto entity = createSceneObject(renderable, sourceType, sourceIndex);
+        registry_.emplace<Transform>(entity, Transform::withPosition(position));
+        return entity;
+    }
+
+    // Batch create scene objects from a vector of Renderables
+    // Returns vector of created entity IDs
+    std::vector<entt::entity> createSceneObjects(std::vector<Renderable>& renderables,
+                                                  RenderableSource::Type sourceType) {
+        std::vector<entt::entity> entities;
+        entities.reserve(renderables.size());
+        for (size_t i = 0; i < renderables.size(); ++i) {
+            entities.push_back(createSceneObject(&renderables[i], sourceType, i));
+        }
+        return entities;
+    }
+
+    // Remove all scene objects of a specific source type
+    // Call before rebuilding a collection to avoid stale entities
+    void removeSceneObjectsBySource(RenderableSource::Type sourceType) {
+        auto view = registry_.view<SceneObjectTag, RenderableSource>();
+        std::vector<entt::entity> toRemove;
+        for (auto entity : view) {
+            if (view.get<RenderableSource>(entity).type == sourceType) {
+                toRemove.push_back(entity);
+            }
+        }
+        for (auto entity : toRemove) {
+            registry_.destroy(entity);
+        }
+    }
+
+    // Get all scene objects for rendering
+    auto getAllSceneObjects() {
+        return registry_.view<SceneObjectTag, RenderablePtr>();
+    }
+
+    // Get scene objects with specific source type
+    auto getSceneObjectsBySource(RenderableSource::Type sourceType) {
+        return registry_.view<SceneObjectTag, RenderablePtr, RenderableSource>();
+    }
+
+    // Get count of scene objects
+    size_t getSceneObjectCount() const {
+        return registry_.view<SceneObjectTag>().size();
+    }
+
+    // Register a SceneObjectCollection's renderables as ECS entities
+    // Call after rebuildSceneObjects() to sync ECS with the collection
+    // Template allows any type with getSceneObjects() method
+    template<typename CollectionT>
+    std::vector<entt::entity> registerCollection(CollectionT& collection,
+                                                  RenderableSource::Type sourceType) {
+        // Remove existing entities from this source first
+        removeSceneObjectsBySource(sourceType);
+        // Create new entities for all renderables
+        return createSceneObjects(collection.getSceneObjects(), sourceType);
+    }
+
+    // Collect all renderables from registered scene objects into a vector
+    // Useful for rendering pipeline that expects a flat vector
+    void collectRenderables(std::vector<Renderable*>& out) {
+        auto view = registry_.view<SceneObjectTag, RenderablePtr>();
+        out.reserve(out.size() + view.size_hint());
+        for (auto entity : view) {
+            auto* ptr = view.get<RenderablePtr>(entity).renderable;
+            if (ptr) {
+                out.push_back(ptr);
+            }
+        }
+    }
+
 private:
     entt::registry registry_;
 };
