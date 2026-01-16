@@ -211,6 +211,7 @@ public:
     void setSSR(std::unique_ptr<SSRSystem> system);
     WaterTileCull& waterTileCull() { return *waterTileCull_; }
     const WaterTileCull& waterTileCull() const { return *waterTileCull_; }
+    bool hasWaterTileCull() const { return waterTileCull_ != nullptr; }
     void setWaterTileCull(std::unique_ptr<WaterTileCull> system);
     WaterGBuffer& waterGBuffer() { return *waterGBuffer_; }
     const WaterGBuffer& waterGBuffer() const { return *waterGBuffer_; }

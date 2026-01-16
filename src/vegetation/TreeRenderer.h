@@ -18,7 +18,9 @@
 #include "DescriptorManager.h"
 
 // Push constants for tree rendering
-struct TreeBranchPushConstants {
+// alignas(16) ensures proper alignment for SIMD operations on glm::mat4.
+// Without this, O3-optimized aligned SSE/AVX loads can crash.
+struct alignas(16) TreeBranchPushConstants {
     glm::mat4 model;      // offset 0, size 64
     float time;           // offset 64, size 4
     float lodBlendFactor; // offset 68, size 4 (0=full geometry, 1=full impostor)
@@ -34,7 +36,8 @@ struct TreeLeafPushConstants {
 };
 
 // Shadow pass push constants (branches)
-struct TreeBranchShadowPushConstants {
+// alignas(16) ensures proper alignment for SIMD operations on glm::mat4.
+struct alignas(16) TreeBranchShadowPushConstants {
     glm::mat4 model;      // offset 0, size 64
     int cascadeIndex;     // offset 64, size 4
 };

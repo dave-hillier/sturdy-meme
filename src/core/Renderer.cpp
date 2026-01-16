@@ -296,6 +296,7 @@ void Renderer::setupFrameGraph() {
 
             if (perfToggles.waterGBuffer &&
                 systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
+                systems_->hasWaterTileCull() &&
                 systems_->waterTileCull().wasWaterVisibleLastFrame(ctx.frameIndex)) {
                 systems_->profiler().beginGpuZone(ctx.commandBuffer, "WaterGBuffer");
                 systems_->waterGBuffer().beginRenderPass(ctx.commandBuffer);
@@ -377,10 +378,8 @@ void Renderer::setupFrameGraph() {
     auto waterTileCull = frameGraph_.addPass({
         .name = "WaterTileCull",
         .execute = [this](FrameGraph::RenderContext& ctx) {
+            if (!ctx.userData) return;
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-            // Defensive null check: userData must be valid RenderContext pointer.
-            // O3 may assume non-null and optimize in ways that crash if invalid.
-            if (!renderCtx) return;
             if (hdrPassEnabled && perfToggles.waterTileCull && systems_->waterTileCull().isEnabled()) {
                 systems_->profiler().beginGpuZone(ctx.commandBuffer, "WaterTileCull");
                 glm::mat4 viewProj = renderCtx->frame.projection * renderCtx->frame.view;
@@ -1328,6 +1327,7 @@ bool Renderer::render(const Camera& camera) {
         // Skip if water was not visible last frame (temporal culling) or disabled
         if (perfToggles.waterGBuffer &&
             systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
+            systems_->hasWaterTileCull() &&
             systems_->waterTileCull().wasWaterVisibleLastFrame(frame.frameIndex)) {
             systems_->profiler().beginGpuZone(cmd, "WaterGBuffer");
             systems_->waterGBuffer().beginRenderPass(cmd);
@@ -1367,7 +1367,8 @@ bool Renderer::render(const Camera& camera) {
 
             // Water tile culling compute pass (Phase 7)
             // Determines which screen tiles contain water for optimized rendering
-            if (perfToggles.waterTileCull && systems_->waterTileCull().isEnabled()) {
+            if (perfToggles.waterTileCull && systems_->hasWaterTileCull() &&
+                systems_->waterTileCull().isEnabled()) {
                 systems_->profiler().beginGpuZone(cmd, "WaterTileCull");
                 glm::mat4 viewProj = frame.projection * frame.view;
                 systems_->waterTileCull().recordTileCull(cmd, frame.frameIndex,
@@ -1474,7 +1475,9 @@ bool Renderer::render(const Camera& camera) {
     systems_->leaf().advanceBufferSet();
 
     // Update water tile cull visibility tracking (uses absolute frame counter)
-    systems_->waterTileCull().endFrame(frameSync_.currentIndex());
+    if (systems_->hasWaterTileCull()) {
+        systems_->waterTileCull().endFrame(frameSync_.currentIndex());
+    }
 
     frameSync_.advance();
 
@@ -1976,7 +1979,8 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
     // Draw water surface (after opaque geometry, blended)
     // Use temporal tile culling: skip if no tiles were visible last frame
-    if (systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
+    if (!systems_->hasWaterTileCull() ||
+        systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
         systems_->profiler().beginGpuZone(cmd, "HDR:Water");
         systems_->water().recordDraw(cmd, frameIndex);
         systems_->profiler().endGpuZone(cmd, "HDR:Water");
@@ -2099,7 +2103,8 @@ void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
         systems_->grass().recordDraw(cmd, frameIndex, grassTime);
         systems_->profiler().endGpuZone(cmd, "HDR:Grass");
 
-        if (systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
+        if (!systems_->hasWaterTileCull() ||
+            systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
             systems_->profiler().beginGpuZone(cmd, "HDR:Water");
             systems_->water().recordDraw(cmd, frameIndex);
             systems_->profiler().endGpuZone(cmd, "HDR:Water");
