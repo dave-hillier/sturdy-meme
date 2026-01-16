@@ -239,6 +239,7 @@ void Renderer::setupFrameGraph() {
         .name = "Compute",
         .execute = [this](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             systems_->profiler().beginCpuZone("ComputeDispatch");
             renderPipeline.computeStage.execute(*renderCtx);
             systems_->profiler().endCpuZone("ComputeDispatch");
@@ -253,6 +254,7 @@ void Renderer::setupFrameGraph() {
         .name = "Shadow",
         .execute = [this, lastSunIntensity](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             if (*lastSunIntensity > 0.001f && perfToggles.shadowPass) {
                 systems_->profiler().beginCpuZone("ShadowRecord");
                 systems_->profiler().beginGpuZone(ctx.commandBuffer, "ShadowPass");
@@ -273,6 +275,7 @@ void Renderer::setupFrameGraph() {
         .name = "Froxel",
         .execute = [this](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             systems_->postProcess().setCameraPlanes(
                 renderCtx->frame.nearPlane, renderCtx->frame.farPlane);
             if (renderPipeline.froxelStageFn && (perfToggles.froxelFog || perfToggles.atmosphereLUT)) {
@@ -293,6 +296,7 @@ void Renderer::setupFrameGraph() {
 
             if (perfToggles.waterGBuffer &&
                 systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
+                systems_->hasWaterTileCull() &&
                 systems_->waterTileCull().wasWaterVisibleLastFrame(ctx.frameIndex)) {
                 systems_->profiler().beginGpuZone(ctx.commandBuffer, "WaterGBuffer");
                 systems_->waterGBuffer().beginRenderPass(ctx.commandBuffer);
@@ -323,6 +327,7 @@ void Renderer::setupFrameGraph() {
         .name = "HDR",
         .execute = [this](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             if (hdrPassEnabled) {
                 systems_->profiler().beginCpuZone("RenderPassRecord");
                 if (ctx.secondaryBuffers && !ctx.secondaryBuffers->empty()) {
@@ -342,6 +347,7 @@ void Renderer::setupFrameGraph() {
         .secondarySlots = 3,  // 3 parallel recording slots
         .secondaryRecord = [this](FrameGraph::RenderContext& ctx, uint32_t slot) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             recordHDRPassSecondarySlot(ctx.commandBuffer, ctx.frameIndex,
                                        renderCtx->frame.time, slot);
         }
@@ -352,6 +358,7 @@ void Renderer::setupFrameGraph() {
         .name = "SSR",
         .execute = [this](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             if (hdrPassEnabled && perfToggles.ssr && systems_->ssr().isEnabled()) {
                 systems_->profiler().beginGpuZone(ctx.commandBuffer, "SSR");
                 systems_->ssr().recordCompute(ctx.commandBuffer, ctx.frameIndex,
@@ -371,6 +378,7 @@ void Renderer::setupFrameGraph() {
     auto waterTileCull = frameGraph_.addPass({
         .name = "WaterTileCull",
         .execute = [this](FrameGraph::RenderContext& ctx) {
+            if (!ctx.userData) return;
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
             if (hdrPassEnabled && perfToggles.waterTileCull && systems_->waterTileCull().isEnabled()) {
                 systems_->profiler().beginGpuZone(ctx.commandBuffer, "WaterTileCull");
@@ -393,6 +401,7 @@ void Renderer::setupFrameGraph() {
         .execute = [this](FrameGraph::RenderContext& ctx) {
             if (renderPipeline.postStage.hiZRecordFn) {
                 RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+                if (!renderCtx) return;
                 renderPipeline.postStage.hiZRecordFn(*renderCtx);
             }
         },
@@ -407,6 +416,7 @@ void Renderer::setupFrameGraph() {
         .execute = [this](FrameGraph::RenderContext& ctx) {
             if (systems_->postProcess().isBloomEnabled() && renderPipeline.postStage.bloomRecordFn) {
                 RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+                if (!renderCtx) return;
                 renderPipeline.postStage.bloomRecordFn(*renderCtx);
             }
         },
@@ -436,6 +446,7 @@ void Renderer::setupFrameGraph() {
         .name = "PostProcess",
         .execute = [this](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             systems_->profiler().beginGpuZone(ctx.commandBuffer, "PostProcess");
             systems_->postProcess().recordPostProcess(ctx.commandBuffer, ctx.frameIndex,
                 *framebuffers_[ctx.imageIndex], renderCtx->frame.deltaTime, guiRenderCallback);
@@ -1316,6 +1327,7 @@ bool Renderer::render(const Camera& camera) {
         // Skip if water was not visible last frame (temporal culling) or disabled
         if (perfToggles.waterGBuffer &&
             systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
+            systems_->hasWaterTileCull() &&
             systems_->waterTileCull().wasWaterVisibleLastFrame(frame.frameIndex)) {
             systems_->profiler().beginGpuZone(cmd, "WaterGBuffer");
             systems_->waterGBuffer().beginRenderPass(cmd);
@@ -1355,7 +1367,8 @@ bool Renderer::render(const Camera& camera) {
 
             // Water tile culling compute pass (Phase 7)
             // Determines which screen tiles contain water for optimized rendering
-            if (perfToggles.waterTileCull && systems_->waterTileCull().isEnabled()) {
+            if (perfToggles.waterTileCull && systems_->hasWaterTileCull() &&
+                systems_->waterTileCull().isEnabled()) {
                 systems_->profiler().beginGpuZone(cmd, "WaterTileCull");
                 glm::mat4 viewProj = frame.projection * frame.view;
                 systems_->waterTileCull().recordTileCull(cmd, frame.frameIndex,
@@ -1462,7 +1475,9 @@ bool Renderer::render(const Camera& camera) {
     systems_->leaf().advanceBufferSet();
 
     // Update water tile cull visibility tracking (uses absolute frame counter)
-    systems_->waterTileCull().endFrame(frameSync_.currentIndex());
+    if (systems_->hasWaterTileCull()) {
+        systems_->waterTileCull().endFrame(frameSync_.currentIndex());
+    }
 
     frameSync_.advance();
 
@@ -1863,7 +1878,8 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
     }
 
     // Render woodland detritus (fallen branches - uses its own descriptor sets)
-    if (systems_->detritus() && !detritusDescriptorSets.empty()) {
+    // Bounds check: frameIndex must be within range, not just non-empty
+    if (systems_->detritus() && frameIndex < detritusDescriptorSets.size()) {
         VkDescriptorSet detritusDescSet = detritusDescriptorSets[frameIndex];
         for (const auto& detritus : systems_->detritus()->getSceneObjects()) {
             renderObject(detritus, detritusDescSet);
@@ -1963,7 +1979,8 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
     // Draw water surface (after opaque geometry, blended)
     // Use temporal tile culling: skip if no tiles were visible last frame
-    if (systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
+    if (!systems_->hasWaterTileCull() ||
+        systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
         systems_->profiler().beginGpuZone(cmd, "HDR:Water");
         systems_->water().recordDraw(cmd, frameIndex);
         systems_->profiler().endGpuZone(cmd, "HDR:Water");
@@ -2086,7 +2103,8 @@ void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
         systems_->grass().recordDraw(cmd, frameIndex, grassTime);
         systems_->profiler().endGpuZone(cmd, "HDR:Grass");
 
-        if (systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
+        if (!systems_->hasWaterTileCull() ||
+            systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
             systems_->profiler().beginGpuZone(cmd, "HDR:Water");
             systems_->water().recordDraw(cmd, frameIndex);
             systems_->profiler().endGpuZone(cmd, "HDR:Water");

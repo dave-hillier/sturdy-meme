@@ -255,10 +255,12 @@ void VolumetricSnowSystem::updateUniforms(uint32_t frameIndex, float deltaTime, 
 
     uniforms.cameraPosition = glm::vec4(lastCameraPosition, 0.0f);
 
+    // Bounds check: frameIndex must be within range
+    if (frameIndex >= uniformBuffers.mappedPointers.size()) return;
     memcpy(uniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(VolumetricSnowUniforms));
 
     // Copy interaction sources to buffer
-    if (!currentInteractions.empty()) {
+    if (!currentInteractions.empty() && frameIndex < interactionBuffers.mappedPointers.size()) {
         size_t copySize = sizeof(VolumetricSnowInteraction) * std::min(currentInteractions.size(),
                                                                         static_cast<size_t>(MAX_INTERACTIONS));
         memcpy(interactionBuffers.mappedPointers[frameIndex], currentInteractions.data(), copySize);

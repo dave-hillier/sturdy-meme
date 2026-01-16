@@ -965,7 +965,8 @@ void GrassSystem::recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex, f
     uint32_t readSet = particleSystem->getRenderBufferSet();
 
     // Update shadow descriptor set to use this frame's renderer UBO
-    if (!rendererUniformBuffers_.empty()) {
+    // Bounds check: frameIndex must be within range, not just non-empty
+    if (frameIndex < rendererUniformBuffers_.size()) {
         DescriptorManager::SetWriter(getDevice(), shadowDescriptorSets_[readSet])
             .writeBuffer(0, rendererUniformBuffers_[frameIndex], 0, 160)
             .update();

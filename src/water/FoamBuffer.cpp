@@ -257,7 +257,8 @@ void FoamBuffer::recordCompute(VkCommandBuffer cmd, uint32_t frameIndex, float d
     if (!computePipeline_) return;
 
     // Update wake uniform buffer for this frame
-    if (!wakeUniformMapped.empty()) {
+    // Bounds check: frameIndex must be within range, not just non-empty
+    if (frameIndex < wakeUniformMapped.size()) {
         std::memcpy(wakeUniformMapped[frameIndex], &wakeData, sizeof(WakeUniformData));
     }
 

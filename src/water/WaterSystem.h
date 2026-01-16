@@ -415,7 +415,8 @@ private:
     TripleBuffered<VkBuffer> tileInfoBuffers_;  // Triple-buffered for frames-in-flight sync
 
     // Push constants - must match shader layout exactly
-    struct PushConstants {
+    // alignas(16) ensures proper alignment for SIMD operations on glm::mat4.
+    struct alignas(16) PushConstants {
         glm::mat4 model;
         int32_t useFFTOcean;   // 0 = Gerstner, 1 = FFT ocean
         float oceanSize0;      // FFT cascade 0 patch size

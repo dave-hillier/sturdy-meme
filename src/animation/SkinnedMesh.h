@@ -110,6 +110,7 @@ private:
 constexpr uint32_t MAX_BONES = 128;
 
 // Bone matrices UBO (binding 12)
-struct BoneMatricesUBO {
+// alignas(16) required for SIMD operations on glm::mat4 array
+struct alignas(16) BoneMatricesUBO {
     glm::mat4 bones[MAX_BONES];
 };

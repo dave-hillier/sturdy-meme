@@ -16,8 +16,12 @@
  *   frame.deltaTime = deltaTime;
  *   // ... populate other fields
  *   subsystem.update(frame);
+ *
+ * Note: alignas(16) ensures proper alignment for SIMD operations on glm::mat4
+ * members (view, projection, viewProj). Without this, O3 optimizations using
+ * aligned SSE/AVX loads can crash on misaligned data.
  */
-struct FrameData {
+struct alignas(16) FrameData {
     // Frame identification
     uint32_t frameIndex = 0;
 

@@ -20,7 +20,8 @@
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
 
 // Push constants for shadow rendering
-struct ShadowPushConstants {
+// alignas(16) required for SIMD operations on glm::mat4
+struct alignas(16) ShadowPushConstants {
     glm::mat4 model;
     int cascadeIndex;  // Which cascade we're rendering to
     int padding[3];    // Padding to align
@@ -100,9 +101,14 @@ public:
     uint32_t getShadowMapSize() const { return SHADOW_MAP_SIZE; }
 
     // Dynamic shadow resource accessors (for binding in main shader)
-    VkImageView getPointShadowArrayView(uint32_t frameIndex) const { return pointShadowResources[frameIndex].arrayView; }
+    // Bounds-checked accessors to prevent O3 UB from OOB access
+    VkImageView getPointShadowArrayView(uint32_t frameIndex) const {
+        return frameIndex < pointShadowResources.size() ? pointShadowResources[frameIndex].arrayView : VK_NULL_HANDLE;
+    }
     VkSampler getPointShadowSampler() const { return pointShadowResources.empty() ? VK_NULL_HANDLE : pointShadowResources[0].sampler; }
-    VkImageView getSpotShadowArrayView(uint32_t frameIndex) const { return spotShadowResources[frameIndex].arrayView; }
+    VkImageView getSpotShadowArrayView(uint32_t frameIndex) const {
+        return frameIndex < spotShadowResources.size() ? spotShadowResources[frameIndex].arrayView : VK_NULL_HANDLE;
+    }
     VkSampler getSpotShadowSampler() const { return spotShadowResources.empty() ? VK_NULL_HANDLE : spotShadowResources[0].sampler; }
 
     // Dynamic shadow rendering (placeholder for future implementation)

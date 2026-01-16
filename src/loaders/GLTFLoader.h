@@ -34,7 +34,8 @@ struct MaterialInfo {
 };
 
 // Forward declarations for skeleton and animation (Phase 2+)
-struct Joint {
+// alignas(16) required for SIMD operations on glm::mat4 members
+struct alignas(16) Joint {
     std::string name;
     int32_t parentIndex;  // -1 for root
     glm::mat4 inverseBindMatrix;
