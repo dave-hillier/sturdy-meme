@@ -46,7 +46,6 @@
     "tinyexr",
     "miniz",
     "libarchive",
-    "entt",
     "doctest"
   ]
 }

@@ -11,7 +11,6 @@
 #include "InitProfiler.h"
 #include "Profiler.h"
 
-#include "Components.h"
 #include "TerrainSystem.h"
 #include "TerrainTileCache.h"
 #include "RockSystem.h"
@@ -359,8 +358,9 @@ bool Application::init(const std::string& title, int width, int height) {
     SDL_Log("  TileCache.getHeightAt(): %.2f (found=%d)", heightFromTileCache, tileHasHeight ? 1 : 0);
     SDL_Log("  Player spawn Y (height + 0.1): %.2f", playerSpawnY);
 
-    // Create player entity with ECS
-    world_.createPlayer(glm::vec3(playerSpawnX, playerSpawnY, playerSpawnZ));
+    // Initialize player state
+    player_.transform = PlayerTransform::withYaw(glm::vec3(playerSpawnX, playerSpawnY, playerSpawnZ), 0.0f);
+    player_.grounded = false;
 
     physics().createCharacter(glm::vec3(playerSpawnX, playerSpawnY, playerSpawnZ),
                               PlayerMovement::CAPSULE_HEIGHT, PlayerMovement::CAPSULE_RADIUS);
@@ -468,8 +468,8 @@ void Application::run() {
 
         // Process movement input for third-person mode
         glm::vec3 desiredVelocity(0.0f);
-        auto& playerTransform = world_.getPlayerTransform();
-        auto& playerMovement = world_.getPlayerMovement();
+        auto& playerTransform = player_.transform;
+        auto& playerMovement = player_.movement;
 
         if (input.isThirdPersonMode()) {
             // Handle orientation lock toggle
@@ -534,11 +534,11 @@ void Application::run() {
         // Sync player entity position from physics character controller
         glm::vec3 physicsVelocity = physics().getCharacterVelocity();
         playerTransform.position = playerPos;
-        world_.setPlayerGrounded(physics().isCharacterOnGround());
+        player_.grounded = physics().isCharacterOnGround();
 
         // Update breadcrumb tracker (Ghost of Tsushima respawn optimization)
         // Only track positions when player is grounded and not in water/hazards
-        if (world_.isPlayerGrounded()) {
+        if (player_.grounded) {
             breadcrumbTracker.update(playerPos);
         }
 
@@ -743,7 +743,7 @@ void Application::processEvents() {
                     SDL_Log("Weather type: %s, Intensity: %.1f", weatherStatus.c_str(), sys.weatherState().getIntensity());
                 }
                 else if (event.key.scancode == SDL_SCANCODE_F) {
-                    glm::vec3 playerPos = world_.getPlayerTransform().position;
+                    glm::vec3 playerPos = player_.transform.position;
                     sys.environmentControl().spawnConfetti(playerPos, 8.0f, 100.0f, 0.5f);
                     SDL_Log("Confetti!");
                 }
@@ -818,7 +818,7 @@ void Application::processEvents() {
     if (input.wasModeSwitchedThisFrame()) {
         if (input.isThirdPersonMode()) {
             // Update player Y position to match terrain height (fixes spawn below terrain)
-            auto& playerTransform = world_.getPlayerTransform();
+            auto& playerTransform = player_.transform;
             float terrainY = renderer_->getSystems().terrain().getHeightAt(
                 playerTransform.position.x, playerTransform.position.z);
             float newY = terrainY + 0.1f;  // Slightly above terrain
@@ -834,7 +834,7 @@ void Application::processEvents() {
 
             // Initialize third-person camera from current free camera position
             // This ensures smooth transition instead of snapping to origin
-            auto& playerMovement = world_.getPlayerMovement();
+            auto& playerMovement = player_.movement;
             camera.initializeThirdPersonFromCurrentPosition(playerMovement.getFocusPoint(playerTransform.position));
         } else {
             // Switching to free camera - just reset smoothing
@@ -1044,8 +1044,8 @@ void Application::updateCameraOcclusion(float deltaTime) {
     if (!input.isThirdPersonMode()) return;
 
     // Raycast from player focus point to camera position
-    const auto& playerTransform = world_.getPlayerTransform();
-    const auto& playerMovement = world_.getPlayerMovement();
+    const auto& playerTransform = player_.transform;
+    const auto& playerMovement = player_.movement;
     glm::vec3 playerFocus = playerMovement.getFocusPoint(playerTransform.position);
     glm::vec3 cameraPos = camera.getPosition();
 
