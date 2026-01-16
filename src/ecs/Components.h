@@ -310,7 +310,10 @@ struct ShadowCaster {
 };
 
 // Light attachment - attaches light to another entity's transform
-struct LightAttachment {
+// DEPRECATED: Use Hierarchy component instead. Create light as child entity with
+// offset as local position. The transform hierarchy system will compute world position.
+// Example: world.createAttachedLight(parent, offset, color, intensity, radius);
+struct [[deprecated("Use Hierarchy component instead")]] LightAttachment {
     entt::entity parent{entt::null};
     glm::vec3 offset{0.0f};  // Offset from parent transform
 };

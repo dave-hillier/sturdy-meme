@@ -35,23 +35,29 @@ public:
             auto& transform = pointLights.get<Transform>(entity);
             auto& light = pointLights.get<PointLight>(entity);
 
+            // Get world position (use WorldTransform if entity has Hierarchy)
+            glm::vec3 worldPos = transform.position;
+            if (registry.all_of<WorldTransform>(entity)) {
+                worldPos = registry.get<WorldTransform>(entity).getWorldPosition();
+            }
+
             // Frustum culling
-            if (!isSphereInFrustum(transform.position, light.radius, viewProjMatrix)) {
+            if (!isSphereInFrustum(worldPos, light.radius, viewProjMatrix)) {
                 continue;
             }
 
-            float dist = glm::length(transform.position - cameraPos);
+            float dist = glm::length(worldPos - cameraPos);
             if (dist > cullRadius + light.radius) continue;
 
             // Calculate weight
-            glm::vec3 toLight = glm::normalize(transform.position - cameraPos);
+            glm::vec3 toLight = glm::normalize(worldPos - cameraPos);
             float angleFactor = glm::max(0.0f, glm::dot(toLight, cameraFront));
             angleFactor = 0.25f + 0.75f * angleFactor;
             float effectiveWeight = (light.priority * angleFactor) / (dist + 1.0f);
 
             // Convert to GPU format
             GPULight gpu{};
-            gpu.positionAndType = glm::vec4(transform.position, 0.0f);  // 0 = point
+            gpu.positionAndType = glm::vec4(worldPos, 0.0f);  // 0 = point
             gpu.directionAndCone = glm::vec4(0.0f, -1.0f, 0.0f, 1.0f);
             gpu.colorAndIntensity = glm::vec4(light.color, light.intensity);
 
@@ -70,26 +76,35 @@ public:
             auto& transform = spotLights.get<Transform>(entity);
             auto& light = spotLights.get<SpotLight>(entity);
 
+            // Get world position and rotation (use WorldTransform if entity has Hierarchy)
+            glm::vec3 worldPos = transform.position;
+            glm::quat worldRot = transform.rotation;
+            if (registry.all_of<WorldTransform>(entity)) {
+                const auto& worldTransform = registry.get<WorldTransform>(entity);
+                worldPos = worldTransform.getWorldPosition();
+                worldRot = worldTransform.getWorldRotation();
+            }
+
             // Frustum culling
-            if (!isSphereInFrustum(transform.position, light.radius, viewProjMatrix)) {
+            if (!isSphereInFrustum(worldPos, light.radius, viewProjMatrix)) {
                 continue;
             }
 
-            float dist = glm::length(transform.position - cameraPos);
+            float dist = glm::length(worldPos - cameraPos);
             if (dist > cullRadius + light.radius) continue;
 
             // Calculate weight
-            glm::vec3 toLight = glm::normalize(transform.position - cameraPos);
+            glm::vec3 toLight = glm::normalize(worldPos - cameraPos);
             float angleFactor = glm::max(0.0f, glm::dot(toLight, cameraFront));
             angleFactor = 0.25f + 0.75f * angleFactor;
             float effectiveWeight = (light.priority * angleFactor) / (dist + 1.0f);
 
-            // Get direction from transform rotation
-            glm::vec3 direction = SpotLight::getDirection(transform);
+            // Get direction from world rotation
+            glm::vec3 direction = worldRot * glm::vec3(0.0f, 0.0f, 1.0f);
 
             // Convert to GPU format
             GPULight gpu{};
-            gpu.positionAndType = glm::vec4(transform.position, 1.0f);  // 1 = spot
+            gpu.positionAndType = glm::vec4(worldPos, 1.0f);  // 1 = spot
             gpu.directionAndCone = glm::vec4(
                 glm::normalize(direction),
                 glm::cos(glm::radians(light.outerConeAngle))
@@ -164,9 +179,15 @@ public:
             auto& transform = pointLights.get<Transform>(entity);
             auto& ecsLight = pointLights.get<PointLight>(entity);
 
+            // Get world position (use WorldTransform if entity has Hierarchy)
+            glm::vec3 worldPos = transform.position;
+            if (registry.all_of<WorldTransform>(entity)) {
+                worldPos = registry.get<WorldTransform>(entity).getWorldPosition();
+            }
+
             Light light;
             light.type = LightType::Point;
-            light.position = transform.position;
+            light.position = worldPos;
             light.color = ecsLight.color;
             light.intensity = ecsLight.intensity;
             light.radius = ecsLight.radius;
@@ -187,10 +208,19 @@ public:
             auto& transform = spotLights.get<Transform>(entity);
             auto& ecsLight = spotLights.get<SpotLight>(entity);
 
+            // Get world position and rotation (use WorldTransform if entity has Hierarchy)
+            glm::vec3 worldPos = transform.position;
+            glm::quat worldRot = transform.rotation;
+            if (registry.all_of<WorldTransform>(entity)) {
+                const auto& worldTransform = registry.get<WorldTransform>(entity);
+                worldPos = worldTransform.getWorldPosition();
+                worldRot = worldTransform.getWorldRotation();
+            }
+
             Light light;
             light.type = LightType::Spot;
-            light.position = transform.position;
-            light.rotation = transform.rotation;  // Use rotation directly
+            light.position = worldPos;
+            light.rotation = worldRot;
             light.color = ecsLight.color;
             light.intensity = ecsLight.intensity;
             light.radius = ecsLight.radius;

@@ -8,13 +8,19 @@
 // Light Systems
 // ============================================================================
 
-// Update attached lights - follows parent entity transform
+// Update lights with hierarchy - no longer syncs to Transform to preserve local offsets.
+// Rendering should use getLightWorldPosition() helper instead.
+// This now only handles legacy LightAttachment for backward compatibility.
 inline void lightAttachmentSystem(entt::registry& registry) {
-    auto view = registry.view<Transform, LightAttachment>();
+    // Lights with Hierarchy: WorldTransform is already computed by hierarchy system.
+    // DON'T sync to Transform - that would overwrite the local offset!
+    // Rendering should use World::getLightWorldPosition() which checks WorldTransform.
 
-    for (auto entity : view) {
-        auto& transform = view.get<Transform>(entity);
-        auto& attachment = view.get<LightAttachment>(entity);
+    // Legacy support: Handle old LightAttachment component (deprecated)
+    auto legacyView = registry.view<Transform, LightAttachment>(entt::exclude<Hierarchy>);
+    for (auto entity : legacyView) {
+        auto& transform = legacyView.get<Transform>(entity);
+        auto& attachment = legacyView.get<LightAttachment>(entity);
 
         if (registry.valid(attachment.parent) &&
             registry.all_of<Transform>(attachment.parent)) {

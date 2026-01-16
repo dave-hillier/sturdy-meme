@@ -126,14 +126,38 @@ public:
         return entity;
     }
 
-    // Create a light attached to another entity
+    // Create a light attached to another entity (uses Hierarchy system)
     entt::entity createAttachedLight(entt::entity parent,
                                       const glm::vec3& offset,
                                       const glm::vec3& color = glm::vec3{1.0f},
                                       float intensity = 1.0f,
                                       float radius = 5.0f) {
-        auto entity = createPointLight(glm::vec3{0.0f}, color, intensity, radius);
-        registry_.emplace<LightAttachment>(entity, LightAttachment{parent, offset});
+        // Create light as child entity with offset as local position
+        auto entity = registry_.create();
+        registry_.emplace<Transform>(entity, Transform::withPosition(offset));
+        registry_.emplace<PointLight>(entity, PointLight{{color, intensity, radius}});
+        registry_.emplace<LightEnabled>(entity);
+        registry_.emplace<WorldTransform>(entity);
+
+        // Set up hierarchy - light is child of parent entity
+        registry_.emplace<Hierarchy>(entity, Hierarchy::withParent(parent));
+
+        // Ensure parent has Hierarchy component
+        if (registry_.valid(parent)) {
+            if (!registry_.all_of<Hierarchy>(parent)) {
+                registry_.emplace<Hierarchy>(parent, Hierarchy::root());
+            }
+            registry_.get<Hierarchy>(parent).children.push_back(entity);
+
+            // Ensure parent has WorldTransform for hierarchy system
+            if (!registry_.all_of<WorldTransform>(parent)) {
+                registry_.emplace<WorldTransform>(parent);
+            }
+        }
+
+        // Update depth
+        TransformHierarchy::updateDepth(registry_, entity);
+
         return entity;
     }
 
@@ -156,6 +180,29 @@ public:
     // Get all enabled spot lights for rendering
     auto getEnabledSpotLights() {
         return registry_.view<Transform, SpotLight, LightEnabled>();
+    }
+
+    // Get a light's world position (handles both hierarchy and non-hierarchy lights)
+    // Use this instead of reading Transform.position directly for lights!
+    glm::vec3 getLightWorldPosition(entt::entity light) const {
+        if (registry_.all_of<WorldTransform>(light)) {
+            return registry_.get<WorldTransform>(light).getWorldPosition();
+        }
+        if (registry_.all_of<Transform>(light)) {
+            return registry_.get<Transform>(light).position;
+        }
+        return glm::vec3(0.0f);
+    }
+
+    // Get a light's world rotation (handles both hierarchy and non-hierarchy lights)
+    glm::quat getLightWorldRotation(entt::entity light) const {
+        if (registry_.all_of<WorldTransform>(light)) {
+            return registry_.get<WorldTransform>(light).getWorldRotation();
+        }
+        if (registry_.all_of<Transform>(light)) {
+            return registry_.get<Transform>(light).rotation;
+        }
+        return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
     }
 
     // ========================================================================
