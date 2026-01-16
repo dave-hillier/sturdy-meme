@@ -545,6 +545,9 @@ void Application::run() {
         // Update scene object transforms from physics
         renderer_->getSystems().scene().update(physics());
 
+        // Update ECS systems (transform hierarchy, lights, AI)
+        world_.updateExtended(deltaTime);
+
         // Update player position for grass interaction (always, regardless of camera mode)
         renderer_->setPlayerState(playerTransform.position, physicsVelocity, PlayerMovement::CAPSULE_RADIUS);
 
