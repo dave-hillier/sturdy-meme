@@ -293,5 +293,5 @@ uint32_t VulkanContext::getTransferQueueFamily() const {
 }
 
 bool VulkanContext::createPipelineCache() {
-    return pipelineCache.init(device, "pipeline_cache.bin");
+    return pipelineCache.init(*raiiDevice_, "pipeline_cache.bin");
 }
