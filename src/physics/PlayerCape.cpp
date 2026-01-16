@@ -1,6 +1,7 @@
 #include "PlayerCape.h"
 #include "WindSystem.h"
 #include "scene/SceneNode.h"
+#include "ecs/Components.h"
 #include <SDL3/SDL_log.h>
 
 void PlayerCape::create(int width, int height, float spacing) {
@@ -271,14 +272,30 @@ void PlayerCape::initializeFromSkeleton(const Skeleton& skeleton, const glm::mat
 
 void PlayerCape::update(const Skeleton& skeleton, float deltaTime, const WindSystem* windSystem) {
     if (!initialized) return;
-    if (!attachmentNode_) {
+
+    glm::mat4 worldTransform(1.0f);
+
+    // Preferred: Get world transform from attached ECS entity
+    if (attachmentEntity_ != entt::null && attachmentRegistry_) {
+        if (attachmentRegistry_->valid(attachmentEntity_)) {
+            // Use WorldTransform if available (for entities with Hierarchy)
+            if (attachmentRegistry_->all_of<WorldTransform>(attachmentEntity_)) {
+                worldTransform = attachmentRegistry_->get<WorldTransform>(attachmentEntity_).matrix;
+            } else if (attachmentRegistry_->all_of<Transform>(attachmentEntity_)) {
+                worldTransform = attachmentRegistry_->get<Transform>(attachmentEntity_).getMatrix();
+            }
+        }
+    }
+    // Legacy: Get world transform from attached scene node
+    else if (attachmentNode_) {
+        worldTransform = attachmentNode_->getWorldMatrix();
+    }
+    else {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "PlayerCape::update called without attachment node; use setAttachmentNode() first");
+                    "PlayerCape::update called without attachment; use setAttachmentEntity() or setAttachmentNode()");
         return;
     }
 
-    // Get world transform from attached scene node
-    glm::mat4 worldTransform = attachmentNode_->getWorldMatrix();
     update(skeleton, worldTransform, deltaTime, windSystem);
 }
 

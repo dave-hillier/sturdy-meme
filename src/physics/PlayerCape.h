@@ -5,6 +5,7 @@
 #include "GLTFLoader.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <entt/entt.hpp>
 #include <string>
 #include <vector>
 
@@ -69,13 +70,30 @@ public:
     void setupDefaultAttachments();
 
     // ========================================================================
-    // Scene Graph Attachment
+    // Scene Graph / ECS Attachment
     // ========================================================================
 
-    // Attach cape to a scene node (e.g., character's scene node)
+    // Attach cape to a scene node (legacy: e.g., character's scene node)
     // The cape will use the node's world transform automatically
-    void setAttachmentNode(SceneNode* node) { attachmentNode_ = node; }
+    void setAttachmentNode(SceneNode* node) {
+        attachmentNode_ = node;
+        attachmentEntity_ = entt::null;
+        attachmentRegistry_ = nullptr;
+    }
     SceneNode* getAttachmentNode() const { return attachmentNode_; }
+
+    // Attach cape to an ECS entity (preferred: uses Transform Hierarchy)
+    // The cape will use the entity's WorldTransform automatically
+    void setAttachmentEntity(entt::entity entity, entt::registry* registry) {
+        attachmentEntity_ = entity;
+        attachmentRegistry_ = registry;
+        attachmentNode_ = nullptr;  // Clear SceneNode when using entity
+    }
+    void clearAttachmentEntity() {
+        attachmentEntity_ = entt::null;
+        attachmentRegistry_ = nullptr;
+    }
+    entt::entity getAttachmentEntity() const { return attachmentEntity_; }
 
     // ========================================================================
     // Update Methods
@@ -128,7 +146,9 @@ private:
     std::vector<BodyCollider> bodyColliders;
     std::vector<CapeAttachment> attachments;
     std::vector<glm::mat4> cachedGlobalTransforms;  // Cache bone transforms
-    SceneNode* attachmentNode_ = nullptr;           // Optional scene graph attachment
+    SceneNode* attachmentNode_ = nullptr;           // Legacy: scene graph attachment
+    entt::entity attachmentEntity_{entt::null};     // Preferred: ECS entity attachment
+    entt::registry* attachmentRegistry_ = nullptr;  // Registry for entity lookup
 
     int clothWidth = 0;
     int clothHeight = 0;

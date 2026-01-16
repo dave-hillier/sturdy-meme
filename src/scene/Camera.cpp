@@ -1,4 +1,5 @@
 #include "Camera.h"
+#include "ecs/Components.h"
 #include <algorithm>
 #include <cmath>
 
@@ -137,6 +138,21 @@ void Camera::setThirdPersonTargetNode(SceneNode* targetNode) {
     } else {
         thirdPersonTargetNode_.reset();
     }
+    // Clear entity target when using SceneNode
+    thirdPersonTargetEntity_ = entt::null;
+    targetEntityRegistry_ = nullptr;
+}
+
+void Camera::setThirdPersonTargetEntity(entt::entity target, entt::registry* registry) {
+    thirdPersonTargetEntity_ = target;
+    targetEntityRegistry_ = registry;
+    // Clear SceneNode target when using entity
+    thirdPersonTargetNode_.reset();
+}
+
+void Camera::clearThirdPersonTargetEntity() {
+    thirdPersonTargetEntity_ = entt::null;
+    targetEntityRegistry_ = nullptr;
 }
 
 void Camera::orbitYaw(float delta) {
@@ -161,8 +177,19 @@ void Camera::updateThirdPerson(float deltaTime) {
     // Reset collision adjustment - will be set by applyCollisionDistance if needed
     collisionAdjustedDistance_ = -1.0f;
 
-    // If following a scene node, get its world position
-    if (thirdPersonTargetNode_) {
+    // If following an ECS entity, get its world position (preferred)
+    if (thirdPersonTargetEntity_ != entt::null && targetEntityRegistry_) {
+        if (targetEntityRegistry_->valid(thirdPersonTargetEntity_)) {
+            // Use WorldTransform if available (for entities with Hierarchy)
+            if (targetEntityRegistry_->all_of<WorldTransform>(thirdPersonTargetEntity_)) {
+                thirdPersonTarget_ = targetEntityRegistry_->get<WorldTransform>(thirdPersonTargetEntity_).getWorldPosition();
+            } else if (targetEntityRegistry_->all_of<Transform>(thirdPersonTargetEntity_)) {
+                thirdPersonTarget_ = targetEntityRegistry_->get<Transform>(thirdPersonTargetEntity_).position;
+            }
+        }
+    }
+    // Legacy: If following a scene node, get its world position
+    else if (thirdPersonTargetNode_) {
         thirdPersonTarget_ = thirdPersonTargetNode_->get().getWorldPosition();
     }
 

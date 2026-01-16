@@ -5,15 +5,19 @@
 #include <glm/gtc/quaternion.hpp>
 #include <optional>
 #include <functional>
+#include <entt/entt.hpp>
 #include "SceneNode.h"
 
+// Forward declaration for ECS registry
+namespace ecs { class World; }
+
 /**
- * Camera - First-person and third-person camera with SceneNode integration
+ * Camera - First-person and third-person camera with SceneNode and ECS integration
  *
- * Includes a SceneNode for:
- * - Parent-child relationships (e.g., camera attached to vehicle)
- * - Consistent transform API with rest of scene graph
- * - Optional target node following in third-person mode
+ * Supports following targets via:
+ * - Direct position (setThirdPersonTarget)
+ * - SceneNode pointer (legacy: setThirdPersonTargetNode)
+ * - ECS entity with Transform/WorldTransform (preferred: setThirdPersonTargetEntity)
  *
  * Supports two modes:
  * - Free camera: Direct position/rotation control
@@ -42,7 +46,9 @@ public:
     // Third-person camera controls
     // ========================================================================
     void setThirdPersonTarget(const glm::vec3& target);
-    void setThirdPersonTargetNode(SceneNode* targetNode);  // Follow a scene node
+    void setThirdPersonTargetNode(SceneNode* targetNode);  // Legacy: Follow a scene node
+    void setThirdPersonTargetEntity(entt::entity target, entt::registry* registry);  // Preferred: Follow ECS entity
+    void clearThirdPersonTargetEntity();  // Clear entity target
     void orbitYaw(float delta);
     void orbitPitch(float delta);
     void adjustDistance(float delta);
@@ -129,7 +135,9 @@ private:
 
     // Third-person camera settings
     glm::vec3 thirdPersonTarget_;
-    std::optional<std::reference_wrapper<SceneNode>> thirdPersonTargetNode_;  // Optional: follow a scene node
+    std::optional<std::reference_wrapper<SceneNode>> thirdPersonTargetNode_;  // Legacy: follow a scene node
+    entt::entity thirdPersonTargetEntity_{entt::null};  // Preferred: follow ECS entity
+    entt::registry* targetEntityRegistry_{nullptr};     // Registry for entity lookup
     float thirdPersonDistance_;
     float thirdPersonMinDistance_;
     float thirdPersonMaxDistance_;
