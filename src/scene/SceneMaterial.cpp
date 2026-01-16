@@ -1,18 +1,18 @@
-#include "SceneObjectCollection.h"
+#include "SceneMaterial.h"
 #include <SDL3/SDL_log.h>
 
-SceneObjectCollection::~SceneObjectCollection() {
+SceneMaterial::~SceneMaterial() {
     cleanup();
 }
 
-void SceneObjectCollection::init(const InitInfo& info, const MaterialProperties& matProps) {
+void SceneMaterial::init(const InitInfo& info, const MaterialProperties& matProps) {
     storedAllocator_ = info.allocator;
     storedDevice_ = info.device;
     materialProps_ = matProps;
     initialized_ = true;
 }
 
-void SceneObjectCollection::setMeshes(std::vector<Mesh>&& meshes) {
+void SceneMaterial::setMeshes(std::vector<Mesh>&& meshes) {
     // Clean up existing meshes first
     for (auto& mesh : meshes_) {
         mesh.releaseGPUResources();
@@ -20,28 +20,28 @@ void SceneObjectCollection::setMeshes(std::vector<Mesh>&& meshes) {
     meshes_ = std::move(meshes);
 }
 
-void SceneObjectCollection::setDiffuseTexture(std::unique_ptr<Texture> texture) {
+void SceneMaterial::setDiffuseTexture(std::unique_ptr<Texture> texture) {
     diffuseTexture_ = std::move(texture);
 }
 
-void SceneObjectCollection::setNormalTexture(std::unique_ptr<Texture> texture) {
+void SceneMaterial::setNormalTexture(std::unique_ptr<Texture> texture) {
     normalTexture_ = std::move(texture);
 }
 
-void SceneObjectCollection::addInstance(const SceneObjectInstance& instance) {
+void SceneMaterial::addInstance(const SceneObjectInstance& instance) {
     instances_.push_back(instance);
 }
 
-void SceneObjectCollection::setInstances(std::vector<SceneObjectInstance>&& instances) {
+void SceneMaterial::setInstances(std::vector<SceneObjectInstance>&& instances) {
     instances_ = std::move(instances);
 }
 
-void SceneObjectCollection::clearInstances() {
+void SceneMaterial::clearInstances() {
     instances_.clear();
     sceneObjects_.clear();
 }
 
-void SceneObjectCollection::rebuildSceneObjects(
+void SceneMaterial::rebuildSceneObjects(
     std::function<glm::mat4(const SceneObjectInstance&, const glm::mat4&)> transformModifier) {
 
     sceneObjects_.clear();
@@ -50,7 +50,7 @@ void SceneObjectCollection::rebuildSceneObjects(
     for (const auto& instance : instances_) {
         if (instance.meshVariation >= meshes_.size()) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                "SceneObjectCollection: Instance mesh variation %u out of range (have %zu meshes)",
+                "SceneMaterial: Instance mesh variation %u out of range (have %zu meshes)",
                 instance.meshVariation, meshes_.size());
             continue;
         }
@@ -73,7 +73,7 @@ void SceneObjectCollection::rebuildSceneObjects(
     }
 }
 
-void SceneObjectCollection::cleanup() {
+void SceneMaterial::cleanup() {
     if (storedDevice_ == VK_NULL_HANDLE) return;
 
     // Release RAII-managed textures

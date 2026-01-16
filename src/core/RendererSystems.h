@@ -10,6 +10,7 @@
 #include "VegetationSystemGroup.h"
 #include "WaterSystemGroup.h"
 #include "SnowSystemGroup.h"
+#include "scene/SceneCollection.h"
 
 // Forward declarations for control subsystems (only those that coordinate multiple systems)
 class EnvironmentControlSubsystem;
@@ -240,6 +241,10 @@ public:
     const DetritusSystem* detritus() const { return detritusSystem_.get(); }
     void setDetritus(std::unique_ptr<DetritusSystem> system);
 
+    // Scene collection for unified material iteration (used by shadow pass)
+    SceneCollection& sceneCollection() { return sceneCollection_; }
+    const SceneCollection& sceneCollection() const { return sceneCollection_; }
+
     // Culling and optimization
     HiZSystem& hiZ() { return *hiZSystem_; }
     const HiZSystem& hiZ() const { return *hiZSystem_; }
@@ -439,6 +444,9 @@ private:
     std::unique_ptr<TreeLODSystem> treeLODSystem_;
     std::unique_ptr<ImpostorCullSystem> impostorCullSystem_;
     std::unique_ptr<DetritusSystem> detritusSystem_;
+
+    // Scene collection for unified material iteration
+    SceneCollection sceneCollection_;
 
     // Tier 2 - Culling
     std::unique_ptr<HiZSystem> hiZSystem_;
