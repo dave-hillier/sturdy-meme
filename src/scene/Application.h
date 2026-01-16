@@ -8,7 +8,7 @@
 #include <memory>
 #include "Renderer.h"
 #include "Camera.h"
-#include "World.h"
+#include "PlayerState.h"
 #include "PhysicsSystem.h"
 #include "PhysicsTerrainTileManager.h"
 #include "ClothSimulation.h"
@@ -41,7 +41,7 @@ private:
     SDL_Window* window = nullptr;
     std::unique_ptr<Renderer> renderer_;
     Camera camera;
-    World world_;  // ECS world containing all entities
+    PlayerState player_;  // Player state (transform, movement, grounded)
     std::optional<PhysicsWorld> physics_;
     PhysicsTerrainTileManager physicsTerrainManager_;
 
