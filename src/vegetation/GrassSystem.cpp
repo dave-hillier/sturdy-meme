@@ -19,6 +19,8 @@
 // Forward declare UniformBufferObject size (needed for descriptor set update)
 struct UniformBufferObject;
 
+GrassSystem::GrassSystem(ConstructToken) {}
+
 std::unique_ptr<GrassSystem> GrassSystem::create(const InitInfo& info) {
     auto system = std::make_unique<GrassSystem>(ConstructToken{});
     if (!system->initInternal(info)) {

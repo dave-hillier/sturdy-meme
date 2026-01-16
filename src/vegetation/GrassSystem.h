@@ -74,7 +74,7 @@ public:
      */
     static std::unique_ptr<GrassSystem> create(const InitInfo& info);
 
-    explicit GrassSystem(ConstructToken) {}
+    explicit GrassSystem(ConstructToken);
 
     /**
      * Bundle of grass-related systems
