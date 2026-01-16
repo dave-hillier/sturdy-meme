@@ -76,6 +76,7 @@
 #include <limits>
 #include <algorithm>
 #include <numeric>
+#include <chrono>
 
 std::unique_ptr<Renderer> Renderer::create(const InitInfo& info) {
     std::unique_ptr<Renderer> instance(new Renderer());
@@ -988,10 +989,22 @@ bool Renderer::render(const Camera& camera) {
     // Begin CPU profiling for this frame (must be before any CPU zones)
     systems_->profiler().beginCpuFrame();
 
+    // Reset queue submit diagnostics for this frame
+    auto& qsDiag = systems_->profiler().getQueueSubmitDiagnostics();
+    qsDiag.reset();
+    qsDiag.validationLayersEnabled = vulkanContext_->hasValidationLayers();
+
     // Frame synchronization - use non-blocking check first to avoid unnecessary waits
     // With triple buffering, the fence is often already signaled
     systems_->profiler().beginCpuZone("Wait:FenceSync");
+
+    // Track fence status for diagnostics
+    qsDiag.fenceWasAlreadySignaled = frameSync_.isCurrentFenceSignaled();
+    auto fenceStart = std::chrono::high_resolution_clock::now();
     frameSync_.waitForCurrentFrameIfNeeded();
+    auto fenceEnd = std::chrono::high_resolution_clock::now();
+    qsDiag.fenceWaitTimeMs = std::chrono::duration<float, std::milli>(fenceEnd - fenceStart).count();
+
     systems_->profiler().endCpuZone("Wait:FenceSync");
 
     systems_->profiler().beginCpuZone("Wait:AcquireImage");
@@ -1274,6 +1287,13 @@ bool Renderer::render(const Camera& camera) {
 
     VkCommandBuffer cmd = commandBuffers[frame.frameIndex];
 
+    // Get reference to diagnostics for command counting
+    auto& cmdDiag = systems_->profiler().getQueueSubmitDiagnostics();
+
+    // Begin command capture if requested
+    auto& cmdCapture = systems_->profiler().getCommandCapture();
+    cmdCapture.beginFrame(systems_->profiler().getFrameNumber());
+
     // Begin GPU profiling frame
     systems_->profiler().beginGpuFrame(cmd, frame.frameIndex);
 
@@ -1312,7 +1332,10 @@ bool Renderer::render(const Camera& camera) {
         if (lastSunIntensity > 0.001f && perfToggles.shadowPass) {
             systems_->profiler().beginCpuZone("ShadowRecord");
             systems_->profiler().beginGpuZone(cmd, "ShadowPass");
+            cmdDiag.renderPassCount++;  // Shadow cascade render pass
+            cmdCapture.recordBeginRenderPass("ShadowSystem", "ShadowCascades");
             recordShadowPass(cmd, frame.frameIndex, frame.time, frame.cameraPosition);
+            cmdCapture.recordEndRenderPass("ShadowSystem");
             systems_->profiler().endGpuZone(cmd, "ShadowPass");
             systems_->profiler().endCpuZone("ShadowRecord");
         }
@@ -1330,16 +1353,20 @@ bool Renderer::render(const Camera& camera) {
             systems_->hasWaterTileCull() &&
             systems_->waterTileCull().wasWaterVisibleLastFrame(frame.frameIndex)) {
             systems_->profiler().beginGpuZone(cmd, "WaterGBuffer");
+            cmdDiag.renderPassCount++;  // Water G-buffer pass
             systems_->waterGBuffer().beginRenderPass(cmd);
 
             // Bind G-buffer pipeline and descriptor set
             vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, systems_->waterGBuffer().getPipeline());
+            cmdDiag.pipelineBindCount++;
             vk::DescriptorSet gbufferDescSet = systems_->waterGBuffer().getDescriptorSet(frame.frameIndex);
             vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                      systems_->waterGBuffer().getPipelineLayout(), 0, gbufferDescSet, {});
+            cmdDiag.descriptorSetBindCount++;
 
             // Draw water mesh
             systems_->water().recordMeshDraw(cmd);
+            cmdDiag.drawCallCount++;
 
             systems_->waterGBuffer().endRenderPass(cmd);
             systems_->profiler().endGpuZone(cmd, "WaterGBuffer");
@@ -1350,13 +1377,17 @@ bool Renderer::render(const Camera& camera) {
         // contains granular HDR:* sub-zones. Nesting would confuse the profiler.
         if (hdrPassEnabled) {
             systems_->profiler().beginCpuZone("RenderPassRecord");
+            cmdDiag.renderPassCount++;  // HDR main render pass
+            cmdCapture.recordBeginRenderPass("HDRPass", "MainScene");
             recordHDRPass(cmd, frame.frameIndex, frame.time);
+            cmdCapture.recordEndRenderPass("HDRPass");
             systems_->profiler().endCpuZone("RenderPassRecord");
 
             // Screen-Space Reflections compute pass (Phase 10)
             // Computes SSR for next frame's water - uses current scene for temporal stability
             if (perfToggles.ssr && systems_->ssr().isEnabled()) {
                 systems_->profiler().beginGpuZone(cmd, "SSR");
+                cmdDiag.dispatchCount++;  // SSR compute
                 systems_->ssr().recordCompute(cmd, frame.frameIndex,
                                         systems_->postProcess().getHDRColorView(),
                                         systems_->postProcess().getHDRDepthView(),
@@ -1370,6 +1401,7 @@ bool Renderer::render(const Camera& camera) {
             if (perfToggles.waterTileCull && systems_->hasWaterTileCull() &&
                 systems_->waterTileCull().isEnabled()) {
                 systems_->profiler().beginGpuZone(cmd, "WaterTileCull");
+                cmdDiag.dispatchCount++;  // Water tile cull compute
                 glm::mat4 viewProj = frame.projection * frame.view;
                 systems_->waterTileCull().recordTileCull(cmd, frame.frameIndex,
                                               viewProj, frame.cameraPosition,
@@ -1381,16 +1413,19 @@ bool Renderer::render(const Camera& camera) {
 
         // Hi-Z pyramid and Bloom via pipeline post stage
         if (renderPipeline.postStage.hiZRecordFn) {
+            cmdDiag.dispatchCount++;  // Hi-Z compute
             renderPipeline.postStage.hiZRecordFn(ctx);
         }
         // Only run bloom passes if bloom is enabled (skip for performance)
         if (systems_->postProcess().isBloomEnabled() && renderPipeline.postStage.bloomRecordFn) {
+            cmdDiag.dispatchCount += 2;  // Bloom downsample + upsample
             renderPipeline.postStage.bloomRecordFn(ctx);
         }
 
         // Bilateral grid for local tone mapping (if enabled)
         if (systems_->postProcess().isLocalToneMapEnabled()) {
             systems_->profiler().beginGpuZone(cmd, "BilateralGrid");
+            cmdDiag.dispatchCount++;  // Bilateral grid compute
             systems_->bilateralGrid().recordBilateralGrid(cmd, frame.frameIndex,
                                                            systems_->postProcess().getHDRColorView());
             systems_->profiler().endGpuZone(cmd, "BilateralGrid");
@@ -1399,12 +1434,17 @@ bool Renderer::render(const Camera& camera) {
         // Post-process pass (with optional GUI overlay callback)
         // Note: This is not in postStage because it needs framebuffer and guiRenderCallback
         systems_->profiler().beginGpuZone(cmd, "PostProcess");
+        cmdDiag.renderPassCount++;  // Post-process render pass
+        cmdDiag.drawCallCount++;    // Full-screen quad
         systems_->postProcess().recordPostProcess(cmd, frame.frameIndex, *framebuffers_[imageIndex], frame.deltaTime, guiRenderCallback);
         systems_->profiler().endGpuZone(cmd, "PostProcess");
     }
 
     // End GPU profiling frame
     systems_->profiler().endGpuFrame(cmd, frame.frameIndex);
+
+    // End command capture
+    cmdCapture.endFrame();
 
     vkCmd.end();
 
@@ -1424,7 +1464,12 @@ bool Renderer::render(const Camera& camera) {
         .setSignalSemaphores(signalSemaphores);
 
     try {
+        // Track queue submit time for diagnostics
+        auto submitStart = std::chrono::high_resolution_clock::now();
         vk::Queue(graphicsQueue).submit(submitInfo, frameSync_.currentFence());
+        auto submitEnd = std::chrono::high_resolution_clock::now();
+        systems_->profiler().getQueueSubmitDiagnostics().queueSubmitTimeMs =
+            std::chrono::duration<float, std::milli>(submitEnd - submitStart).count();
     } catch (const vk::DeviceLostError&) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Device lost during queue submit");
         systems_->profiler().endCpuZone("QueueSubmit");
