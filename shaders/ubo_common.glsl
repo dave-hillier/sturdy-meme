@@ -64,6 +64,10 @@ layout(set = 0, binding = UBO_BINDING) uniform UniformBufferObject {
     // Sky rendering parameters (from UI controls) - used by sky.frag
     float skyExposure;             // Sky brightness multiplier (1-20, default 5.0)
     float skyPad1, skyPad2, skyPad3; // Padding for alignment
+
+    // Performance toggles - allow shader-side disabling of expensive features
+    float shadowsEnabled;          // 1.0 = sample shadows, 0.0 = skip shadow sampling (perf toggle)
+    float perfPad1, perfPad2, perfPad3; // Padding for alignment
 } ubo;
 
 #endif // UBO_COMMON_GLSL

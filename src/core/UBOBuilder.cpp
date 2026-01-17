@@ -165,6 +165,12 @@ UniformBufferObject UBOBuilder::buildUniformBufferData(
     ubo.skyPad2 = 0.0f;
     ubo.skyPad3 = 0.0f;
 
+    // Performance toggles
+    ubo.shadowsEnabled = config.shadowsEnabled ? 1.0f : 0.0f;
+    ubo.perfPad1 = 0.0f;
+    ubo.perfPad2 = 0.0f;
+    ubo.perfPad3 = 0.0f;
+
     return ubo;
 }
 
