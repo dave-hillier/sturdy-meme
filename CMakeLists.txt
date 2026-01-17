@@ -137,6 +137,9 @@ set(SOURCES
     src/lighting/ShadowSystem.cpp
     # Physics
     src/physics/PhysicsSystem.cpp
+    src/physics/JoltLayerConfig.cpp
+    src/physics/JoltRuntime.cpp
+    src/physics/CharacterController.cpp
     src/physics/PhysicsTerrainTileManager.cpp
     src/physics/ParticleSystem.cpp
     src/physics/ClothSimulation.cpp

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CharacterController.h"
+
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
@@ -14,8 +16,6 @@ namespace JPH {
     class JobSystemThreadPool;
     class BodyInterface;
     class Body;
-    class Character;
-    class CharacterVirtual;
 }
 
 // Forward declaration for Jolt runtime RAII wrapper
@@ -24,21 +24,6 @@ struct JoltRuntime;
 // Physics body handle
 using PhysicsBodyID = uint32_t;
 constexpr PhysicsBodyID INVALID_BODY_ID = 0xFFFFFFFF;
-
-// Collision layers
-namespace PhysicsLayers {
-    constexpr uint8_t NON_MOVING = 0;
-    constexpr uint8_t MOVING = 1;
-    constexpr uint8_t CHARACTER = 2;
-    constexpr uint8_t NUM_LAYERS = 3;
-}
-
-// Broad phase layers
-namespace BroadPhaseLayers {
-    constexpr uint8_t NON_MOVING = 0;
-    constexpr uint8_t MOVING = 1;
-    constexpr uint8_t NUM_LAYERS = 2;
-}
 
 struct PhysicsBodyInfo {
     PhysicsBodyID bodyID = INVALID_BODY_ID;
@@ -168,29 +153,31 @@ public:
 
 #ifdef JPH_DEBUG_RENDERER
     // Access to physics system for debug rendering (non-const because DrawBodies is non-const)
-    JPH::PhysicsSystem* getPhysicsSystem() { return physicsSystem.get(); }
+    JPH::PhysicsSystem* getPhysicsSystem() { return physicsSystem_.get(); }
 #endif
 
 private:
     PhysicsWorld();  // Private: only factory can construct
     bool initInternal();
 
+    // Internal helper for heightfield creation
+    PhysicsBodyID createHeightfieldInternal(const float* samples, const uint8_t* holeMask,
+                                             uint32_t sampleCount, float worldSize,
+                                             float heightScale, const glm::vec3& worldPosition,
+                                             bool useHalfTexelOffset);
+
     // Jolt runtime (ref-counted for multiple worlds)
     std::shared_ptr<JoltRuntime> joltRuntime_;
 
-    std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator;
-    std::unique_ptr<JPH::JobSystemThreadPool> jobSystem;
-    std::unique_ptr<JPH::PhysicsSystem> physicsSystem;
+    std::unique_ptr<JPH::TempAllocatorImpl> tempAllocator_;
+    std::unique_ptr<JPH::JobSystemThreadPool> jobSystem_;
+    std::unique_ptr<JPH::PhysicsSystem> physicsSystem_;
 
-    // Character
-    std::unique_ptr<JPH::CharacterVirtual> character;
-    float characterHeight = 1.8f;
-    float characterRadius = 0.3f;
-    glm::vec3 characterDesiredVelocity{0.0f};
-    bool characterWantsJump = false;
+    // Character controller
+    CharacterController character_;
 
     // Accumulated time for fixed timestep
-    float accumulatedTime = 0.0f;
+    float accumulatedTime_ = 0.0f;
     static constexpr float FIXED_TIMESTEP = 1.0f / 60.0f;
     static constexpr int MAX_SUBSTEPS = 4;
 };

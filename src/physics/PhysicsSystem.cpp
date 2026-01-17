@@ -1,10 +1,11 @@
 #include "PhysicsSystem.h"
+#include "JoltLayerConfig.h"
+#include "JoltRuntime.h"
+#include "PhysicsConversions.h"
 #include "TerrainHeight.h"
 
 // Jolt Physics includes
 #include <Jolt/Jolt.h>
-#include <Jolt/RegisterTypes.h>
-#include <Jolt/Core/Factory.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Physics/PhysicsSettings.h>
@@ -15,218 +16,27 @@
 #include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
 #include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
-#include <Jolt/Physics/Collision/Shape/ScaledShape.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
-#include <Jolt/Physics/Body/BodyActivationListener.h>
-#include <Jolt/Physics/Character/CharacterVirtual.h>
-#include <Jolt/Physics/Collision/BroadPhase/BroadPhaseQuery.h>
-#include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 
 #include <SDL3/SDL_log.h>
-#include <cstdarg>
 #include <thread>
 #include <cmath>
 #include <algorithm>
-#include <mutex>
 
-// Memory allocation hooks for Jolt
 JPH_SUPPRESS_WARNINGS
 
-// Callback for traces
-static void TraceImpl(const char* inFMT, ...) {
-    va_list args;
-    va_start(args, inFMT);
-    char buffer[1024];
-    vsnprintf(buffer, sizeof(buffer), inFMT, args);
-    va_end(args);
-    SDL_Log("Jolt: %s", buffer);
-}
-
-#ifdef JPH_ENABLE_ASSERTS
-// Callback for asserts
-static bool AssertFailedImpl(const char* inExpression, const char* inMessage, const char* inFile, uint32_t inLine) {
-    SDL_Log("Jolt Assert: %s:%u: (%s) %s", inFile, inLine, inExpression, inMessage ? inMessage : "");
-    return true; // Break into debugger
-}
-#endif
-
-// Layer definitions for object vs broadphase layers
-class BPLayerInterfaceImpl final : public JPH::BroadPhaseLayerInterface {
-public:
-    BPLayerInterfaceImpl() {
-        objectToBroadPhase[PhysicsLayers::NON_MOVING] = JPH::BroadPhaseLayer(BroadPhaseLayers::NON_MOVING);
-        objectToBroadPhase[PhysicsLayers::MOVING] = JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
-        objectToBroadPhase[PhysicsLayers::CHARACTER] = JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
-    }
-
-    virtual uint32_t GetNumBroadPhaseLayers() const override {
-        return BroadPhaseLayers::NUM_LAYERS;
-    }
-
-    virtual JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer inLayer) const override {
-        JPH_ASSERT(inLayer < PhysicsLayers::NUM_LAYERS);
-        return objectToBroadPhase[inLayer];
-    }
-
-#if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
-    virtual const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer inLayer) const override {
-        switch ((JPH::BroadPhaseLayer::Type)inLayer) {
-            case BroadPhaseLayers::NON_MOVING: return "NON_MOVING";
-            case BroadPhaseLayers::MOVING: return "MOVING";
-            default: JPH_ASSERT(false); return "INVALID";
-        }
-    }
-#endif
-
-private:
-    JPH::BroadPhaseLayer objectToBroadPhase[PhysicsLayers::NUM_LAYERS];
-};
-
-// Determines which object layers can collide
-class ObjectLayerPairFilterImpl : public JPH::ObjectLayerPairFilter {
-public:
-    virtual bool ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const override {
-        switch (inObject1) {
-            case PhysicsLayers::NON_MOVING:
-                return inObject2 == PhysicsLayers::MOVING || inObject2 == PhysicsLayers::CHARACTER;
-            case PhysicsLayers::MOVING:
-                return true; // Moving objects collide with everything
-            case PhysicsLayers::CHARACTER:
-                return true; // Character collides with everything
-            default:
-                JPH_ASSERT(false);
-                return false;
-        }
-    }
-};
-
-// Determines if an object and broadphase layer can collide
-class ObjectVsBroadPhaseLayerFilterImpl : public JPH::ObjectVsBroadPhaseLayerFilter {
-public:
-    virtual bool ShouldCollide(JPH::ObjectLayer inLayer1, JPH::BroadPhaseLayer inLayer2) const override {
-        switch (inLayer1) {
-            case PhysicsLayers::NON_MOVING:
-                return inLayer2 == JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
-            case PhysicsLayers::MOVING:
-            case PhysicsLayers::CHARACTER:
-                return true;
-            default:
-                JPH_ASSERT(false);
-                return false;
-        }
-    }
-};
-
-// Contact listener for character
-class CharacterContactListener : public JPH::CharacterContactListener {
-public:
-    virtual void OnContactAdded(const JPH::CharacterVirtual* inCharacter,
-                                 const JPH::BodyID& inBodyID2,
-                                 const JPH::SubShapeID& inSubShapeID2,
-                                 JPH::RVec3Arg inContactPosition,
-                                 JPH::Vec3Arg inContactNormal,
-                                 JPH::CharacterContactSettings& ioSettings) override {
-        // Allow character to be pushed and to push objects
-        ioSettings.mCanPushCharacter = true;
-        ioSettings.mCanReceiveImpulses = true;
-    }
-};
-
-// Static instances
-static BPLayerInterfaceImpl broadPhaseLayerInterface;
-static ObjectLayerPairFilterImpl objectLayerPairFilter;
-static ObjectVsBroadPhaseLayerFilterImpl objectVsBroadPhaseLayerFilter;
-static CharacterContactListener characterContactListener;
-
-// JoltRuntime RAII wrapper for global Jolt state
-// Uses weak_ptr to allow multiple PhysicsWorld instances to share runtime
-namespace {
-    std::weak_ptr<JoltRuntime> g_joltRuntime;
-    std::mutex g_joltMutex;
-}
-
-struct JoltRuntime {
-    JoltRuntime() {
-        // Register allocation hook
-        JPH::RegisterDefaultAllocator();
-
-        // Install callbacks
-        JPH::Trace = TraceImpl;
-        JPH_IF_ENABLE_ASSERTS(JPH::AssertFailed = AssertFailedImpl;)
-
-        // Create factory
-        JPH::Factory::sInstance = new JPH::Factory();
-
-        // Register all Jolt physics types
-        JPH::RegisterTypes();
-
-        SDL_Log("Jolt runtime initialized");
-    }
-
-    ~JoltRuntime() {
-        // Unregisters all types with the factory and cleans up the default material
-        JPH::UnregisterTypes();
-
-        // Destroy factory
-        delete JPH::Factory::sInstance;
-        JPH::Factory::sInstance = nullptr;
-
-        SDL_Log("Jolt runtime shutdown");
-    }
-
-    // Get or create the shared runtime
-    static std::shared_ptr<JoltRuntime> acquire() {
-        std::lock_guard<std::mutex> lock(g_joltMutex);
-        auto runtime = g_joltRuntime.lock();
-        if (!runtime) {
-            runtime = std::make_shared<JoltRuntime>();
-            g_joltRuntime = runtime;
-        }
-        return runtime;
-    }
-
-    // Non-copyable, non-movable
-    JoltRuntime(const JoltRuntime&) = delete;
-    JoltRuntime& operator=(const JoltRuntime&) = delete;
-    JoltRuntime(JoltRuntime&&) = delete;
-    JoltRuntime& operator=(JoltRuntime&&) = delete;
-};
-
-// Helper conversions
-static inline JPH::Vec3 toJolt(const glm::vec3& v) {
-    return JPH::Vec3(v.x, v.y, v.z);
-}
-
-static inline JPH::Quat toJolt(const glm::quat& q) {
-    return JPH::Quat(q.x, q.y, q.z, q.w);
-}
-
-static inline glm::vec3 toGLM(const JPH::Vec3& v) {
-    return glm::vec3(v.GetX(), v.GetY(), v.GetZ());
-}
-
-// Only define RVec3 overload if it's a different type (double precision mode)
-#ifdef JPH_DOUBLE_PRECISION
-static inline glm::vec3 toGLM(const JPH::RVec3& v) {
-    return glm::vec3(static_cast<float>(v.GetX()), static_cast<float>(v.GetY()), static_cast<float>(v.GetZ()));
-}
-#endif
-
-static inline glm::quat toGLM(const JPH::Quat& q) {
-    return glm::quat(q.GetW(), q.GetX(), q.GetY(), q.GetZ());
-}
+using namespace PhysicsConversions;
 
 PhysicsWorld::PhysicsWorld() = default;
 
 PhysicsWorld::~PhysicsWorld() {
     // RAII cleanup: reset unique_ptrs in reverse order of creation
-    character.reset();
-    physicsSystem.reset();
-    jobSystem.reset();
-    tempAllocator.reset();
+    physicsSystem_.reset();
+    jobSystem_.reset();
+    tempAllocator_.reset();
 
     // Release our reference to the Jolt runtime
     // When the last PhysicsWorld is destroyed, this will trigger JoltRuntime cleanup
@@ -237,37 +47,28 @@ PhysicsWorld::~PhysicsWorld() {
 
 PhysicsWorld::PhysicsWorld(PhysicsWorld&& other) noexcept
     : joltRuntime_(std::move(other.joltRuntime_))
-    , tempAllocator(std::move(other.tempAllocator))
-    , jobSystem(std::move(other.jobSystem))
-    , physicsSystem(std::move(other.physicsSystem))
-    , character(std::move(other.character))
-    , characterHeight(other.characterHeight)
-    , characterRadius(other.characterRadius)
-    , characterDesiredVelocity(other.characterDesiredVelocity)
-    , characterWantsJump(other.characterWantsJump)
-    , accumulatedTime(other.accumulatedTime) {
+    , tempAllocator_(std::move(other.tempAllocator_))
+    , jobSystem_(std::move(other.jobSystem_))
+    , physicsSystem_(std::move(other.physicsSystem_))
+    , character_(std::move(other.character_))
+    , accumulatedTime_(other.accumulatedTime_) {
 }
 
 PhysicsWorld& PhysicsWorld::operator=(PhysicsWorld&& other) noexcept {
     if (this != &other) {
         // Clean up existing resources
-        character.reset();
-        physicsSystem.reset();
-        jobSystem.reset();
-        tempAllocator.reset();
+        physicsSystem_.reset();
+        jobSystem_.reset();
+        tempAllocator_.reset();
         joltRuntime_.reset();
 
         // Move resources from other
         joltRuntime_ = std::move(other.joltRuntime_);
-        tempAllocator = std::move(other.tempAllocator);
-        jobSystem = std::move(other.jobSystem);
-        physicsSystem = std::move(other.physicsSystem);
-        character = std::move(other.character);
-        characterHeight = other.characterHeight;
-        characterRadius = other.characterRadius;
-        characterDesiredVelocity = other.characterDesiredVelocity;
-        characterWantsJump = other.characterWantsJump;
-        accumulatedTime = other.accumulatedTime;
+        tempAllocator_ = std::move(other.tempAllocator_);
+        jobSystem_ = std::move(other.jobSystem_);
+        physicsSystem_ = std::move(other.physicsSystem_);
+        character_ = std::move(other.character_);
+        accumulatedTime_ = other.accumulatedTime_;
     }
     return *this;
 }
@@ -285,11 +86,11 @@ bool PhysicsWorld::initInternal() {
     joltRuntime_ = JoltRuntime::acquire();
 
     // Create temp allocator (10 MB)
-    tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(10 * 1024 * 1024);
+    tempAllocator_ = std::make_unique<JPH::TempAllocatorImpl>(10 * 1024 * 1024);
 
     // Create job system with thread count
     int numThreads = std::max(1, static_cast<int>(std::thread::hardware_concurrency()) - 1);
-    jobSystem = std::make_unique<JPH::JobSystemThreadPool>(
+    jobSystem_ = std::make_unique<JPH::JobSystemThreadPool>(
         JPH::cMaxPhysicsJobs,
         JPH::cMaxPhysicsBarriers,
         numThreads
@@ -301,19 +102,19 @@ bool PhysicsWorld::initInternal() {
     const uint32_t maxBodyPairs = 1024;
     const uint32_t maxContactConstraints = 1024;
 
-    physicsSystem = std::make_unique<JPH::PhysicsSystem>();
-    physicsSystem->Init(
+    physicsSystem_ = std::make_unique<JPH::PhysicsSystem>();
+    physicsSystem_->Init(
         maxBodies,
         numBodyMutexes,
         maxBodyPairs,
         maxContactConstraints,
-        broadPhaseLayerInterface,
-        objectVsBroadPhaseLayerFilter,
-        objectLayerPairFilter
+        g_broadPhaseLayerInterface,
+        g_objectVsBroadPhaseLayerFilter,
+        g_objectLayerPairFilter
     );
 
     // Set gravity
-    physicsSystem->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
+    physicsSystem_->SetGravity(JPH::Vec3(0.0f, -9.81f, 0.0f));
 
     SDL_Log("Physics system initialized with %d worker threads", numThreads);
     return true;
@@ -321,82 +122,30 @@ bool PhysicsWorld::initInternal() {
 
 void PhysicsWorld::update(float deltaTime) {
     // Fixed timestep physics with accumulator
-    accumulatedTime += deltaTime;
+    accumulatedTime_ += deltaTime;
     int numSteps = 0;
 
-    while (accumulatedTime >= FIXED_TIMESTEP && numSteps < MAX_SUBSTEPS) {
+    while (accumulatedTime_ >= FIXED_TIMESTEP && numSteps < MAX_SUBSTEPS) {
         // Update character if exists
-        if (character) {
-            // Apply character input following Jolt's CharacterVirtual documentation exactly
-            JPH::Vec3 currentVelocity = character->GetLinearVelocity();
-            JPH::CharacterVirtual::EGroundState groundState = character->GetGroundState();
-            bool onGround = groundState == JPH::CharacterVirtual::EGroundState::OnGround;
-
-            JPH::Vec3 newVelocity;
-
-            // Horizontal velocity from input
-            newVelocity.SetX(characterDesiredVelocity.x);
-            newVelocity.SetZ(characterDesiredVelocity.z);
-
-            // Vertical velocity per Jolt docs:
-            // OnGround: groundVelocity + horizontal + optional jump + dt*gravity
-            // Else: currentVertical + horizontal + dt*gravity
-            if (onGround) {
-                JPH::Vec3 groundVelocity = character->GetGroundVelocity();
-                float verticalVelocity = groundVelocity.GetY();
-
-                if (characterWantsJump) {
-                    verticalVelocity += 5.0f;
-                    characterWantsJump = false;
-                }
-
-                newVelocity.SetY(verticalVelocity);
-            } else {
-                newVelocity.SetY(currentVelocity.GetY());
-            }
-
-            // Always apply gravity as per docs
-            newVelocity += physicsSystem->GetGravity() * FIXED_TIMESTEP;
-
-            character->SetLinearVelocity(newVelocity);
-
-            // ExtendedUpdate - use zero gravity to avoid applying extra downward force
-            JPH::CharacterVirtual::ExtendedUpdateSettings updateSettings;
-            updateSettings.mStickToFloorStepDown = JPH::Vec3(0, -0.5f, 0);
-            updateSettings.mWalkStairsStepUp = JPH::Vec3(0, 0.4f, 0);
-
-            JPH::DefaultBroadPhaseLayerFilter broadPhaseFilter(objectVsBroadPhaseLayerFilter, PhysicsLayers::CHARACTER);
-            JPH::DefaultObjectLayerFilter objectLayerFilter(objectLayerPairFilter, PhysicsLayers::CHARACTER);
-            JPH::BodyFilter bodyFilter;
-            JPH::ShapeFilter shapeFilter;
-
-            character->ExtendedUpdate(
-                FIXED_TIMESTEP,
-                JPH::Vec3::sZero(),  // No extra gravity - we already applied it above
-                updateSettings,
-                broadPhaseFilter,
-                objectLayerFilter,
-                bodyFilter,
-                shapeFilter,
-                *tempAllocator
-            );
+        if (character_.isValid()) {
+            character_.update(FIXED_TIMESTEP, physicsSystem_.get(), tempAllocator_.get());
         }
 
         // Step physics
-        physicsSystem->Update(FIXED_TIMESTEP, 1, tempAllocator.get(), jobSystem.get());
+        physicsSystem_->Update(FIXED_TIMESTEP, 1, tempAllocator_.get(), jobSystem_.get());
 
-        accumulatedTime -= FIXED_TIMESTEP;
+        accumulatedTime_ -= FIXED_TIMESTEP;
         numSteps++;
     }
 
     // Prevent spiral of death
-    if (accumulatedTime > FIXED_TIMESTEP * MAX_SUBSTEPS) {
-        accumulatedTime = 0.0f;
+    if (accumulatedTime_ > FIXED_TIMESTEP * MAX_SUBSTEPS) {
+        accumulatedTime_ = 0.0f;
     }
 }
 
 PhysicsBodyID PhysicsWorld::createTerrainDisc(float radius, float heightOffset) {
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
 
     // Create a large flat box as the ground plane
     // Box is centered at Y = heightOffset - 0.5 so the top surface is at heightOffset
@@ -432,47 +181,46 @@ PhysicsBodyID PhysicsWorld::createTerrainDisc(float radius, float heightOffset) 
     return body->GetID().GetIndexAndSequenceNumber();
 }
 
-PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, uint32_t sampleCount,
-                                                      float worldSize, float heightScale) {
-    // Call the version with no hole mask
-    return createTerrainHeightfield(samples, nullptr, sampleCount, worldSize, heightScale);
-}
-
-PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const uint8_t* holeMask,
-                                                      uint32_t sampleCount, float worldSize, float heightScale) {
+// Internal helper that consolidates all heightfield creation logic
+PhysicsBodyID PhysicsWorld::createHeightfieldInternal(const float* samples, const uint8_t* holeMask,
+                                                       uint32_t sampleCount, float worldSize,
+                                                       float heightScale, const glm::vec3& worldPosition,
+                                                       bool useHalfTexelOffset) {
     if (!samples || sampleCount < 2) {
         SDL_Log("Invalid heightfield parameters");
         return INVALID_BODY_ID;
     }
 
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
 
     // Convert to world-space heights and apply hole mask
     std::vector<float> joltSamples(sampleCount * sampleCount);
-
-    for (uint32_t y = 0; y < sampleCount; y++) {
-        for (uint32_t x = 0; x < sampleCount; x++) {
-            uint32_t idx = y * sampleCount + x;
-
-            bool isHole = false;
-            if (holeMask) {
-                isHole = holeMask[idx] > 127;
-            }
-
-            if (isHole) {
-                joltSamples[idx] = JPH::HeightFieldShapeConstants::cNoCollisionValue;
-            } else {
-                joltSamples[idx] = TerrainHeight::toWorld(samples[idx], heightScale);
-            }
+    for (uint32_t i = 0; i < sampleCount * sampleCount; i++) {
+        bool isHole = holeMask && holeMask[i] > 127;
+        if (isHole) {
+            joltSamples[i] = JPH::HeightFieldShapeConstants::cNoCollisionValue;
+        } else {
+            joltSamples[i] = TerrainHeight::toWorld(samples[i], heightScale);
         }
     }
 
     // XZ spacing: sampleCount samples span (sampleCount-1) intervals
     float xzScale = worldSize / (sampleCount - 1);
 
+    // Calculate offset
+    float offsetX = -worldSize * 0.5f;
+    float offsetZ = -worldSize * 0.5f;
+
+    // Half-texel offset for tiled terrain to align with GPU texture sampling
+    if (useHalfTexelOffset) {
+        float halfTexel = (worldSize / sampleCount) * 0.5f;
+        offsetX -= halfTexel;
+        offsetZ -= halfTexel;
+    }
+
     JPH::HeightFieldShapeSettings heightFieldSettings(
         joltSamples.data(),
-        JPH::Vec3(-worldSize * 0.5f, 0.0f, -worldSize * 0.5f),
+        JPH::Vec3(offsetX, 0.0f, offsetZ),
         JPH::Vec3(xzScale, 1.0f, xzScale),
         sampleCount
     );
@@ -486,10 +234,10 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const
         return INVALID_BODY_ID;
     }
 
-    // Create the body at the origin (the shape's offset handles positioning)
+    // Create the body at the specified world position
     JPH::BodyCreationSettings bodySettings(
         shapeResult.Get(),
-        JPH::RVec3(0.0, 0.0, 0.0),
+        JPH::RVec3(worldPosition.x, worldPosition.y, worldPosition.z),
         JPH::Quat::sIdentity(),
         JPH::EMotionType::Static,
         PhysicsLayers::NON_MOVING
@@ -505,137 +253,43 @@ PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const
 
     bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
 
-    SDL_Log("Created terrain heightfield %ux%u, world size %.1f, height scale %.1f",
-            sampleCount, sampleCount, worldSize, heightScale);
+    if (worldPosition == glm::vec3(0.0f)) {
+        SDL_Log("Created terrain heightfield %ux%u, world size %.1f, height scale %.1f",
+                sampleCount, sampleCount, worldSize, heightScale);
+    }
+
     return body->GetID().GetIndexAndSequenceNumber();
+}
+
+PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, uint32_t sampleCount,
+                                                      float worldSize, float heightScale) {
+    return createHeightfieldInternal(samples, nullptr, sampleCount, worldSize, heightScale,
+                                     glm::vec3(0.0f), false);
+}
+
+PhysicsBodyID PhysicsWorld::createTerrainHeightfield(const float* samples, const uint8_t* holeMask,
+                                                      uint32_t sampleCount, float worldSize, float heightScale) {
+    return createHeightfieldInternal(samples, holeMask, sampleCount, worldSize, heightScale,
+                                     glm::vec3(0.0f), false);
 }
 
 PhysicsBodyID PhysicsWorld::createTerrainHeightfieldAtPosition(const float* samples, uint32_t sampleCount,
                                                                  float tileWorldSize, float heightScale,
                                                                  const glm::vec3& worldPosition) {
-    if (!samples || sampleCount < 2) {
-        SDL_Log("Invalid heightfield parameters");
-        return INVALID_BODY_ID;
-    }
-
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
-
-    // Convert to world-space heights
-    std::vector<float> joltSamples(sampleCount * sampleCount);
-    for (uint32_t i = 0; i < sampleCount * sampleCount; i++) {
-        joltSamples[i] = TerrainHeight::toWorld(samples[i], heightScale);
-    }
-
-    // XZ spacing
-    float xzScale = tileWorldSize / (sampleCount - 1);
-
-    // Half-texel offset to align with GPU texture sampling
-    float halfTexel = (tileWorldSize / sampleCount) * 0.5f;
-
-    JPH::HeightFieldShapeSettings heightFieldSettings(
-        joltSamples.data(),
-        JPH::Vec3(-tileWorldSize * 0.5f - halfTexel, 0.0f, -tileWorldSize * 0.5f - halfTexel),
-        JPH::Vec3(xzScale, 1.0f, xzScale),
-        sampleCount
-    );
-
-    heightFieldSettings.mMaterials.push_back(new JPH::PhysicsMaterial());
-
-    JPH::ShapeSettings::ShapeResult shapeResult = heightFieldSettings.Create();
-    if (!shapeResult.IsValid()) {
-        SDL_Log("Failed to create heightfield shape: %s", shapeResult.GetError().c_str());
-        return INVALID_BODY_ID;
-    }
-
-    // Create body at the specified world position
-    JPH::BodyCreationSettings bodySettings(
-        shapeResult.Get(),
-        JPH::RVec3(worldPosition.x, worldPosition.y, worldPosition.z),
-        JPH::Quat::sIdentity(),
-        JPH::EMotionType::Static,
-        PhysicsLayers::NON_MOVING
-    );
-    bodySettings.mFriction = 0.8f;
-    bodySettings.mRestitution = 0.0f;
-
-    JPH::Body* body = bodyInterface.CreateBody(bodySettings);
-    if (!body) {
-        SDL_Log("Failed to create heightfield body");
-        return INVALID_BODY_ID;
-    }
-
-    bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
-
-    return body->GetID().GetIndexAndSequenceNumber();
+    return createHeightfieldInternal(samples, nullptr, sampleCount, tileWorldSize, heightScale,
+                                     worldPosition, true);
 }
 
 PhysicsBodyID PhysicsWorld::createTerrainHeightfieldAtPosition(const float* samples, const uint8_t* holeMask,
                                                                  uint32_t sampleCount, float tileWorldSize,
                                                                  float heightScale, const glm::vec3& worldPosition) {
-    if (!samples || sampleCount < 2) {
-        SDL_Log("Invalid heightfield parameters");
-        return INVALID_BODY_ID;
-    }
-
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
-
-    // Convert to world-space heights and apply hole mask
-    std::vector<float> joltSamples(sampleCount * sampleCount);
-    for (uint32_t i = 0; i < sampleCount * sampleCount; i++) {
-        bool isHole = holeMask && holeMask[i] > 127;
-        if (isHole) {
-            joltSamples[i] = JPH::HeightFieldShapeConstants::cNoCollisionValue;
-        } else {
-            joltSamples[i] = TerrainHeight::toWorld(samples[i], heightScale);
-        }
-    }
-
-    // XZ spacing
-    float xzScale = tileWorldSize / (sampleCount - 1);
-
-    // Half-texel offset to align with GPU texture sampling
-    float halfTexel = (tileWorldSize / sampleCount) * 0.5f;
-
-    JPH::HeightFieldShapeSettings heightFieldSettings(
-        joltSamples.data(),
-        JPH::Vec3(-tileWorldSize * 0.5f - halfTexel, 0.0f, -tileWorldSize * 0.5f - halfTexel),
-        JPH::Vec3(xzScale, 1.0f, xzScale),
-        sampleCount
-    );
-
-    heightFieldSettings.mMaterials.push_back(new JPH::PhysicsMaterial());
-
-    JPH::ShapeSettings::ShapeResult shapeResult = heightFieldSettings.Create();
-    if (!shapeResult.IsValid()) {
-        SDL_Log("Failed to create heightfield shape: %s", shapeResult.GetError().c_str());
-        return INVALID_BODY_ID;
-    }
-
-    // Create body at the specified world position
-    JPH::BodyCreationSettings bodySettings(
-        shapeResult.Get(),
-        JPH::RVec3(worldPosition.x, worldPosition.y, worldPosition.z),
-        JPH::Quat::sIdentity(),
-        JPH::EMotionType::Static,
-        PhysicsLayers::NON_MOVING
-    );
-    bodySettings.mFriction = 0.8f;
-    bodySettings.mRestitution = 0.0f;
-
-    JPH::Body* body = bodyInterface.CreateBody(bodySettings);
-    if (!body) {
-        SDL_Log("Failed to create heightfield body");
-        return INVALID_BODY_ID;
-    }
-
-    bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
-
-    return body->GetID().GetIndexAndSequenceNumber();
+    return createHeightfieldInternal(samples, holeMask, sampleCount, tileWorldSize, heightScale,
+                                     worldPosition, true);
 }
 
 PhysicsBodyID PhysicsWorld::createBox(const glm::vec3& position, const glm::vec3& halfExtents,
                                        float mass, float friction, float restitution) {
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
 
     JPH::BoxShapeSettings boxSettings(toJolt(halfExtents));
     JPH::ShapeSettings::ShapeResult shapeResult = boxSettings.Create();
@@ -655,7 +309,7 @@ PhysicsBodyID PhysicsWorld::createBox(const glm::vec3& position, const glm::vec3
     bodySettings.mRestitution = restitution;
     bodySettings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
     bodySettings.mMassPropertiesOverride.mMass = mass;
-    bodySettings.mLinearDamping = 0.05f;  // Add slight damping to reduce jitter
+    bodySettings.mLinearDamping = 0.05f;
     bodySettings.mAngularDamping = 0.05f;
 
     JPH::Body* body = bodyInterface.CreateBody(bodySettings);
@@ -670,7 +324,7 @@ PhysicsBodyID PhysicsWorld::createBox(const glm::vec3& position, const glm::vec3
 
 PhysicsBodyID PhysicsWorld::createSphere(const glm::vec3& position, float radius,
                                           float mass, float friction, float restitution) {
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
 
     JPH::SphereShapeSettings sphereSettings(radius);
     JPH::ShapeSettings::ShapeResult shapeResult = sphereSettings.Create();
@@ -690,7 +344,7 @@ PhysicsBodyID PhysicsWorld::createSphere(const glm::vec3& position, float radius
     bodySettings.mRestitution = restitution;
     bodySettings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
     bodySettings.mMassPropertiesOverride.mMass = mass;
-    bodySettings.mLinearDamping = 0.05f;  // Add slight damping to reduce jitter
+    bodySettings.mLinearDamping = 0.05f;
     bodySettings.mAngularDamping = 0.05f;
 
     JPH::Body* body = bodyInterface.CreateBody(bodySettings);
@@ -705,7 +359,7 @@ PhysicsBodyID PhysicsWorld::createSphere(const glm::vec3& position, float radius
 
 PhysicsBodyID PhysicsWorld::createStaticBox(const glm::vec3& position, const glm::vec3& halfExtents,
                                              const glm::quat& rotation) {
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
 
     JPH::BoxShapeSettings boxSettings(toJolt(halfExtents));
     JPH::ShapeSettings::ShapeResult shapeResult = boxSettings.Create();
@@ -738,7 +392,7 @@ PhysicsBodyID PhysicsWorld::createStaticConvexHull(const glm::vec3& position, co
                                                     const glm::quat& rotation) {
     if (vertexCount < 4) return INVALID_BODY_ID;
 
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
 
     // Convert glm vertices to Jolt Vec3 array with scale applied
     std::vector<JPH::Vec3> joltVertices;
@@ -749,7 +403,7 @@ PhysicsBodyID PhysicsWorld::createStaticConvexHull(const glm::vec3& position, co
 
     // Create convex hull from vertices
     JPH::ConvexHullShapeSettings hullSettings(joltVertices.data(), static_cast<int>(joltVertices.size()));
-    hullSettings.mMaxConvexRadius = 0.05f;  // Small radius for sharp edges
+    hullSettings.mMaxConvexRadius = 0.05f;
     JPH::ShapeSettings::ShapeResult shapeResult = hullSettings.Create();
     if (!shapeResult.IsValid()) {
         SDL_Log("Failed to create convex hull shape: %s", shapeResult.GetError().c_str());
@@ -763,7 +417,7 @@ PhysicsBodyID PhysicsWorld::createStaticConvexHull(const glm::vec3& position, co
         JPH::EMotionType::Static,
         PhysicsLayers::NON_MOVING
     );
-    bodySettings.mFriction = 0.7f;  // Rocks are rough
+    bodySettings.mFriction = 0.7f;
 
     JPH::Body* body = bodyInterface.CreateBody(bodySettings);
     if (!body) {
@@ -777,7 +431,7 @@ PhysicsBodyID PhysicsWorld::createStaticConvexHull(const glm::vec3& position, co
 
 PhysicsBodyID PhysicsWorld::createStaticCapsule(const glm::vec3& position, float halfHeight, float radius,
                                                  const glm::quat& rotation) {
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
 
     // Jolt capsules are oriented along the Y axis by default
     JPH::CapsuleShapeSettings capsuleSettings(halfHeight, radius);
@@ -815,7 +469,7 @@ PhysicsBodyID PhysicsWorld::createStaticCompoundCapsules(const glm::vec3& positi
         return INVALID_BODY_ID;
     }
 
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
 
     // Build compound shape from multiple capsules
     JPH::StaticCompoundShapeSettings compoundSettings;
@@ -861,81 +515,27 @@ PhysicsBodyID PhysicsWorld::createStaticCompoundCapsules(const glm::vec3& positi
 }
 
 bool PhysicsWorld::createCharacter(const glm::vec3& position, float height, float radius) {
-    characterHeight = height;
-    characterRadius = radius;
-
-    // Create a capsule shape for the character
-    // Capsule height is the cylinder height (excluding hemispheres)
-    float cylinderHeight = height - 2.0f * radius;
-    if (cylinderHeight < 0.0f) cylinderHeight = 0.01f;
-
-    JPH::RefConst<JPH::Shape> standingShape = new JPH::CapsuleShape(cylinderHeight * 0.5f, radius);
-
-    JPH::CharacterVirtualSettings settings;
-    settings.mShape = standingShape;
-    settings.mMaxSlopeAngle = JPH::DegreesToRadians(45.0f);
-    settings.mMaxStrength = 25.0f;  // Further reduced to minimize impulses
-    settings.mBackFaceMode = JPH::EBackFaceMode::CollideWithBackFaces;
-    settings.mCharacterPadding = 0.05f;  // Increased from 0.02 for better stability
-    settings.mPenetrationRecoverySpeed = 0.4f;  // Further reduced for gentler contact resolution
-    settings.mPredictiveContactDistance = 0.1f;
-    settings.mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -radius);
-    settings.mMass = 70.0f;  // Reduced mass to lessen impact on light objects
-
-    // Position the character so feet are at the given Y
-    JPH::RVec3 characterPos(position.x, position.y + height * 0.5f, position.z);
-
-    character = std::make_unique<JPH::CharacterVirtual>(
-        &settings,
-        characterPos,
-        JPH::Quat::sIdentity(),
-        0,  // User data
-        physicsSystem.get()
-    );
-    character->SetListener(&characterContactListener);
-
-    SDL_Log("Created character controller at (%.1f, %.1f, %.1f)", position.x, position.y, position.z);
-    return true;
+    return character_.create(physicsSystem_.get(), position, height, radius);
 }
 
 void PhysicsWorld::updateCharacter(float deltaTime, const glm::vec3& desiredVelocity, bool jump) {
-    if (!character) return;
-
-    // Store the desired velocity and jump request for the fixed timestep update
-    characterDesiredVelocity = desiredVelocity;
-    characterWantsJump = jump;
+    character_.setInput(desiredVelocity, jump);
 }
 
 void PhysicsWorld::setCharacterPosition(const glm::vec3& position) {
-    if (!character) return;
-
-    // Character position is at center, so offset by half height
-    JPH::RVec3 centerPos(position.x, position.y + characterHeight * 0.5f, position.z);
-    character->SetPosition(centerPos);
-    // Reset velocity to avoid glitches when teleporting
-    character->SetLinearVelocity(JPH::Vec3::sZero());
+    character_.setPosition(position);
 }
 
 glm::vec3 PhysicsWorld::getCharacterPosition() const {
-    if (!character) return glm::vec3(0.0f);
-
-    JPH::RVec3 pos = character->GetPosition();
-    // Return foot position (bottom of character)
-    return glm::vec3(
-        static_cast<float>(pos.GetX()),
-        static_cast<float>(pos.GetY()) - characterHeight * 0.5f,
-        static_cast<float>(pos.GetZ())
-    );
+    return character_.getPosition();
 }
 
 glm::vec3 PhysicsWorld::getCharacterVelocity() const {
-    if (!character) return glm::vec3(0.0f);
-    return toGLM(character->GetLinearVelocity());
+    return character_.getVelocity();
 }
 
 bool PhysicsWorld::isCharacterOnGround() const {
-    if (!character) return false;
-    return character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
+    return character_.isOnGround();
 }
 
 PhysicsBodyInfo PhysicsWorld::getBodyInfo(PhysicsBodyID bodyID) const {
@@ -945,7 +545,7 @@ PhysicsBodyInfo PhysicsWorld::getBodyInfo(PhysicsBodyID bodyID) const {
     JPH::BodyID joltID;
     joltID = JPH::BodyID(bodyID);
 
-    const JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    const JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
     if (!bodyInterface.IsAdded(joltID)) return info;
 
     info.bodyID = bodyID;
@@ -961,7 +561,7 @@ void PhysicsWorld::setBodyPosition(PhysicsBodyID bodyID, const glm::vec3& positi
     if (bodyID == INVALID_BODY_ID) return;
 
     JPH::BodyID joltID(bodyID);
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
     if (!bodyInterface.IsAdded(joltID)) return;
 
     bodyInterface.SetPosition(joltID, JPH::RVec3(position.x, position.y, position.z), JPH::EActivation::Activate);
@@ -971,7 +571,7 @@ void PhysicsWorld::setBodyVelocity(PhysicsBodyID bodyID, const glm::vec3& veloci
     if (bodyID == INVALID_BODY_ID) return;
 
     JPH::BodyID joltID(bodyID);
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
     if (!bodyInterface.IsAdded(joltID)) return;
 
     bodyInterface.SetLinearVelocity(joltID, toJolt(velocity));
@@ -981,7 +581,7 @@ void PhysicsWorld::applyImpulse(PhysicsBodyID bodyID, const glm::vec3& impulse) 
     if (bodyID == INVALID_BODY_ID) return;
 
     JPH::BodyID joltID(bodyID);
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
     if (!bodyInterface.IsAdded(joltID)) return;
 
     bodyInterface.AddImpulse(joltID, toJolt(impulse));
@@ -993,7 +593,7 @@ glm::mat4 PhysicsWorld::getBodyTransform(PhysicsBodyID bodyID) const {
     }
 
     JPH::BodyID joltID(bodyID);
-    const JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    const JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
     if (!bodyInterface.IsAdded(joltID)) {
         return glm::mat4(1.0f);
     }
@@ -1012,7 +612,7 @@ glm::mat4 PhysicsWorld::getBodyTransform(PhysicsBodyID bodyID) const {
 }
 
 int PhysicsWorld::getActiveBodyCount() const {
-    return static_cast<int>(physicsSystem->GetNumActiveBodies(JPH::EBodyType::RigidBody));
+    return static_cast<int>(physicsSystem_->GetNumActiveBodies(JPH::EBodyType::RigidBody));
 }
 
 std::vector<RaycastHit> PhysicsWorld::castRayAllHits(const glm::vec3& from, const glm::vec3& to) const {
@@ -1031,14 +631,13 @@ std::vector<RaycastHit> PhysicsWorld::castRayAllHits(const glm::vec3& from, cons
     ray.mDirection = JPH::Vec3(direction.x * rayLength, direction.y * rayLength, direction.z * rayLength);
 
     // Use NarrowPhaseQuery for accurate shape-level collision detection
-    // BroadPhaseQuery only tests against AABBs, which causes false positives for heightfields
     JPH::AllHitCollisionCollector<JPH::CastRayCollector> collector;
 
-    // Use RayCastSettings with default backface mode (ignores backfaces for triangles/convex)
+    // Use RayCastSettings with default backface mode
     JPH::RayCastSettings settings;
 
-    // Cast the ray using narrowphase - this tests against actual shape geometry
-    physicsSystem->GetNarrowPhaseQuery().CastRay(ray, settings, collector);
+    // Cast the ray using narrowphase
+    physicsSystem_->GetNarrowPhaseQuery().CastRay(ray, settings, collector);
 
     // Convert results
     for (const auto& hit : collector.mHits) {
@@ -1062,7 +661,7 @@ void PhysicsWorld::removeBody(PhysicsBodyID bodyID) {
     if (bodyID == INVALID_BODY_ID) return;
 
     JPH::BodyID joltID(bodyID);
-    JPH::BodyInterface& bodyInterface = physicsSystem->GetBodyInterface();
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
 
     if (bodyInterface.IsAdded(joltID)) {
         bodyInterface.RemoveBody(joltID);

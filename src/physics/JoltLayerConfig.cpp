@@ -1,0 +1,7 @@
+#include "JoltLayerConfig.h"
+
+// Global instances for layer filtering
+BPLayerInterfaceImpl g_broadPhaseLayerInterface;
+ObjectLayerPairFilterImpl g_objectLayerPairFilter;
+ObjectVsBroadPhaseLayerFilterImpl g_objectVsBroadPhaseLayerFilter;
+CharacterContactListener g_characterContactListener;
