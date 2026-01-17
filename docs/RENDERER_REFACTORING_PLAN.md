@@ -103,6 +103,6 @@ private:
 - [x] Step 4: Extract FrameDataBuilder utility
 - [x] Step 5: Move state sync to control subsystems (already done in main branch)
 - [x] Step 6: Move debug visualization (updateRoadRiverVisualization moved to DebugControlSubsystem)
-- [ ] Step 7: Move Hi-Z object data
+- [ ] Step 7: Move Hi-Z object data (deferred - would require adding scene/rock dependencies to HiZSystem)
 - [ ] Step 8: Cleanup legacy pipeline
 - [ ] Step 9: Remove interface accessors
