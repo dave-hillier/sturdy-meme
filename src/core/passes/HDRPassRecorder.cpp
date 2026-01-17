@@ -33,8 +33,13 @@
 #include <algorithm>
 #include <numeric>
 
+HDRPassRecorder::HDRPassRecorder(const HDRPassResources& resources)
+    : resources_(resources)
+{
+}
+
 HDRPassRecorder::HDRPassRecorder(RendererSystems& systems)
-    : systems_(systems)
+    : resources_(HDRPassResources::collect(systems))
 {
 }
 
@@ -42,93 +47,93 @@ void HDRPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float tim
     vk::CommandBuffer vkCmd(cmd);
 
     // Wrap entire HDR pass in a GPU zone to measure total time
-    systems_.profiler().beginGpuZone(cmd, "HDRPass");
+    resources_.profiler->beginGpuZone(cmd, "HDRPass");
 
     std::array<vk::ClearValue, 2> clearValues{};
     clearValues[0].color = vk::ClearColorValue{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
     clearValues[1].depthStencil = vk::ClearDepthStencilValue{1.0f, 0};
 
-    VkExtent2D rawExtent = systems_.postProcess().getExtent();
+    VkExtent2D rawExtent = resources_.postProcess->getExtent();
     vk::Extent2D hdrExtent = vk::Extent2D{}.setWidth(rawExtent.width).setHeight(rawExtent.height);
 
     auto hdrPassInfo = vk::RenderPassBeginInfo{}
-        .setRenderPass(systems_.postProcess().getHDRRenderPass())
-        .setFramebuffer(systems_.postProcess().getHDRFramebuffer())
+        .setRenderPass(resources_.postProcess->getHDRRenderPass())
+        .setFramebuffer(resources_.postProcess->getHDRFramebuffer())
         .setRenderArea(vk::Rect2D{{0, 0}, hdrExtent})
         .setClearValues(clearValues);
 
     vkCmd.beginRenderPass(hdrPassInfo, vk::SubpassContents::eInline);
 
     // Draw sky (with atmosphere LUT bindings)
-    systems_.profiler().beginGpuZone(cmd, "HDR:Sky");
-    systems_.sky().recordDraw(cmd, frameIndex);
-    systems_.profiler().endGpuZone(cmd, "HDR:Sky");
+    resources_.profiler->beginGpuZone(cmd, "HDR:Sky");
+    resources_.sky->recordDraw(cmd, frameIndex);
+    resources_.profiler->endGpuZone(cmd, "HDR:Sky");
 
     // Draw terrain (LEB adaptive tessellation)
     if (config_.terrainEnabled) {
-        systems_.profiler().beginGpuZone(cmd, "HDR:Terrain");
-        systems_.terrain().recordDraw(cmd, frameIndex);
-        systems_.profiler().endGpuZone(cmd, "HDR:Terrain");
+        resources_.profiler->beginGpuZone(cmd, "HDR:Terrain");
+        resources_.terrain->recordDraw(cmd, frameIndex);
+        resources_.profiler->endGpuZone(cmd, "HDR:Terrain");
     }
 
     // Draw Catmull-Clark subdivision surfaces
-    systems_.profiler().beginGpuZone(cmd, "HDR:CatmullClark");
-    systems_.catmullClark().recordDraw(cmd, frameIndex);
-    systems_.profiler().endGpuZone(cmd, "HDR:CatmullClark");
+    resources_.profiler->beginGpuZone(cmd, "HDR:CatmullClark");
+    resources_.geometry.catmullClark().recordDraw(cmd, frameIndex);
+    resources_.profiler->endGpuZone(cmd, "HDR:CatmullClark");
 
     // Draw scene objects (static meshes)
-    systems_.profiler().beginGpuZone(cmd, "HDR:SceneObjects");
+    resources_.profiler->beginGpuZone(cmd, "HDR:SceneObjects");
     if (config_.sceneObjectsPipeline) {
         vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, *config_.sceneObjectsPipeline);
     }
     recordSceneObjects(cmd, frameIndex);
-    systems_.profiler().endGpuZone(cmd, "HDR:SceneObjects");
+    resources_.profiler->endGpuZone(cmd, "HDR:SceneObjects");
 
     // Draw skinned character with GPU skinning
-    systems_.profiler().beginGpuZone(cmd, "HDR:SkinnedChar");
+    resources_.profiler->beginGpuZone(cmd, "HDR:SkinnedChar");
     {
-        SceneBuilder& sceneBuilder = systems_.scene().getSceneBuilder();
+        SceneBuilder& sceneBuilder = resources_.scene->getSceneBuilder();
         if (sceneBuilder.hasCharacter()) {
             const auto& sceneObjects = sceneBuilder.getRenderables();
             size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
             if (playerIndex < sceneObjects.size()) {
                 const Renderable& playerObj = sceneObjects[playerIndex];
-                systems_.skinnedMesh().record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
+                resources_.skinnedMesh->record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
             }
         }
     }
-    systems_.profiler().endGpuZone(cmd, "HDR:SkinnedChar");
+    resources_.profiler->endGpuZone(cmd, "HDR:SkinnedChar");
 
     // Draw grass
-    systems_.profiler().beginGpuZone(cmd, "HDR:Grass");
-    systems_.grass().recordDraw(cmd, frameIndex, time);
-    systems_.profiler().endGpuZone(cmd, "HDR:Grass");
+    resources_.profiler->beginGpuZone(cmd, "HDR:Grass");
+    resources_.vegetation.grass().recordDraw(cmd, frameIndex, time);
+    resources_.profiler->endGpuZone(cmd, "HDR:Grass");
 
     // Draw water surface (after opaque geometry, blended)
     // Use temporal tile culling: skip if no tiles were visible last frame
-    if (!systems_.hasWaterTileCull() ||
-        systems_.waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
-        systems_.profiler().beginGpuZone(cmd, "HDR:Water");
-        systems_.water().recordDraw(cmd, frameIndex);
-        systems_.profiler().endGpuZone(cmd, "HDR:Water");
+    if (!resources_.hasWaterTileCull() ||
+        resources_.waterTileCull->wasWaterVisibleLastFrame(frameIndex)) {
+        resources_.profiler->beginGpuZone(cmd, "HDR:Water");
+        resources_.water->recordDraw(cmd, frameIndex);
+        resources_.profiler->endGpuZone(cmd, "HDR:Water");
     }
 
     // Draw falling leaves - after grass, before weather
-    systems_.profiler().beginGpuZone(cmd, "HDR:Leaves");
-    systems_.leaf().recordDraw(cmd, frameIndex, time);
-    systems_.profiler().endGpuZone(cmd, "HDR:Leaves");
+    resources_.profiler->beginGpuZone(cmd, "HDR:Leaves");
+    resources_.snow.leaf().recordDraw(cmd, frameIndex, time);
+    resources_.profiler->endGpuZone(cmd, "HDR:Leaves");
 
     // Draw weather particles (rain/snow) - after opaque geometry
-    systems_.profiler().beginGpuZone(cmd, "HDR:Weather");
-    systems_.weather().recordDraw(cmd, frameIndex, time);
-    systems_.profiler().endGpuZone(cmd, "HDR:Weather");
+    resources_.profiler->beginGpuZone(cmd, "HDR:Weather");
+    resources_.snow.weather().recordDraw(cmd, frameIndex, time);
+    resources_.profiler->endGpuZone(cmd, "HDR:Weather");
 
     // Draw debug lines (if any are present - includes physics debug and road/river visualization)
     recordDebugLines(cmd);
 
     vkCmd.endRenderPass();
 
-    systems_.profiler().endGpuZone(cmd, "HDRPass");
+    resources_.profiler->endGpuZone(cmd, "HDRPass");
 }
 
 void HDRPassRecorder::recordWithSecondaries(VkCommandBuffer cmd, uint32_t frameIndex, float time,
@@ -136,18 +141,18 @@ void HDRPassRecorder::recordWithSecondaries(VkCommandBuffer cmd, uint32_t frameI
     vk::CommandBuffer vkCmd(cmd);
 
     // Wrap entire HDR pass in a GPU zone to measure total time
-    systems_.profiler().beginGpuZone(cmd, "HDRPass");
+    resources_.profiler->beginGpuZone(cmd, "HDRPass");
 
     std::array<vk::ClearValue, 2> clearValues{};
     clearValues[0].color = vk::ClearColorValue{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
     clearValues[1].depthStencil = vk::ClearDepthStencilValue{1.0f, 0};
 
-    VkExtent2D rawExtent = systems_.postProcess().getExtent();
+    VkExtent2D rawExtent = resources_.postProcess->getExtent();
     vk::Extent2D hdrExtent = vk::Extent2D{}.setWidth(rawExtent.width).setHeight(rawExtent.height);
 
     auto hdrPassInfo = vk::RenderPassBeginInfo{}
-        .setRenderPass(systems_.postProcess().getHDRRenderPass())
-        .setFramebuffer(systems_.postProcess().getHDRFramebuffer())
+        .setRenderPass(resources_.postProcess->getHDRRenderPass())
+        .setFramebuffer(resources_.postProcess->getHDRFramebuffer())
         .setRenderArea(vk::Rect2D{{0, 0}, hdrExtent})
         .setClearValues(clearValues);
 
@@ -162,7 +167,7 @@ void HDRPassRecorder::recordWithSecondaries(VkCommandBuffer cmd, uint32_t frameI
 
     vkCmd.endRenderPass();
 
-    systems_.profiler().endGpuZone(cmd, "HDRPass");
+    resources_.profiler->endGpuZone(cmd, "HDRPass");
 }
 
 void HDRPassRecorder::recordSecondarySlot(VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t slot) {
@@ -174,65 +179,65 @@ void HDRPassRecorder::recordSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
     switch (slot) {
     case 0:
         // Slot 0: Sky + Terrain + Catmull-Clark (geometry base)
-        systems_.profiler().beginGpuZone(cmd, "HDR:Sky");
-        systems_.sky().recordDraw(cmd, frameIndex);
-        systems_.profiler().endGpuZone(cmd, "HDR:Sky");
+        resources_.profiler->beginGpuZone(cmd, "HDR:Sky");
+        resources_.sky->recordDraw(cmd, frameIndex);
+        resources_.profiler->endGpuZone(cmd, "HDR:Sky");
 
         if (config_.terrainEnabled) {
-            systems_.profiler().beginGpuZone(cmd, "HDR:Terrain");
-            systems_.terrain().recordDraw(cmd, frameIndex);
-            systems_.profiler().endGpuZone(cmd, "HDR:Terrain");
+            resources_.profiler->beginGpuZone(cmd, "HDR:Terrain");
+            resources_.terrain->recordDraw(cmd, frameIndex);
+            resources_.profiler->endGpuZone(cmd, "HDR:Terrain");
         }
 
-        systems_.profiler().beginGpuZone(cmd, "HDR:CatmullClark");
-        systems_.catmullClark().recordDraw(cmd, frameIndex);
-        systems_.profiler().endGpuZone(cmd, "HDR:CatmullClark");
+        resources_.profiler->beginGpuZone(cmd, "HDR:CatmullClark");
+        resources_.geometry.catmullClark().recordDraw(cmd, frameIndex);
+        resources_.profiler->endGpuZone(cmd, "HDR:CatmullClark");
         break;
 
     case 1:
         // Slot 1: Scene Objects + Skinned Character (scene meshes)
-        systems_.profiler().beginGpuZone(cmd, "HDR:SceneObjects");
+        resources_.profiler->beginGpuZone(cmd, "HDR:SceneObjects");
         if (config_.sceneObjectsPipeline) {
             vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, *config_.sceneObjectsPipeline);
         }
         recordSceneObjects(cmd, frameIndex);
-        systems_.profiler().endGpuZone(cmd, "HDR:SceneObjects");
+        resources_.profiler->endGpuZone(cmd, "HDR:SceneObjects");
 
-        systems_.profiler().beginGpuZone(cmd, "HDR:SkinnedChar");
+        resources_.profiler->beginGpuZone(cmd, "HDR:SkinnedChar");
         {
-            SceneBuilder& sceneBuilder = systems_.scene().getSceneBuilder();
+            SceneBuilder& sceneBuilder = resources_.scene->getSceneBuilder();
             if (sceneBuilder.hasCharacter()) {
                 const auto& sceneObjects = sceneBuilder.getRenderables();
                 size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
                 if (playerIndex < sceneObjects.size()) {
                     const Renderable& playerObj = sceneObjects[playerIndex];
-                    systems_.skinnedMesh().record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
+                    resources_.skinnedMesh->record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
                 }
             }
         }
-        systems_.profiler().endGpuZone(cmd, "HDR:SkinnedChar");
+        resources_.profiler->endGpuZone(cmd, "HDR:SkinnedChar");
         break;
 
     case 2:
         // Slot 2: Grass + Water + Leaves + Weather + Debug lines (vegetation/effects/debug)
-        systems_.profiler().beginGpuZone(cmd, "HDR:Grass");
-        systems_.grass().recordDraw(cmd, frameIndex, time);
-        systems_.profiler().endGpuZone(cmd, "HDR:Grass");
+        resources_.profiler->beginGpuZone(cmd, "HDR:Grass");
+        resources_.vegetation.grass().recordDraw(cmd, frameIndex, time);
+        resources_.profiler->endGpuZone(cmd, "HDR:Grass");
 
-        if (!systems_.hasWaterTileCull() ||
-            systems_.waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
-            systems_.profiler().beginGpuZone(cmd, "HDR:Water");
-            systems_.water().recordDraw(cmd, frameIndex);
-            systems_.profiler().endGpuZone(cmd, "HDR:Water");
+        if (!resources_.hasWaterTileCull() ||
+            resources_.waterTileCull->wasWaterVisibleLastFrame(frameIndex)) {
+            resources_.profiler->beginGpuZone(cmd, "HDR:Water");
+            resources_.water->recordDraw(cmd, frameIndex);
+            resources_.profiler->endGpuZone(cmd, "HDR:Water");
         }
 
-        systems_.profiler().beginGpuZone(cmd, "HDR:Leaves");
-        systems_.leaf().recordDraw(cmd, frameIndex, time);
-        systems_.profiler().endGpuZone(cmd, "HDR:Leaves");
+        resources_.profiler->beginGpuZone(cmd, "HDR:Leaves");
+        resources_.snow.leaf().recordDraw(cmd, frameIndex, time);
+        resources_.profiler->endGpuZone(cmd, "HDR:Leaves");
 
-        systems_.profiler().beginGpuZone(cmd, "HDR:Weather");
-        systems_.weather().recordDraw(cmd, frameIndex, time);
-        systems_.profiler().endGpuZone(cmd, "HDR:Weather");
+        resources_.profiler->beginGpuZone(cmd, "HDR:Weather");
+        resources_.snow.weather().recordDraw(cmd, frameIndex, time);
+        resources_.profiler->endGpuZone(cmd, "HDR:Weather");
 
         recordDebugLines(cmd);
         break;
@@ -248,7 +253,7 @@ void HDRPassRecorder::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameInde
     vk::CommandBuffer vkCmd(cmd);
 
     // Get MaterialRegistry for descriptor set lookup
-    const auto& materialRegistry = systems_.scene().getSceneBuilder().getMaterialRegistry();
+    const auto& materialRegistry = resources_.scene->getSceneBuilder().getMaterialRegistry();
 
     // Helper lambda to render a scene object with a descriptor set
     auto renderObject = [&](const Renderable& obj, VkDescriptorSet descSet) {
@@ -279,9 +284,9 @@ void HDRPassRecorder::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameInde
     };
 
     // Render scene manager objects using MaterialRegistry for descriptor set lookup
-    const auto& sceneObjects = systems_.scene().getRenderables();
-    size_t playerIndex = systems_.scene().getSceneBuilder().getPlayerObjectIndex();
-    bool hasCharacter = systems_.scene().getSceneBuilder().hasCharacter();
+    const auto& sceneObjects = resources_.scene->getRenderables();
+    size_t playerIndex = resources_.scene->getSceneBuilder().getPlayerObjectIndex();
+    bool hasCharacter = resources_.scene->getSceneBuilder().hasCharacter();
 
     // Build sorted indices by materialId to minimize descriptor set switches
     std::vector<size_t> sortedIndices(sceneObjects.size());
@@ -316,53 +321,53 @@ void HDRPassRecorder::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameInde
     }
 
     // Render procedural rocks (RockSystem owns its own descriptor sets)
-    if (systems_.rock().hasDescriptorSets()) {
-        VkDescriptorSet rockDescSet = systems_.rock().getDescriptorSet(frameIndex);
-        for (const auto& rock : systems_.rock().getSceneObjects()) {
+    if (resources_.vegetation.rock().hasDescriptorSets()) {
+        VkDescriptorSet rockDescSet = resources_.vegetation.rock().getDescriptorSet(frameIndex);
+        for (const auto& rock : resources_.vegetation.rock().getSceneObjects()) {
             renderObject(rock, rockDescSet);
         }
     }
 
     // Render woodland detritus (DetritusSystem owns its own descriptor sets)
-    if (systems_.detritus() && systems_.detritus()->hasDescriptorSets()) {
-        VkDescriptorSet detritusDescSet = systems_.detritus()->getDescriptorSet(frameIndex);
-        for (const auto& detritus : systems_.detritus()->getSceneObjects()) {
+    if (resources_.vegetation.hasDetritus() && resources_.vegetation.detritus()->hasDescriptorSets()) {
+        VkDescriptorSet detritusDescSet = resources_.vegetation.detritus()->getDescriptorSet(frameIndex);
+        for (const auto& detritus : resources_.vegetation.detritus()->getSceneObjects()) {
             renderObject(detritus, detritusDescSet);
         }
     }
 
     // Render procedural trees using dedicated TreeRenderer with wind animation
-    if (systems_.tree() && systems_.treeRenderer()) {
-        systems_.treeRenderer()->render(cmd, frameIndex, systems_.wind().getTime(), *systems_.tree(), systems_.treeLOD());
+    if (resources_.vegetation.hasTree() && resources_.vegetation.hasTreeRenderer()) {
+        resources_.vegetation.treeRenderer()->render(cmd, frameIndex, resources_.wind->getTime(), *resources_.vegetation.tree(), resources_.vegetation.treeLOD());
     }
 
     // Render tree impostors for distant trees
-    if (systems_.treeLOD()) {
-        auto* impostorCull = systems_.impostorCull();
+    if (resources_.vegetation.hasTreeLOD()) {
+        auto* impostorCull = resources_.vegetation.impostorCull();
         if (impostorCull && impostorCull->getTreeCount() > 0) {
             // Use GPU-culled indirect rendering
-            systems_.treeLOD()->renderImpostorsGPUCulled(
+            resources_.vegetation.treeLOD()->renderImpostorsGPUCulled(
                 cmd, frameIndex,
-                systems_.globalBuffers().uniformBuffers.buffers[frameIndex],
-                systems_.shadow().getShadowImageView(),
-                systems_.shadow().getShadowSampler(),
+                resources_.globalBuffers->uniformBuffers.buffers[frameIndex],
+                resources_.shadow->getShadowImageView(),
+                resources_.shadow->getShadowSampler(),
                 impostorCull->getVisibleImpostorBuffer(),
                 impostorCull->getIndirectDrawBuffer()
             );
         } else {
             // Fall back to CPU-culled rendering
-            systems_.treeLOD()->renderImpostors(
+            resources_.vegetation.treeLOD()->renderImpostors(
                 cmd, frameIndex,
-                systems_.globalBuffers().uniformBuffers.buffers[frameIndex],
-                systems_.shadow().getShadowImageView(),
-                systems_.shadow().getShadowSampler()
+                resources_.globalBuffers->uniformBuffers.buffers[frameIndex],
+                resources_.shadow->getShadowImageView(),
+                resources_.shadow->getShadowSampler()
             );
         }
     }
 }
 
 void HDRPassRecorder::recordDebugLines(VkCommandBuffer cmd) {
-    if (!systems_.debugLine().hasLines()) {
+    if (!resources_.debugLine->hasLines()) {
         return;
     }
 
@@ -372,13 +377,13 @@ void HDRPassRecorder::recordDebugLines(VkCommandBuffer cmd) {
     auto viewport = vk::Viewport{}
         .setX(0.0f)
         .setY(0.0f)
-        .setWidth(static_cast<float>(systems_.postProcess().getExtent().width))
-        .setHeight(static_cast<float>(systems_.postProcess().getExtent().height))
+        .setWidth(static_cast<float>(resources_.postProcess->getExtent().width))
+        .setHeight(static_cast<float>(resources_.postProcess->getExtent().height))
         .setMinDepth(0.0f)
         .setMaxDepth(1.0f);
     vkCmd.setViewport(0, viewport);
 
-    VkExtent2D debugExtent = systems_.postProcess().getExtent();
+    VkExtent2D debugExtent = resources_.postProcess->getExtent();
     auto scissor = vk::Rect2D{}
         .setOffset({0, 0})
         .setExtent(vk::Extent2D{}.setWidth(debugExtent.width).setHeight(debugExtent.height));
@@ -387,5 +392,5 @@ void HDRPassRecorder::recordDebugLines(VkCommandBuffer cmd) {
     // Need to get viewProj from the config (stored by Renderer)
     // For now, use identity if not set (could be improved by always passing viewProj)
     glm::mat4 viewProj = config_.lastViewProj ? *config_.lastViewProj : glm::mat4(1.0f);
-    systems_.debugLine().recordCommands(cmd, viewProj);
+    resources_.debugLine->recordCommands(cmd, viewProj);
 }

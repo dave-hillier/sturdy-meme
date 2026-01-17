@@ -23,8 +23,8 @@
 #include "CloudShadowSystem.h"
 #include "AtmosphereSystemGroup.h"
 #include "SnowSystemGroup.h"
+#include "GeometrySystemGroup.h"
 #include "HiZSystem.h"
-#include "CatmullClarkSystem.h"
 #include "RockSystem.h"
 #include "TreeSystem.h"
 #include "ThreadedTreeGenerator.h"
@@ -483,39 +483,21 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                                             systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler(),
                                             MAX_FRAMES_IN_FLIGHT);
 
-    // Initialize Catmull-Clark subdivision system via factory
-    float suzanneX = 5.0f, suzanneZ = -5.0f;
-    glm::vec3 suzannePos(suzanneX, core.terrain.getHeightAt(suzanneX, suzanneZ) + 2.0f, suzanneZ);
+    // Initialize geometry systems via GeometrySystemGroup factory
+    {
+        INIT_PROFILE_PHASE("GeometrySubsystems");
+        GeometrySystemGroup::CreateDeps geomDeps{
+            initCtx,
+            core.hdr.renderPass,
+            systems_->globalBuffers().uniformBuffers.buffers,
+            resourcePath,
+            core.terrain.getHeightAt
+        };
+        auto geomBundle = GeometrySystemGroup::createAll(geomDeps);
+        if (!geomBundle) return false;
 
-    CatmullClarkSystem::InitInfo catmullClarkInfo{};
-    catmullClarkInfo.device = device;
-    catmullClarkInfo.physicalDevice = physicalDevice;
-    catmullClarkInfo.allocator = allocator;
-    catmullClarkInfo.renderPass = core.hdr.renderPass;
-    catmullClarkInfo.descriptorPool = initCtx.descriptorPool;
-    catmullClarkInfo.extent = initCtx.extent;
-    catmullClarkInfo.shaderPath = initCtx.shaderPath;
-    catmullClarkInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    catmullClarkInfo.graphicsQueue = graphicsQueue;
-    catmullClarkInfo.commandPool = vulkanContext_->getCommandPool();
-    catmullClarkInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-
-    CatmullClarkConfig catmullClarkConfig{};
-    catmullClarkConfig.position = suzannePos;
-    catmullClarkConfig.scale = glm::vec3(2.0f);
-    catmullClarkConfig.targetEdgePixels = 12.0f;
-    catmullClarkConfig.maxDepth = 16;
-    catmullClarkConfig.splitThreshold = 18.0f;
-    catmullClarkConfig.mergeThreshold = 6.0f;
-    catmullClarkConfig.objPath = resourcePath + "/assets/suzanne.obj";
-
-    auto catmullClarkSystem = CatmullClarkSystem::create(catmullClarkInfo, catmullClarkConfig);
-    if (!catmullClarkSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create CatmullClarkSystem");
-        return false;
+        systems_->setCatmullClark(std::move(geomBundle->catmullClark));
     }
-    systems_->setCatmullClark(std::move(catmullClarkSystem));
-    systems_->catmullClark().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers);
 
     // Create sky descriptor sets now that uniform buffers and LUTs are ready
     if (!systems_->sky().createDescriptorSets(systems_->globalBuffers().uniformBuffers.buffers, sizeof(UniformBufferObject), systems_->atmosphereLUT())) return false;

@@ -65,9 +65,11 @@ set(SOURCES
     src/core/passes/ComputePasses.cpp
     src/core/passes/ShadowPasses.cpp
     src/core/passes/ShadowPassRecorder.cpp
+    src/core/passes/ShadowPassResources.cpp
     src/core/passes/WaterPasses.cpp
     src/core/passes/HDRPass.cpp
     src/core/passes/HDRPassRecorder.cpp
+    src/core/passes/HDRPassResources.cpp
     src/core/passes/PostPasses.cpp
     src/core/FrameUpdater.cpp
     src/core/FrameDataBuilder.cpp
@@ -197,6 +199,7 @@ set(SOURCES
     src/subdivision/CatmullClarkCBT.cpp
     src/subdivision/CatmullClarkMesh.cpp
     src/subdivision/CatmullClarkSystem.cpp
+    src/subdivision/GeometrySystemGroup.cpp
     # Loaders
     src/loaders/OBJLoader.cpp
     src/loaders/GLTFLoader.cpp

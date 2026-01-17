@@ -15,6 +15,8 @@
 #include <glm/glm.hpp>
 #include <vector>
 
+#include "HDRPassResources.h"
+
 class RendererSystems;
 
 class HDRPassRecorder {
@@ -28,6 +30,10 @@ public:
         glm::mat4* lastViewProj = nullptr;                        // For debug line rendering
     };
 
+    // Construct with focused resources (preferred - reduced coupling)
+    explicit HDRPassRecorder(const HDRPassResources& resources);
+
+    // Construct with RendererSystems (convenience, collects resources internally)
     explicit HDRPassRecorder(RendererSystems& systems);
 
     // Set configuration (must be called before recording)
@@ -53,6 +59,6 @@ private:
     // Helper to record debug lines with viewport/scissor setup
     void recordDebugLines(VkCommandBuffer cmd);
 
-    RendererSystems& systems_;
+    HDRPassResources resources_;
     Config config_;
 };
