@@ -74,6 +74,7 @@ set(SOURCES
     src/core/updaters/VegetationUpdater.cpp
     src/core/updaters/AtmosphereUpdater.cpp
     src/core/updaters/EnvironmentUpdater.cpp
+    src/core/updaters/UBOUpdater.cpp
     src/core/LoadingRenderer.cpp
     src/core/loading/LoadJobQueue.cpp
     src/core/loading/AsyncStartupLoader.cpp

@@ -14,6 +14,7 @@
 #include "core/pipeline/FrameGraphBuilder.h"
 #include "core/FrameUpdater.h"
 #include "core/FrameDataBuilder.h"
+#include "core/updaters/UBOUpdater.h"
 #include "interfaces/IPlayerControl.h"
 
 // Subsystem includes for render loop
@@ -543,13 +544,6 @@ bool Renderer::createGraphicsPipeline() {
     return true;
 }
 
-void Renderer::updateLightBuffer(uint32_t currentImage, const Camera& camera) {
-    LightBuffer buffer{};
-    glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
-    systems_->scene().getLightManager().buildLightBuffer(buffer, camera.getPosition(), camera.getFront(), viewProj, lightCullRadius);
-    systems_->globalBuffers().updateLightBuffer(currentImage, buffer);
-}
-
 bool Renderer::createDescriptorPool() {
     VkDevice device = vulkanContext_->getVkDevice();
 
@@ -613,69 +607,6 @@ bool Renderer::createDescriptorSets() {
     // They are created in initPhase2 when the systems are initialized
 
     return true;
-}
-
-
-void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) {
-    // Get current time of day from time system (already updated in render())
-    float currentTimeOfDay = systems_->time().getTimeOfDay();
-
-    // Pure calculations via UBOBuilder
-    UBOBuilder::LightingParams lighting = systems_->uboBuilder().calculateLightingParams(currentTimeOfDay);
-    systems_->time().setCurrentMoonPhase(lighting.moonPhase);  // Track current effective phase
-
-    // Calculate and apply tide based on celestial positions
-    DateTime dateTime = DateTime::fromTimeOfDay(currentTimeOfDay, systems_->time().getCurrentYear(),
-                                                 systems_->time().getCurrentMonth(), systems_->time().getCurrentDay());
-    TideInfo tide = systems_->celestial().calculateTide(dateTime);
-    systems_->water().updateTide(tide.height);
-
-    // Update cascade matrices via shadow system
-    systems_->shadow().updateCascadeMatrices(lighting.sunDir, camera);
-
-    // Build UBO data via UBOBuilder (pure calculation)
-    // Get cloud parameters from EnvironmentControlSubsystem (authoritative source)
-    auto& envControl = systems_->environmentControl();
-    UBOBuilder::MainUBOConfig mainConfig{};
-    mainConfig.showCascadeDebug = showCascadeDebug;
-    mainConfig.useParaboloidClouds = envControl.isUsingParaboloidClouds();
-    mainConfig.cloudCoverage = envControl.getCloudCoverage();
-    mainConfig.cloudDensity = envControl.getCloudDensity();
-    mainConfig.skyExposure = envControl.getSkyExposure();
-    mainConfig.shadowsEnabled = perfToggles.shadowPass;  // Skip shadow sampling when shadows disabled
-    UniformBufferObject ubo = systems_->uboBuilder().buildUniformBufferData(camera, lighting, currentTimeOfDay, mainConfig);
-
-    UBOBuilder::SnowConfig snowConfig{};
-    snowConfig.useVolumetricSnow = useVolumetricSnow;
-    snowConfig.showSnowDepthDebug = showSnowDepthDebug;
-    snowConfig.maxSnowHeight = MAX_SNOW_HEIGHT;
-    SnowUBO snowUbo = systems_->uboBuilder().buildSnowUBOData(snowConfig);
-
-    // Set rain wetness from weather system (composable material system integration)
-    // Weather type 0 = rain, type 1 = snow - rain causes wetness on vegetation
-    if (systems_->weather().getWeatherType() == 0) {
-        snowUbo.rainWetness = systems_->weather().getIntensity();
-    } else {
-        snowUbo.rainWetness = 0.0f;
-    }
-
-    CloudShadowUBO cloudShadowUbo = systems_->uboBuilder().buildCloudShadowUBOData();
-
-    // State mutations - use GlobalBufferManager for buffer updates
-    lastSunIntensity = lighting.sunIntensity;
-    systems_->globalBuffers().updateUniformBuffer(currentImage, ubo);
-    systems_->globalBuffers().updateSnowBuffer(currentImage, snowUbo);
-    systems_->globalBuffers().updateCloudShadowBuffer(currentImage, cloudShadowUbo);
-
-    // Update light buffer with camera-based culling
-    updateLightBuffer(currentImage, camera);
-
-    // Calculate sun screen position (pure) and update post-process (state mutation)
-    glm::vec2 sunScreenPos = calculateSunScreenPos(camera, lighting.sunDir);
-    systems_->postProcess().setSunScreenPos(sunScreenPos);
-
-    // Update HDR enabled state
-    systems_->postProcess().setHDREnabled(hdrEnabled);
 }
 
 bool Renderer::render(const Camera& camera) {
@@ -766,10 +697,19 @@ bool Renderer::render(const Camera& camera) {
     // Track UBO bandwidth
     CommandCounter bandwidthCounter(&qsDiag);
 
-    // Update uniform buffer data
+    // Update uniform buffer data via UBOUpdater
     {
         systems_->profiler().beginCpuZone("UniformUpdates:UBO");
-        updateUniformBuffer(frameSync_.currentIndex(), camera);
+        UBOUpdater::Config uboConfig;
+        uboConfig.showCascadeDebug = showCascadeDebug;
+        uboConfig.useVolumetricSnow = useVolumetricSnow;
+        uboConfig.showSnowDepthDebug = showSnowDepthDebug;
+        uboConfig.shadowsEnabled = perfToggles.shadowPass;
+        uboConfig.hdrEnabled = hdrEnabled;
+        uboConfig.maxSnowHeight = MAX_SNOW_HEIGHT;
+        uboConfig.lightCullRadius = lightCullRadius;
+        auto uboResult = UBOUpdater::update(*systems_, frameSync_.currentIndex(), camera, uboConfig);
+        lastSunIntensity = uboResult.sunIntensity;
         // Track bandwidth: main UBO + dynamic UBO copy + snow + cloudShadow + lights
         bandwidthCounter.recordUboUpdate(sizeof(UniformBufferObject) * 2);  // regular + dynamic
         bandwidthCounter.recordUboUpdate(sizeof(SnowUBO));
@@ -1049,21 +989,6 @@ bool Renderer::handleResize() {
     );
     framebufferResized = false;
     return success;
-}
-
-// Pure calculation helper - sun screen position for god rays
-
-glm::vec2 Renderer::calculateSunScreenPos(const Camera& camera, const glm::vec3& sunDir) const {
-    glm::vec3 sunWorldPos = camera.getPosition() + sunDir * 1000.0f;
-    glm::vec4 sunClipPos = camera.getProjectionMatrix() * camera.getViewMatrix() * glm::vec4(sunWorldPos, 1.0f);
-
-    glm::vec2 sunScreenPos(0.5f, 0.5f);
-    if (sunClipPos.w > 0.0f) {
-        glm::vec3 sunNDC = glm::vec3(sunClipPos) / sunClipPos.w;
-        sunScreenPos = glm::vec2(sunNDC.x * 0.5f + 0.5f, sunNDC.y * 0.5f + 0.5f);
-        sunScreenPos.y = 1.0f - sunScreenPos.y;
-    }
-    return sunScreenPos;
 }
 
 // Render pass recording helpers - pure command recording, no state mutation

@@ -245,9 +245,6 @@ private:
     bool createDescriptorSets();
     bool createDepthResources();
 
-
-    void updateUniformBuffer(uint32_t currentImage, const Camera& camera);
-
     // Render pass recording helpers (pure - only record commands, no state mutation)
     void recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, const glm::vec3& cameraPosition);
     void recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime);
@@ -257,9 +254,6 @@ private:
 
     // Setup frame graph passes with dependencies
     void setupFrameGraph();
-
-    // Pure calculation helpers (no state mutation)
-    glm::vec2 calculateSunScreenPos(const Camera& camera, const glm::vec3& sunDir) const;
 
     std::string resourcePath;
     Config config_;  // Renderer configuration
@@ -334,8 +328,6 @@ private:
 
     // GUI rendering callback
     GuiRenderCallback guiRenderCallback;
-
-    void updateLightBuffer(uint32_t currentImage, const Camera& camera);
 
     // Skinned mesh rendering
     bool initSkinnedMeshRenderer();
