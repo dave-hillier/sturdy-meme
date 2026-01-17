@@ -8,6 +8,9 @@
 #include <cstdint>
 #include <optional>
 
+// Forward declaration
+struct TreeSkeleton;
+
 // Seeded random number generator (matching ez-tree's RNG)
 class TreeRNG {
 public:
@@ -36,6 +39,7 @@ struct BranchData {
     int level;
     int sectionCount;
     int segmentCount;
+    int32_t parentBranchIndex{-1};  // Index of parent branch (-1 for trunk)
     std::vector<SectionData> sections;
 };
 
@@ -56,6 +60,10 @@ struct TreeMeshData {
     uint32_t totalBranchIndices() const;
     uint32_t totalLeafVertices() const;
     uint32_t totalLeafIndices() const;
+
+    // Generate skeleton from branch hierarchy
+    // Must include TreeSkeleton.h before calling
+    TreeSkeleton generateSkeleton() const;
 };
 
 // GPU-compatible branch data for compute shader (std430 layout)
@@ -101,6 +109,7 @@ private:
         int level;
         int sectionCount;
         int segmentCount;
+        int32_t parentBranchIndex{-1};  // Index of parent branch in meshData.branches
     };
 
     void processBranch(const Branch& branch, const TreeOptions& options,
@@ -109,7 +118,8 @@ private:
     void generateChildBranches(int count, int level,
                                const std::vector<SectionData>& sections,
                                const TreeOptions& options, TreeRNG& rng,
-                               std::queue<Branch>& branchQueue);
+                               std::queue<Branch>& branchQueue,
+                               int32_t parentBranchIndex);
 
     void generateLeaves(const std::vector<SectionData>& sections,
                         const TreeOptions& options, TreeRNG& rng,

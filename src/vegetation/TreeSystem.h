@@ -14,6 +14,7 @@
 
 #include "TreeOptions.h"
 #include "TreeGenerator.h"
+#include "TreeSkeleton.h"
 #include "TreeCollision.h"
 #include "Mesh.h"
 #include "Texture.h"
@@ -201,6 +202,10 @@ public:
     // Get full tree bounds (branches + leaves) for accurate imposter sizing
     const AABB& getFullTreeBounds(uint32_t meshIndex) const { return fullTreeBounds_[meshIndex]; }
 
+    // Get tree skeleton for animation (per mesh, not per instance)
+    const TreeSkeleton& getTreeSkeleton(uint32_t meshIndex) const { return treeSkeletons_[meshIndex]; }
+    const std::vector<TreeSkeleton>& getTreeSkeletons() const { return treeSkeletons_; }
+
 private:
     bool initInternal(const InitInfo& info);
     void cleanup();
@@ -250,6 +255,9 @@ private:
 
     // Raw mesh data (stored for collision generation)
     std::vector<TreeMeshData> treeMeshData_;
+
+    // Tree skeletons for animation (one per mesh)
+    std::vector<TreeSkeleton> treeSkeletons_;
 
     // Full tree bounds (branches + leaves) per mesh - for accurate imposter sizing
     std::vector<AABB> fullTreeBounds_;

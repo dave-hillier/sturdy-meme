@@ -1,6 +1,8 @@
 #include "TreeGenerator.h"
+#include "TreeSkeleton.h"
 #include <glm/gtc/constants.hpp>
 #include <cmath>
+#include <sstream>
 
 // TreeRNG implementation (matching ez-tree's RNG algorithm)
 TreeRNG::TreeRNG(uint32_t seed)
@@ -47,6 +49,42 @@ uint32_t TreeMeshData::totalLeafIndices() const {
     return static_cast<uint32_t>(leaves.size()) * 6;
 }
 
+TreeSkeleton TreeMeshData::generateSkeleton() const {
+    TreeSkeleton skeleton;
+    skeleton.branches.reserve(branches.size());
+
+    for (size_t i = 0; i < branches.size(); ++i) {
+        const BranchData& branchData = branches[i];
+
+        TreeBranch branch;
+
+        // Generate name based on level and index
+        std::ostringstream nameStream;
+        if (branchData.level == 0) {
+            nameStream << "trunk";
+        } else {
+            nameStream << "branch_" << branchData.level << "_" << i;
+        }
+        branch.name = nameStream.str();
+
+        // Use tracked parent index
+        branch.parentIndex = branchData.parentBranchIndex;
+
+        // Create local transform from branch data
+        glm::mat4 T = glm::translate(glm::mat4(1.0f), branchData.origin);
+        glm::mat4 R = glm::mat4_cast(branchData.orientation);
+        branch.restPoseLocal = T * R;
+
+        branch.radius = branchData.radius;
+        branch.length = branchData.length;
+        branch.level = branchData.level;
+
+        skeleton.branches.push_back(branch);
+    }
+
+    return skeleton;
+}
+
 // TreeGenerator implementation
 TreeMeshData TreeGenerator::generate(const TreeOptions& options) {
     TreeMeshData meshData;
@@ -71,6 +109,8 @@ TreeMeshData TreeGenerator::generate(const TreeOptions& options) {
         branchQueue.pop();
         processBranch(branch, options, rng, meshData);
 
+        // Track current branch index for parent linking
+        int32_t currentBranchIndex = static_cast<int32_t>(meshData.branches.size()) - 1;
         const BranchData& processedBranch = meshData.branches.back();
 
         // Deciduous trees have a terminal branch that grows out of the end of the parent branch
@@ -86,6 +126,7 @@ TreeMeshData TreeGenerator::generate(const TreeOptions& options) {
                 child.level = branch.level + 1;
                 child.sectionCount = processedBranch.sectionCount;  // Same as parent
                 child.segmentCount = processedBranch.segmentCount;
+                child.parentBranchIndex = currentBranchIndex;
                 branchQueue.push(child);
             } else {
                 // At final level - just add a single leaf at the tip
@@ -102,7 +143,8 @@ TreeMeshData TreeGenerator::generate(const TreeOptions& options) {
                 options.branch.children[branch.level],
                 branch.level + 1,
                 processedBranch.sections,
-                options, rng, branchQueue);
+                options, rng, branchQueue,
+                currentBranchIndex);
         }
     }
 
@@ -119,6 +161,7 @@ void TreeGenerator::processBranch(const Branch& branch, const TreeOptions& optio
     branchData.level = branch.level;
     branchData.sectionCount = branch.sectionCount;
     branchData.segmentCount = branch.segmentCount;
+    branchData.parentBranchIndex = branch.parentBranchIndex;
 
     glm::quat sectionOrientation = branch.orientation;
     glm::vec3 sectionOrigin = branch.origin;
@@ -209,7 +252,8 @@ void TreeGenerator::processBranch(const Branch& branch, const TreeOptions& optio
 void TreeGenerator::generateChildBranches(int count, int level,
                                           const std::vector<SectionData>& sections,
                                           const TreeOptions& options, TreeRNG& rng,
-                                          std::queue<Branch>& branchQueue) {
+                                          std::queue<Branch>& branchQueue,
+                                          int32_t parentBranchIndex) {
     float radialOffset = rng.random();
 
     for (int i = 0; i < count; ++i) {
@@ -266,6 +310,7 @@ void TreeGenerator::generateChildBranches(int count, int level,
         child.level = level;
         child.sectionCount = options.branch.sections[level];
         child.segmentCount = options.branch.segments[level];
+        child.parentBranchIndex = parentBranchIndex;
 
         branchQueue.push(child);
     }

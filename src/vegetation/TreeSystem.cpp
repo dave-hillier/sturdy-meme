@@ -534,11 +534,15 @@ uint32_t TreeSystem::addTree(const glm::vec3& position, float rotation, float sc
     // Compute full tree bounds (branches + leaves) before moving data
     AABB fullBounds = computeFullTreeBounds(branchMesh, leafInstances);
 
+    // Generate skeleton from mesh data before moving it
+    TreeSkeleton skeleton = meshData.generateSkeleton();
+
     uint32_t meshIndex = static_cast<uint32_t>(branchMeshes_.size());
     branchMeshes_.push_back(std::move(branchMesh));
     leafInstancesPerTree_.push_back(std::move(leafInstances));
     treeOptions_.push_back(options);
     treeMeshData_.push_back(std::move(meshData));
+    treeSkeletons_.push_back(std::move(skeleton));
     fullTreeBounds_.push_back(fullBounds);
 
     TreeInstanceData instance;
@@ -752,6 +756,9 @@ void TreeSystem::regenerateTree(uint32_t treeIndex) {
         // Compute full bounds before moving data
         AABB fullBounds = computeFullTreeBounds(branchMesh, leafInstances);
 
+        // Generate skeleton from mesh data before moving it
+        TreeSkeleton skeleton = meshData.generateSkeleton();
+
         if (meshIndex < branchMeshes_.size()) {
             branchMeshes_[meshIndex] = std::move(branchMesh);
         }
@@ -760,6 +767,9 @@ void TreeSystem::regenerateTree(uint32_t treeIndex) {
         }
         if (meshIndex < treeMeshData_.size()) {
             treeMeshData_[meshIndex] = std::move(meshData);
+        }
+        if (meshIndex < treeSkeletons_.size()) {
+            treeSkeletons_[meshIndex] = std::move(skeleton);
         }
         if (meshIndex < fullTreeBounds_.size()) {
             fullTreeBounds_[meshIndex] = fullBounds;
