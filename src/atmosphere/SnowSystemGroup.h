@@ -1,6 +1,11 @@
 #pragma once
 
 #include "SystemGroupMacros.h"
+#include "InitContext.h"
+
+#include <memory>
+#include <optional>
+#include <vulkan/vulkan.h>
 
 // Forward declarations
 class SnowMaskSystem;
@@ -24,6 +29,9 @@ class LeafSystem;
  *   auto& snow = systems.snow();
  *   snow.mask().recordCompute(cmd, frameIndex);
  *   snow.volumetric().recordCompute(cmd, frameIndex);
+ *
+ * Self-initialization:
+ *   auto bundle = SnowSystemGroup::createAll(deps);
  */
 struct SnowSystemGroup {
     // Non-owning references to systems (owned by RendererSystems)
@@ -42,4 +50,32 @@ struct SnowSystemGroup {
     bool isValid() const {
         return mask_ && volumetric_ && weather_ && leaf_;
     }
+
+    // ========================================================================
+    // Factory methods for self-initialization
+    // ========================================================================
+
+    /**
+     * Bundle of all snow/weather systems (owned pointers).
+     */
+    struct Bundle {
+        std::unique_ptr<SnowMaskSystem> snowMask;
+        std::unique_ptr<VolumetricSnowSystem> volumetricSnow;
+        std::unique_ptr<WeatherSystem> weather;
+        std::unique_ptr<LeafSystem> leaf;
+    };
+
+    /**
+     * Dependencies required to create snow/weather systems.
+     */
+    struct CreateDeps {
+        const InitContext& ctx;
+        VkRenderPass hdrRenderPass;
+    };
+
+    /**
+     * Factory: Create all snow and weather systems.
+     * Returns nullopt on failure.
+     */
+    static std::optional<Bundle> createAll(const CreateDeps& deps);
 };

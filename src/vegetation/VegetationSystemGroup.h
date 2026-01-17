@@ -1,6 +1,13 @@
 #pragma once
 
 #include "SystemGroupMacros.h"
+#include "InitContext.h"
+#include "RockSystem.h"  // For RockConfig
+
+#include <memory>
+#include <optional>
+#include <functional>
+#include <vulkan/vulkan.h>
 
 // Forward declarations
 class GrassSystem;
@@ -34,6 +41,10 @@ class RockSystem;
  *   if (veg.hasTreeRenderer()) {
  *       veg.treeRenderer().render(cmd, frameIndex, *veg.tree());
  *   }
+ *
+ * Self-initialization:
+ *   auto bundle = VegetationSystemGroup::createAll(deps);
+ *   // Move systems to RendererSystems, then use VegetationContentGenerator for content
  */
 struct VegetationSystemGroup {
     // Non-owning references to systems (owned by RendererSystems)
@@ -62,4 +73,46 @@ struct VegetationSystemGroup {
     bool isValid() const {
         return grass_ && wind_ && rock_;
     }
+
+    // ========================================================================
+    // Factory methods for self-initialization
+    // ========================================================================
+
+    /**
+     * Bundle of all vegetation-related systems (owned pointers).
+     */
+    struct Bundle {
+        std::unique_ptr<GrassSystem> grass;
+        std::unique_ptr<WindSystem> wind;
+        std::unique_ptr<RockSystem> rock;
+        std::unique_ptr<TreeSystem> tree;
+        std::unique_ptr<TreeRenderer> treeRenderer;
+        std::unique_ptr<TreeLODSystem> treeLOD;
+        std::unique_ptr<ImpostorCullSystem> impostorCull;
+        // Note: DetritusSystem needs tree positions, created separately after content generation
+    };
+
+    using HeightFunc = std::function<float(float, float)>;
+
+    /**
+     * Dependencies required to create vegetation systems.
+     */
+    struct CreateDeps {
+        const InitContext& ctx;
+        VkRenderPass hdrRenderPass;
+        VkRenderPass shadowRenderPass;
+        uint32_t shadowMapSize;
+        float terrainSize;
+        HeightFunc getTerrainHeight;
+        RockConfig rockConfig;  // Rock generation config
+    };
+
+    /**
+     * Factory: Create all vegetation systems.
+     * Returns nullopt if required systems fail.
+     *
+     * Note: Content generation (trees, impostors) should be done via
+     * VegetationContentGenerator after systems are stored in RendererSystems.
+     */
+    static std::optional<Bundle> createAll(const CreateDeps& deps);
 };

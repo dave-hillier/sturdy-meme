@@ -1,6 +1,11 @@
 #pragma once
 
 #include "SystemGroupMacros.h"
+#include "InitContext.h"
+
+#include <memory>
+#include <optional>
+#include <vulkan/vulkan.h>
 
 // Forward declarations
 class WaterSystem;
@@ -30,6 +35,13 @@ class WaterGBuffer;
  *   auto& water = systems.water();
  *   water.displacement().recordCompute(cmd, frameIndex);
  *   water.system().recordDraw(cmd, frameIndex);
+ *
+ * Self-initialization:
+ *   auto bundle = WaterSystemGroup::createAll(deps);
+ *   if (bundle) {
+ *       systems.setWater(std::move(bundle->system));
+ *       // ... etc
+ *   }
  */
 struct WaterSystemGroup {
     // Non-owning references to systems (owned by RendererSystems)
@@ -56,4 +68,41 @@ struct WaterSystemGroup {
     bool isValid() const {
         return system_ && displacement_ && flowMap_ && foam_ && ssr_;
     }
+
+    // ========================================================================
+    // Factory methods for self-initialization
+    // ========================================================================
+
+    /**
+     * Bundle of all water-related systems (owned pointers).
+     * Used during initialization - systems are moved to RendererSystems after creation.
+     */
+    struct Bundle {
+        std::unique_ptr<WaterSystem> system;
+        std::unique_ptr<WaterDisplacement> displacement;
+        std::unique_ptr<FlowMapGenerator> flowMap;
+        std::unique_ptr<FoamBuffer> foam;
+        std::unique_ptr<SSRSystem> ssr;
+        std::unique_ptr<WaterTileCull> tileCull;      // Optional
+        std::unique_ptr<WaterGBuffer> gBuffer;        // Optional
+    };
+
+    /**
+     * Dependencies required to create water systems.
+     */
+    struct CreateDeps {
+        const InitContext& ctx;
+        VkRenderPass hdrRenderPass;
+        float waterSize = 65536.0f;
+        std::string assetPath;
+    };
+
+    /**
+     * Factory: Create all water systems with proper initialization order.
+     * Returns nullopt on failure of required systems.
+     *
+     * Note: SSR is created but not fully initialized here - it needs
+     * additional wiring after other systems are ready.
+     */
+    static std::optional<Bundle> createAll(const CreateDeps& deps);
 };

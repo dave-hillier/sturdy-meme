@@ -21,6 +21,8 @@
 #include "FroxelSystem.h"
 #include "AtmosphereLUTSystem.h"
 #include "CloudShadowSystem.h"
+#include "AtmosphereSystemGroup.h"
+#include "SnowSystemGroup.h"
 #include "HiZSystem.h"
 #include "CatmullClarkSystem.h"
 #include "RockSystem.h"
@@ -30,12 +32,15 @@
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
 #include "DetritusSystem.h"
+#include "VegetationContentGenerator.h"
+#include "VegetationSystemGroup.h"
 #include "WaterSystem.h"
 #include "WaterDisplacement.h"
 #include "FlowMapGenerator.h"
 #include "FoamBuffer.h"
 #include "WaterTileCull.h"
 #include "WaterGBuffer.h"
+#include "WaterSystemGroup.h"
 #include "SSRSystem.h"
 #include "DebugLineSystem.h"
 #include "Profiler.h"
@@ -127,14 +132,6 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     {
         INIT_PROFILE_PHASE("SkinnedMeshRenderer");
         if (!initSkinnedMeshRenderer()) return false;
-    }
-
-    // Initialize sky system via factory (needs HDR render pass from postProcessSystem)
-    {
-        INIT_PROFILE_PHASE("SkySystem");
-        auto skySystem = SkySystem::create(initCtx, systems_->postProcess().getHDRRenderPass());
-        if (!skySystem) return false;
-        systems_->setSky(std::move(skySystem));
     }
 
     if (!createCommandBuffers()) return false;
@@ -236,28 +233,60 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         systems_->setScene(std::move(sceneManager));
     }
 
-    // Initialize snow subsystems (SnowMaskSystem, VolumetricSnowSystem)
+    // Create all snow and weather systems using SnowSystemGroup factory
     {
-        auto bundle = SnowMaskSystem::createWithDependencies(initCtx, core.hdr.renderPass);
-        if (!bundle) {
-            return false;
-        }
-        systems_->setSnowMask(std::move(bundle->snowMask));
-        systems_->setVolumetricSnow(std::move(bundle->volumetricSnow));
+        SnowSystemGroup::CreateDeps snowDeps{initCtx, core.hdr.renderPass};
+        auto snowBundle = SnowSystemGroup::createAll(snowDeps);
+        if (!snowBundle) return false;
+
+        systems_->setSnowMask(std::move(snowBundle->snowMask));
+        systems_->setVolumetricSnow(std::move(snowBundle->volumetricSnow));
+        systems_->setWeather(std::move(snowBundle->weather));
+        systems_->setLeaf(std::move(snowBundle->leaf));
     }
 
     if (!createDescriptorSets()) return false;
     if (!createSkinnedMeshRendererDescriptorSets()) return false;
 
-    // Initialize grass and wind subsystems
+    // Create all vegetation systems using VegetationSystemGroup factory
     {
-        auto bundle = GrassSystem::createWithDependencies(
-            initCtx, core.hdr.renderPass, core.shadow.renderPass, core.shadow.mapSize);
-        if (!bundle) {
-            return false;
-        }
-        systems_->setWind(std::move(bundle->wind));
-        systems_->setGrass(std::move(bundle->grass));
+        INIT_PROFILE_PHASE("VegetationSystems");
+
+        // Rock placement configuration
+        RockConfig rockConfig{};
+        rockConfig.rockVariations = 6;
+        rockConfig.rocksPerVariation = 10;
+        rockConfig.minRadius = 0.4f;
+        rockConfig.maxRadius = 2.0f;
+        rockConfig.placementRadius = 100.0f;
+        rockConfig.placementCenter = sceneInfo.sceneOrigin;
+        rockConfig.minDistanceBetween = 4.0f;
+        rockConfig.roughness = 0.35f;
+        rockConfig.asymmetry = 0.3f;
+        rockConfig.subdivisions = 3;
+        rockConfig.materialRoughness = 0.75f;
+        rockConfig.materialMetallic = 0.0f;
+
+        VegetationSystemGroup::CreateDeps vegDeps{
+            initCtx,
+            core.hdr.renderPass,
+            core.shadow.renderPass,
+            core.shadow.mapSize,
+            core.terrain.size,
+            core.terrain.getHeightAt,
+            rockConfig
+        };
+
+        auto vegBundle = VegetationSystemGroup::createAll(vegDeps);
+        if (!vegBundle) return false;
+
+        systems_->setWind(std::move(vegBundle->wind));
+        systems_->setGrass(std::move(vegBundle->grass));
+        systems_->setRock(std::move(vegBundle->rock));
+        systems_->setTree(std::move(vegBundle->tree));
+        systems_->setTreeRenderer(std::move(vegBundle->treeRenderer));
+        if (vegBundle->treeLOD) systems_->setTreeLOD(std::move(vegBundle->treeLOD));
+        if (vegBundle->impostorCull) systems_->setImpostorCull(std::move(vegBundle->impostorCull));
     }
 
     const EnvironmentSettings* envSettings = &systems_->wind().getEnvironmentSettings();
@@ -267,10 +296,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         windBuffers[i] = systems_->wind().getBufferInfo(i).buffer;
     }
-    // Note: grass.updateDescriptorSets is called later after CloudShadowSystem is created
 
     // Update terrain descriptor sets with shared resources
-    // Convert raw VkBuffer vectors to vk::Buffer vectors
     auto convertBuffers = [](const std::vector<VkBuffer>& raw) {
         std::vector<vk::Buffer> result;
         result.reserve(raw.size());
@@ -285,485 +312,53 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         convertBuffers(systems_->globalBuffers().snowBuffers.buffers),
         convertBuffers(systems_->globalBuffers().cloudShadowBuffers.buffers));
 
-    // Initialize rock system via factory
-    RockSystem::InitInfo rockInfo{};
-    rockInfo.device = device;
-    rockInfo.allocator = allocator;
-    rockInfo.commandPool = **commandPool_;
-    rockInfo.graphicsQueue = graphicsQueue;
-    rockInfo.physicalDevice = physicalDevice;
-    rockInfo.resourcePath = resourcePath;
-    rockInfo.terrainSize = core.terrain.size;
-    rockInfo.getTerrainHeight = core.terrain.getHeightAt;
-
-    RockConfig rockConfig{};
-    rockConfig.rockVariations = 6;
-    rockConfig.rocksPerVariation = 10;
-    rockConfig.minRadius = 0.4f;
-    rockConfig.maxRadius = 2.0f;
-    rockConfig.placementRadius = 100.0f;
-    rockConfig.placementCenter = sceneInfo.sceneOrigin;  // Place rocks at settlement location
-    rockConfig.minDistanceBetween = 4.0f;
-    rockConfig.roughness = 0.35f;
-    rockConfig.asymmetry = 0.3f;
-    rockConfig.subdivisions = 3;
-    rockConfig.materialRoughness = 0.75f;
-    rockConfig.materialMetallic = 0.0f;
-
+    // Generate vegetation content using VegetationContentGenerator
     {
-        INIT_PROFILE_PHASE("RockSystem");
-        auto rockSystem = RockSystem::create(rockInfo, rockConfig);
-        if (!rockSystem) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create RockSystem");
-            return false;
-        }
-        systems_->setRock(std::move(rockSystem));
-    }
+        VegetationContentGenerator::Config vegConfig;
+        vegConfig.resourcePath = resourcePath;
+        vegConfig.getTerrainHeight = core.terrain.getHeightAt;
+        vegConfig.terrainSize = core.terrain.size;
 
-    // Initialize tree system via factory
-    TreeSystem::InitInfo treeInfo{};
-    treeInfo.device = device;
-    treeInfo.allocator = allocator;
-    treeInfo.commandPool = **commandPool_;
-    treeInfo.graphicsQueue = graphicsQueue;
-    treeInfo.physicalDevice = physicalDevice;
-    treeInfo.resourcePath = resourcePath;
-    treeInfo.terrainSize = core.terrain.size;
-    treeInfo.getTerrainHeight = core.terrain.getHeightAt;
+        VegetationContentGenerator vegGen(vegConfig);
 
-    std::unique_ptr<TreeSystem> treeSystem;
-    {
-        INIT_PROFILE_PHASE("TreeSystem");
-        treeSystem = TreeSystem::create(treeInfo);
-        if (!treeSystem) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create TreeSystem");
-            return false;
-        }
-    }
+        // Generate demo trees and forest
+        if (systems_->tree()) {
+            vegGen.generateDemoTrees(*systems_->tree(), sceneInfo.sceneOrigin);
 
-    // Add trees to the scene - place woods a few hundred units from settlement
-    std::string presetDir = treeInfo.resourcePath + "/assets/trees/presets/";
+            const glm::vec2 forestCenter(sceneInfo.sceneOrigin.x + 200.0f, sceneInfo.sceneOrigin.y + 100.0f);
+            vegGen.generateForest(*systems_->tree(), forestCenter, 80.0f, 500);
 
-    auto loadPresetOrDefault = [&](const std::string& presetName, TreeOptions (*defaultFn)()) {
-        std::string path = presetDir + presetName;
-        if (std::filesystem::exists(path)) {
-            return TreeOptions::loadFromJson(path);
-        }
-        return defaultFn();
-    };
-
-    // Demo trees placed near the settlement (0-50 units offset)
-    const float demoTreeX = sceneInfo.sceneOrigin.x;
-    const float demoTreeZ = sceneInfo.sceneOrigin.y;
-
-    // Oak tree
-    float oakX = demoTreeX + 35.0f, oakZ = demoTreeZ + 25.0f;
-    glm::vec3 oakPos(oakX, core.terrain.getHeightAt(oakX, oakZ), oakZ);
-    treeSystem->addTree(oakPos, 0.0f, 1.0f, loadPresetOrDefault("oak_large.json", TreeOptions::defaultOak));
-
-    // Pine tree
-    float pineX = demoTreeX + 50.0f, pineZ = demoTreeZ - 30.0f;
-    glm::vec3 pinePos(pineX, core.terrain.getHeightAt(pineX, pineZ), pineZ);
-    treeSystem->addTree(pinePos, 0.5f, 1.0f, loadPresetOrDefault("pine_large.json", TreeOptions::defaultPine));
-
-    // Ash tree
-    float ashX = demoTreeX - 40.0f, ashZ = demoTreeZ - 25.0f;
-    glm::vec3 ashPos(ashX, core.terrain.getHeightAt(ashX, ashZ), ashZ);
-    treeSystem->addTree(ashPos, 1.0f, 1.0f, loadPresetOrDefault("ash_large.json", TreeOptions::defaultOak));
-
-    // Aspen tree
-    float aspenX = demoTreeX + 30.0f, aspenZ = demoTreeZ + 40.0f;
-    glm::vec3 aspenPos(aspenX, core.terrain.getHeightAt(aspenX, aspenZ), aspenZ);
-    treeSystem->addTree(aspenPos, 1.5f, 1.0f, loadPresetOrDefault("aspen_large.json", TreeOptions::defaultOak));
-
-    systems_->setTree(std::move(treeSystem));
-    SDL_Log("Tree system initialized with %zu trees", systems_->tree()->getTreeCount());
-
-    // Initialize TreeRenderer for dedicated tree shaders with wind animation
-    {
-        TreeRenderer::InitInfo treeRendererInfo{};
-        treeRendererInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-        treeRendererInfo.device = vk::Device(device);
-        treeRendererInfo.physicalDevice = vk::PhysicalDevice(physicalDevice);
-        treeRendererInfo.allocator = allocator;
-        treeRendererInfo.hdrRenderPass = vk::RenderPass(systems_->postProcess().getHDRRenderPass());
-        treeRendererInfo.shadowRenderPass = vk::RenderPass(systems_->shadow().getShadowRenderPass());
-        treeRendererInfo.descriptorPool = &*descriptorManagerPool;
-        treeRendererInfo.extent = vk::Extent2D{systems_->postProcess().getExtent().width, systems_->postProcess().getExtent().height};
-        treeRendererInfo.shadowMapSize = systems_->shadow().getShadowMapSize();
-        treeRendererInfo.resourcePath = resourcePath;
-        treeRendererInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;
-
-        auto treeRenderer = TreeRenderer::create(treeRendererInfo);
-        if (!treeRenderer) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create TreeRenderer");
-            return false;
-        }
-        systems_->setTreeRenderer(std::move(treeRenderer));
-        SDL_Log("TreeRenderer initialized for wind animation");
-    }
-
-    // Initialize TreeLODSystem for impostor rendering
-    {
-        TreeLODSystem::InitInfo treeLODInfo{};
-        treeLODInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-        treeLODInfo.device = device;
-        treeLODInfo.physicalDevice = physicalDevice;
-        treeLODInfo.allocator = allocator;
-        treeLODInfo.hdrRenderPass = systems_->postProcess().getHDRRenderPass();
-        treeLODInfo.shadowRenderPass = systems_->shadow().getShadowRenderPass();
-        treeLODInfo.commandPool = **commandPool_;
-        treeLODInfo.graphicsQueue = graphicsQueue;
-        treeLODInfo.descriptorPool = &*descriptorManagerPool;
-        treeLODInfo.extent = systems_->postProcess().getExtent();
-        treeLODInfo.resourcePath = resourcePath;
-        treeLODInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;
-        treeLODInfo.shadowMapSize = systems_->shadow().getShadowMapSize();
-
-        auto treeLOD = TreeLODSystem::create(treeLODInfo);
-        if (treeLOD) {
-            systems_->setTreeLOD(std::move(treeLOD));
-            SDL_Log("TreeLODSystem initialized for impostor rendering");
-        } else {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem creation failed (non-fatal)");
-        }
-    }
-
-    // Initialize ImpostorCullSystem for GPU-driven impostor culling with Hi-Z
-    {
-        ImpostorCullSystem::InitInfo impostorCullInfo{};
-        impostorCullInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-        impostorCullInfo.device = device;
-        impostorCullInfo.physicalDevice = physicalDevice;
-        impostorCullInfo.allocator = allocator;
-        impostorCullInfo.descriptorPool = &*descriptorManagerPool;
-        impostorCullInfo.extent = systems_->postProcess().getExtent();
-        impostorCullInfo.resourcePath = resourcePath;
-        impostorCullInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;
-        impostorCullInfo.maxTrees = 100000;
-        impostorCullInfo.maxArchetypes = 16;
-
-        auto impostorCull = ImpostorCullSystem::create(impostorCullInfo);
-        if (impostorCull) {
-            systems_->setImpostorCull(std::move(impostorCull));
-            SDL_Log("ImpostorCullSystem initialized for GPU-driven Hi-Z occlusion culling");
-        } else {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "ImpostorCullSystem creation failed (non-fatal)");
-        }
-    }
-
-    // Add a forest 200 units away from the settlement
-    // The forest is placed away from spawn for load testing
-    // Uses threaded tree generation for faster startup
-    std::unique_ptr<ThreadedTreeGenerator> threadedTreeGen;
-    std::vector<TreeOptions> forestTreeOptions;  // Store options for GPU upload
-    {
-        auto* treeSystem = systems_->tree();
-        if (treeSystem) {
-            const float forestCenterX = sceneInfo.sceneOrigin.x + 200.0f;
-            const float forestCenterZ = sceneInfo.sceneOrigin.y + 100.0f;
-            const float forestRadius = 80.0f;
-            const int numTrees = 500;
-
-            std::string presetDir = resourcePath + "/assets/trees/presets/";
-            std::vector<std::pair<std::string, TreeOptions(*)()>> treePresets = {
-                {"oak_medium.json", TreeOptions::defaultOak},
-                {"pine_medium.json", TreeOptions::defaultPine},
-                {"ash_medium.json", TreeOptions::defaultOak},
-                {"aspen_medium.json", TreeOptions::defaultOak}
-            };
-
-            auto loadPreset = [&](const std::string& presetName, TreeOptions (*defaultFn)()) {
-                std::string path = presetDir + presetName;
-                if (std::filesystem::exists(path)) {
-                    return TreeOptions::loadFromJson(path);
-                }
-                return defaultFn();
-            };
-
-            // Poisson disk sampling for natural tree placement
-            // Minimum distance between trees (adjusted for tree size variation)
-            const float minDist = 8.0f;
-            const int maxAttempts = 30;  // Attempts to place each new point
-
-            // Simple LCG pseudo-random generator for deterministic results
-            uint32_t seed = 12345;
-            auto nextRand = [&seed]() -> float {
-                seed = seed * 1103515245 + 12345;
-                return static_cast<float>((seed >> 16) & 0x7FFF) / 32767.0f;
-            };
-
-            std::vector<glm::vec2> placedTrees;
-            placedTrees.reserve(numTrees);
-
-            // Start with a random point in the forest area
-            placedTrees.push_back(glm::vec2(forestCenterX, forestCenterZ));
-
-            // Active list for Poisson disk sampling
-            std::vector<size_t> activeList;
-            activeList.push_back(0);
-
-            int treesPlaced = 0;
-            while (!activeList.empty() && treesPlaced < numTrees) {
-                // Pick a random active point
-                size_t activeIdx = static_cast<size_t>(nextRand() * activeList.size());
-                if (activeIdx >= activeList.size()) activeIdx = activeList.size() - 1;
-                glm::vec2 activePoint = placedTrees[activeList[activeIdx]];
-
-                bool foundValid = false;
-                for (int attempt = 0; attempt < maxAttempts; attempt++) {
-                    // Generate random point in annulus [minDist, 2*minDist] around active point
-                    float angle = nextRand() * 2.0f * 3.14159265f;
-                    float dist = minDist + nextRand() * minDist;
-                    glm::vec2 newPoint = activePoint + glm::vec2(std::cos(angle), std::sin(angle)) * dist;
-
-                    // Check if within forest bounds (circular)
-                    float distFromCenter = glm::length(newPoint - glm::vec2(forestCenterX, forestCenterZ));
-                    if (distFromCenter > forestRadius) continue;
-
-                    // Check distance from all existing points
-                    bool tooClose = false;
-                    for (const auto& p : placedTrees) {
-                        if (glm::length(newPoint - p) < minDist) {
-                            tooClose = true;
-                            break;
-                        }
-                    }
-
-                    if (!tooClose) {
-                        placedTrees.push_back(newPoint);
-                        activeList.push_back(placedTrees.size() - 1);
-                        foundValid = true;
-                        break;
-                    }
-                }
-
-                if (!foundValid) {
-                    // Remove from active list if no valid point found
-                    activeList.erase(activeList.begin() + activeIdx);
-                }
+            // Generate impostor archetypes
+            if (systems_->treeLOD()) {
+                vegGen.generateImpostorArchetypes(*systems_->tree(), *systems_->treeLOD());
             }
 
-            // Create threaded tree generator with 4 worker threads
-            threadedTreeGen = ThreadedTreeGenerator::create(4);
-            if (threadedTreeGen) {
-                // Queue all trees for parallel generation
-                std::vector<ThreadedTreeGenerator::TreeRequest> requests;
-                requests.reserve(placedTrees.size());
-                forestTreeOptions.reserve(placedTrees.size());
-
-                for (size_t i = 0; i < placedTrees.size() && treesPlaced < numTrees; i++) {
-                    float x = placedTrees[i].x;
-                    float z = placedTrees[i].y;
-                    float y = core.terrain.getHeightAt(x, z);
-
-                    // Random rotation and scale variation
-                    float rotation = nextRand() * 2.0f * 3.14159265f;
-                    float scale = 0.7f + 0.6f * nextRand();
-
-                    // Select tree type pseudo-randomly
-                    size_t presetIdx = static_cast<size_t>(nextRand() * treePresets.size());
-                    if (presetIdx >= treePresets.size()) presetIdx = treePresets.size() - 1;
-                    auto opts = loadPreset(treePresets[presetIdx].first, treePresets[presetIdx].second);
-
-                    // Determine archetype index based on leaf type
-                    uint32_t archetypeIndex = 0;
-                    const std::string& leafType = opts.leaves.type;
-                    if (leafType == "oak") archetypeIndex = 0;
-                    else if (leafType == "pine") archetypeIndex = 1;
-                    else if (leafType == "ash") archetypeIndex = 2;
-                    else if (leafType == "aspen") archetypeIndex = 3;
-
-                    ThreadedTreeGenerator::TreeRequest req;
-                    req.position = glm::vec3(x, y, z);
-                    req.rotation = rotation;
-                    req.scale = scale;
-                    req.options = opts;
-                    req.archetypeIndex = archetypeIndex;
-                    requests.push_back(req);
-                    forestTreeOptions.push_back(opts);
-                    treesPlaced++;
-                }
-
-                // Submit all trees for parallel generation (non-blocking)
-                threadedTreeGen->queueTrees(requests);
-                SDL_Log("Forest: queued %d trees for parallel generation", treesPlaced);
-            } else {
-                // Fallback to serial generation if threaded generator fails
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create threaded tree generator, using serial generation");
-                for (size_t i = 0; i < placedTrees.size() && treesPlaced < numTrees; i++) {
-                    float x = placedTrees[i].x;
-                    float z = placedTrees[i].y;
-                    float y = core.terrain.getHeightAt(x, z);
-
-                    float rotation = nextRand() * 2.0f * 3.14159265f;
-                    float scale = 0.7f + 0.6f * nextRand();
-
-                    size_t presetIdx = static_cast<size_t>(nextRand() * treePresets.size());
-                    if (presetIdx >= treePresets.size()) presetIdx = treePresets.size() - 1;
-                    auto opts = loadPreset(treePresets[presetIdx].first, treePresets[presetIdx].second);
-
-                    treeSystem->addTree(glm::vec3(x, y, z), rotation, scale, opts);
-                    treesPlaced++;
-                }
-                SDL_Log("Forest added: %d trees (serial) at distance 200 units from settlement", treesPlaced);
-            }
-
-            // Wait for threaded tree generation to complete and upload to GPU
-            if (threadedTreeGen) {
-                SDL_Log("Waiting for threaded tree generation to complete...");
-
-                // Wait for all trees to be generated
-                threadedTreeGen->waitForAll();
-
-                // Get completed trees and upload to GPU
-                auto stagedTrees = threadedTreeGen->getCompletedTrees();
-                int uploadedCount = 0;
-                for (auto& staged : stagedTrees) {
-                    uint32_t treeIdx = treeSystem->addTreeFromStagedData(
-                        staged.position, staged.rotation, staged.scale,
-                        staged.options,
-                        staged.branchVertexData, staged.branchVertexCount,
-                        staged.branchIndices,
-                        staged.leafInstanceData, staged.leafInstanceCount,
-                        staged.archetypeIndex);
-
-                    if (treeIdx != UINT32_MAX) {
-                        uploadedCount++;
-                    }
-                }
-
-                // Finalize leaf buffer and rebuild scene objects once for all trees
-                treeSystem->finalizeLeafInstanceBuffer();
-
-                SDL_Log("Forest: uploaded %d/%zu trees to GPU", uploadedCount, stagedTrees.size());
-                threadedTreeGen.reset();  // Clean up generator
-            }
-
-            // Generate impostor archetypes for each unique tree type
-            // The first 4 trees (display trees) define the archetypes: oak, pine, ash, aspen
-            auto* treeLOD = systems_->treeLOD();
-            if (treeLOD) {
-                // Archetype definitions: mesh index -> (name, bark, leaves)
-                struct ArchetypeInfo {
-                    uint32_t meshIndex;
-                    std::string name;
-                    std::string bark;
-                    std::string leaves;
-                };
-
-                std::vector<ArchetypeInfo> archetypeInfos = {
-                    {0, "oak",   "oak",   "oak"},
-                    {1, "pine",  "pine",  "pine"},
-                    {2, "ash",   "oak",   "ash"},
-                    {3, "aspen", "birch", "aspen"}
-                };
-
-                for (const auto& info : archetypeInfos) {
-                    if (info.meshIndex >= treeSystem->getMeshCount()) continue;
-
-                    const auto& branchMesh = treeSystem->getBranchMesh(info.meshIndex);
-                    const auto& leafInstances = treeSystem->getLeafInstances(info.meshIndex);
-                    const auto& treeOpts = treeSystem->getTreeOptions(info.meshIndex);
-
-                    auto* barkTex = treeSystem->getBarkTexture(info.bark);
-                    auto* barkNorm = treeSystem->getBarkNormalMap(info.bark);
-                    auto* leafTex = treeSystem->getLeafTexture(info.leaves);
-
-                    if (barkTex && barkNorm && leafTex) {
-                        int32_t archetypeIdx = treeLOD->generateImpostor(
-                            info.name,
-                            treeOpts,
-                            branchMesh,
-                            leafInstances,
-                            barkTex->getImageView(),
-                            barkNorm->getImageView(),
-                            leafTex->getImageView(),
-                            barkTex->getSampler()
-                        );
-                        if (archetypeIdx >= 0) {
-                            SDL_Log("Generated impostor archetype %d: %s", archetypeIdx, info.name.c_str());
-                        } else {
-                            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to generate %s impostor", info.name.c_str());
-                        }
-                    } else {
-                        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Missing textures for %s impostor", info.name.c_str());
-                    }
-                }
-            }
-
-            // Update ImpostorCullSystem with tree data for GPU-driven culling
-            auto* impostorCull = systems_->impostorCull();
-            if (impostorCull && treeLOD) {
-                impostorCull->updateTreeData(*treeSystem, treeLOD->getImpostorAtlas());
-                impostorCull->updateArchetypeData(treeLOD->getImpostorAtlas());
-                impostorCull->initializeDescriptorSets();
-                SDL_Log("ImpostorCullSystem: Updated with %u trees", impostorCull->getTreeCount());
-            }
-
-            // Update TreeRenderer with spatial index
-            // Note: updateBranchCullingData is called later in the render loop when needed
-            if (systems_->treeRenderer()) {
-                systems_->treeRenderer()->updateSpatialIndex(*treeSystem);
-            }
-
-            // Initialize TreeLODSystem descriptor sets now that impostors are generated
-            if (treeLOD) {
-                treeLOD->initializeDescriptorSets(
-                    systems_->globalBuffers().uniformBuffers.buffers,
-                    systems_->shadow().getShadowImageView(),
-                    systems_->shadow().getShadowSampler());
-
-                // If GPU culling is available, update instance buffer binding
-                if (impostorCull) {
-                    treeLOD->initializeGPUCulledDescriptors(impostorCull->getVisibleImpostorBuffer());
-                }
-            }
+            // Finalize tree systems
+            vegGen.finalizeTreeSystems(
+                *systems_->tree(),
+                systems_->treeLOD(),
+                systems_->impostorCull(),
+                systems_->treeRenderer(),
+                systems_->globalBuffers().uniformBuffers.buffers,
+                systems_->shadow().getShadowImageView(),
+                systems_->shadow().getShadowSampler());
         }
     }
 
     // Initialize detritus system (fallen branches scattered near trees)
-    {
-        DetritusSystem::InitInfo detritusInfo{};
-        detritusInfo.device = device;
-        detritusInfo.allocator = allocator;
-        detritusInfo.commandPool = **commandPool_;
-        detritusInfo.graphicsQueue = graphicsQueue;
-        detritusInfo.physicalDevice = physicalDevice;
-        detritusInfo.resourcePath = resourcePath;
-        detritusInfo.terrainSize = core.terrain.size;
-        detritusInfo.getTerrainHeight = core.terrain.getHeightAt;
+    if (systems_->tree()) {
+        VegetationContentGenerator::Config vegConfig;
+        vegConfig.resourcePath = resourcePath;
+        vegConfig.getTerrainHeight = core.terrain.getHeightAt;
+        vegConfig.terrainSize = core.terrain.size;
 
-        // Gather tree positions for scattering detritus nearby
-        if (systems_->tree()) {
-            const auto& treeInstances = systems_->tree()->getTreeInstances();
-            detritusInfo.treePositions.reserve(treeInstances.size());
-            for (const auto& tree : treeInstances) {
-                detritusInfo.treePositions.push_back(tree.position());
-            }
-        }
-
-        DetritusConfig detritusConfig{};
-        detritusConfig.branchVariations = 8;
-        detritusConfig.branchesPerVariation = 4;
-        detritusConfig.minLength = 0.5f;
-        detritusConfig.maxLength = 2.5f;
-        detritusConfig.minRadius = 0.03f;
-        detritusConfig.maxRadius = 0.12f;
-        detritusConfig.placementRadius = 8.0f;  // Scatter within 8m of each tree
-        detritusConfig.minDistanceBetween = 1.5f;
-        detritusConfig.breakChance = 0.7f;
-        detritusConfig.maxChildren = 3;
-        detritusConfig.materialRoughness = 0.85f;
-        detritusConfig.materialMetallic = 0.0f;
-
-        auto detritusSystem = DetritusSystem::create(detritusInfo, detritusConfig);
+        VegetationContentGenerator vegGen(vegConfig);
+        VegetationContentGenerator::DetritusCreateInfo detritusInfo{
+            device, allocator, **commandPool_, graphicsQueue, physicalDevice
+        };
+        auto detritusSystem = vegGen.createDetritusSystem(detritusInfo, *systems_->tree());
         if (detritusSystem) {
             systems_->setDetritus(std::move(detritusSystem));
-            SDL_Log("DetritusSystem initialized with %zu fallen branches near %zu trees",
-                    systems_->detritus()->getDetritusCount(), detritusInfo.treePositions.size());
-        } else {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "DetritusSystem creation failed (non-fatal)");
         }
     }
 
@@ -906,16 +501,6 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         }
     }
 
-    // Initialize weather and leaf subsystems
-    {
-        auto bundle = WeatherSystem::createWithDependencies(initCtx, core.hdr.renderPass);
-        if (!bundle) {
-            return false;
-        }
-        systems_->setWeather(std::move(bundle->weather));
-        systems_->setLeaf(std::move(bundle->leaf));
-    }
-
     // Connect leaf system to environment settings
     systems_->leaf().setEnvironmentSettings(envSettings);
 
@@ -946,9 +531,28 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                                      systems_->terrain().getTileArrayView(), systems_->terrain().getTileSampler(),
                                      leafTileInfoBuffers, &systems_->globalBuffers().dynamicRendererUBO);
 
-    // Initialize atmosphere subsystems (Froxel, AtmosphereLUT, CloudShadow)
-    if (!RendererInit::initAtmosphereSubsystems(*systems_, initCtx, core.shadow,
-                                                 systems_->globalBuffers().lightBuffers.buffers)) return false;
+    // Initialize atmosphere subsystems (Sky, Froxel, AtmosphereLUT, CloudShadow)
+    // Uses self-initializing AtmosphereSystemGroup to invert dependencies
+    {
+        INIT_PROFILE_PHASE("AtmosphereSubsystems");
+        AtmosphereSystemGroup::CreateDeps atmosDeps{
+            initCtx,
+            core.hdr.renderPass,
+            core.shadow.cascadeView,
+            core.shadow.sampler,
+            systems_->globalBuffers().lightBuffers.buffers
+        };
+        auto atmosBundle = AtmosphereSystemGroup::createAll(atmosDeps);
+        if (!atmosBundle) return false;
+
+        systems_->setSky(std::move(atmosBundle->sky));
+        systems_->setFroxel(std::move(atmosBundle->froxel));
+        systems_->setAtmosphereLUT(std::move(atmosBundle->atmosphereLUT));
+        systems_->setCloudShadow(std::move(atmosBundle->cloudShadow));
+
+        // Wire froxel to post-process for compositing
+        AtmosphereSystemGroup::wireToPostProcess(systems_->froxel(), systems_->postProcess());
+    }
 
     // Update grass descriptor sets (now that CloudShadowSystem exists)
     // Pass triple-buffered tile info buffers to avoid CPU-GPU sync issues
@@ -1033,127 +637,29 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Factory always returns valid profiler - GPU may be disabled if init fails
     systems_->setProfiler(Profiler::create(device, physicalDevice, MAX_FRAMES_IN_FLIGHT));
 
-    // Create WaterSystem via factory before initializing other water subsystems
+    // Create all water systems using WaterSystemGroup factory
     {
-        INIT_PROFILE_PHASE("WaterSystem");
-        WaterSystem::InitInfo waterInfo{};
-        waterInfo.device = device;
-        waterInfo.physicalDevice = physicalDevice;
-        waterInfo.allocator = allocator;
-        waterInfo.descriptorPool = initCtx.descriptorPool;
-        waterInfo.hdrRenderPass = core.hdr.renderPass;
-        waterInfo.shaderPath = initCtx.shaderPath;
-        waterInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-        waterInfo.extent = initCtx.extent;
-        waterInfo.commandPool = **commandPool_;
-        waterInfo.graphicsQueue = graphicsQueue;
-        waterInfo.waterSize = 65536.0f;  // Extend well beyond terrain for horizon
-        waterInfo.assetPath = resourcePath;
-        waterInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
+        INIT_PROFILE_PHASE("WaterSystems");
+        WaterSystemGroup::CreateDeps waterDeps{
+            initCtx,
+            core.hdr.renderPass,
+            65536.0f,  // waterSize - extend well beyond terrain for horizon
+            resourcePath
+        };
 
-        auto waterSystem = WaterSystem::create(waterInfo);
-        if (!waterSystem) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create WaterSystem");
-            return false;
-        }
-        systems_->setWater(std::move(waterSystem));
+        auto waterBundle = WaterSystemGroup::createAll(waterDeps);
+        if (!waterBundle) return false;
+
+        systems_->setWater(std::move(waterBundle->system));
+        systems_->setFlowMap(std::move(waterBundle->flowMap));
+        systems_->setWaterDisplacement(std::move(waterBundle->displacement));
+        systems_->setFoam(std::move(waterBundle->foam));
+        systems_->setSSR(std::move(waterBundle->ssr));
+        if (waterBundle->tileCull) systems_->setWaterTileCull(std::move(waterBundle->tileCull));
+        if (waterBundle->gBuffer) systems_->setWaterGBuffer(std::move(waterBundle->gBuffer));
     }
 
-    // Create water subsystems via factories before constructing WaterSubsystems struct
-    // FlowMapGenerator
-    FlowMapGenerator::InitInfo flowInfo{};
-    flowInfo.device = device;
-    flowInfo.allocator = allocator;
-    flowInfo.commandPool = **commandPool_;
-    flowInfo.queue = graphicsQueue;
-    flowInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-
-    auto flowMapGenerator = FlowMapGenerator::create(flowInfo);
-    if (!flowMapGenerator) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create FlowMapGenerator");
-        return false;
-    }
-    systems_->setFlowMap(std::move(flowMapGenerator));
-
-    // WaterDisplacement
-    WaterDisplacement::InitInfo dispInfo{};
-    dispInfo.device = device;
-    dispInfo.physicalDevice = physicalDevice;
-    dispInfo.allocator = allocator;
-    dispInfo.commandPool = **commandPool_;
-    dispInfo.computeQueue = graphicsQueue;
-    dispInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    dispInfo.displacementResolution = 512;
-    dispInfo.worldSize = 65536.0f;
-    dispInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-
-    auto waterDisplacement = WaterDisplacement::create(dispInfo);
-    if (!waterDisplacement) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create WaterDisplacement");
-        return false;
-    }
-    systems_->setWaterDisplacement(std::move(waterDisplacement));
-
-    // FoamBuffer
-    FoamBuffer::InitInfo foamInfo{};
-    foamInfo.device = device;
-    foamInfo.physicalDevice = physicalDevice;
-    foamInfo.allocator = allocator;
-    foamInfo.commandPool = **commandPool_;
-    foamInfo.computeQueue = graphicsQueue;
-    foamInfo.shaderPath = initCtx.shaderPath;
-    foamInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    foamInfo.resolution = 512;
-    foamInfo.worldSize = 65536.0f;
-    foamInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-
-    auto foamBuffer = FoamBuffer::create(foamInfo);
-    if (!foamBuffer) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create FoamBuffer");
-        return false;
-    }
-    systems_->setFoam(std::move(foamBuffer));
-
-    // WaterTileCull
-    WaterTileCull::InitInfo tileCullInfo{};
-    tileCullInfo.device = device;
-    tileCullInfo.physicalDevice = physicalDevice;
-    tileCullInfo.allocator = allocator;
-    tileCullInfo.commandPool = **commandPool_;
-    tileCullInfo.computeQueue = graphicsQueue;
-    tileCullInfo.shaderPath = initCtx.shaderPath;
-    tileCullInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    tileCullInfo.extent = initCtx.extent;
-    tileCullInfo.tileSize = 32;
-    tileCullInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-
-    auto waterTileCull = WaterTileCull::create(tileCullInfo);
-    if (waterTileCull) {
-        systems_->setWaterTileCull(std::move(waterTileCull));
-    } else {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create WaterTileCull - continuing without");
-    }
-
-    // WaterGBuffer
-    WaterGBuffer::InitInfo gbufferInfo{};
-    gbufferInfo.device = device;
-    gbufferInfo.physicalDevice = physicalDevice;
-    gbufferInfo.allocator = allocator;
-    gbufferInfo.fullResExtent = initCtx.extent;
-    gbufferInfo.resolutionScale = 0.5f;
-    gbufferInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    gbufferInfo.shaderPath = initCtx.shaderPath;
-    gbufferInfo.descriptorPool = initCtx.descriptorPool;
-    gbufferInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-
-    auto waterGBuffer = WaterGBuffer::create(gbufferInfo);
-    if (waterGBuffer) {
-        systems_->setWaterGBuffer(std::move(waterGBuffer));
-    } else {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create WaterGBuffer - continuing without");
-    }
-
-    // Initialize water subsystems (configure WaterSystem, generate flow map, create SSR)
+    // Initialize water subsystems (configure WaterSystem, generate flow map)
     WaterSubsystems waterSubs{systems_->water(), systems_->waterDisplacement(), systems_->flowMap(), systems_->foam(), *systems_, systems_->waterTileCull(), systems_->waterGBuffer()};
     if (!RendererInit::initWaterSubsystems(waterSubs, initCtx, core.hdr.renderPass,
                                             systems_->shadow(), systems_->terrain(), terrainConfig, systems_->postProcess(), **depthSampler_)) return false;

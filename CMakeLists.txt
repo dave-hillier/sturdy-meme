@@ -103,6 +103,8 @@ set(SOURCES
     src/atmosphere/CloudShadowSystem.cpp
     src/atmosphere/SnowMaskSystem.cpp
     src/atmosphere/VolumetricSnowSystem.cpp
+    src/atmosphere/AtmosphereSystemGroup.cpp
+    src/atmosphere/SnowSystemGroup.cpp
     # Vegetation
     src/vegetation/GrassSystem.cpp
     src/vegetation/GrassTile.cpp
@@ -112,6 +114,7 @@ set(SOURCES
     src/vegetation/TreeSystem.cpp
     src/vegetation/TreeGenerator.cpp
     src/vegetation/ThreadedTreeGenerator.cpp
+    src/vegetation/VegetationContentGenerator.cpp
     src/vegetation/TreeOptions.cpp
     src/vegetation/TreeRenderer.cpp
     src/vegetation/TreeLeafCulling.cpp
@@ -123,6 +126,7 @@ set(SOURCES
     src/vegetation/ImpostorCullSystem.cpp
     src/vegetation/BranchGenerator.cpp
     src/vegetation/DetritusSystem.cpp
+    src/vegetation/VegetationSystemGroup.cpp
     # Postprocess
     src/postprocess/PostProcessSystem.cpp
     src/postprocess/BloomSystem.cpp
@@ -163,6 +167,7 @@ set(SOURCES
     src/water/WaterDisplacement.cpp
     src/water/FoamBuffer.cpp
     src/water/WaterTileCull.cpp
+    src/water/WaterSystemGroup.cpp
     # GUI
     src/gui/GuiSystem.cpp
     src/gui/GuiTimeTab.cpp
