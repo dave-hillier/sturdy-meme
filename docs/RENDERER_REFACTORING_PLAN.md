@@ -96,12 +96,12 @@ private:
 
 ## Progress Tracking
 
-- [ ] Step 0: Extract RendererCore class
-- [ ] Step 1: Extract render pass recorders
+- [x] Step 0: Extract RendererCore class
+- [x] Step 1: Extract render pass recorders (ShadowPassRecorder, HDRPassRecorder)
 - [ ] Step 2: Move UBO updates to GlobalBufferManager
 - [ ] Step 3: Move Vulkan infrastructure to VulkanContext
 - [ ] Step 4: Extract FrameDataBuilder utility
-- [ ] Step 5: Move state sync to control subsystems
+- [x] Step 5: Move state sync to control subsystems (already done in main branch)
 - [ ] Step 6: Move debug visualization
 - [ ] Step 7: Move Hi-Z object data
 - [ ] Step 8: Cleanup legacy pipeline
