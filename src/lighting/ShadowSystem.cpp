@@ -5,9 +5,11 @@
 #include "PipelineBuilder.h"
 #include "GraphicsPipelineFactory.h"
 #include "debug/QueueSubmitDiagnostics.h"
+#include "shaders/bindings.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <algorithm>
+#include <unordered_map>
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 #include <limits>
@@ -54,9 +56,11 @@ bool ShadowSystem::initInternal(const InitInfo& info) {
     if (!createShadowRenderPass()) return false;
     if (!createShadowResources()) return false;
     if (!createDynamicShadowResources()) return false;
+    if (!createInstancedShadowResources()) return false;
     if (!createShadowPipeline()) return false;
     if (!createSkinnedShadowPipeline()) return false;
     if (!createDynamicShadowPipeline()) return false;
+    if (!createInstancedShadowPipeline()) return false;
 
     return true;
 }
@@ -83,6 +87,9 @@ void ShadowSystem::cleanup() {
 
     // Dynamic shadow cleanup
     destroyDynamicShadowResources();
+
+    // Instanced shadow cleanup
+    destroyInstancedShadowResources();
 
     // Render pass
     if (shadowRenderPass != VK_NULL_HANDLE) vkDevice.destroyRenderPass(shadowRenderPass);
@@ -319,6 +326,254 @@ void ShadowSystem::destroyDynamicShadowResources() {
     }
 }
 
+bool ShadowSystem::createInstancedShadowResources() {
+    vk::Device vkDevice(device);
+
+    // Create descriptor set layout for instanced shadow rendering
+    auto instanceBufferBinding = vk::DescriptorSetLayoutBinding{}
+        .setBinding(Bindings::SHADOW_INSTANCES)
+        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex);
+
+    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
+        .setBindings(instanceBufferBinding);
+
+    try {
+        instancedShadowDescriptorSetLayout = vkDevice.createDescriptorSetLayout(layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create instanced shadow descriptor set layout: %s", e.what());
+        return false;
+    }
+
+    // Create per-frame instance buffers (persistently mapped for fast CPU writes)
+    instanceBuffers.resize(framesInFlight);
+    instanceAllocations.resize(framesInFlight);
+    instanceMappedPtrs.resize(framesInFlight);
+
+    VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bufferInfo.size = MAX_SHADOW_INSTANCES * sizeof(glm::mat4);
+    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        VmaAllocationInfo allocResult;
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
+                            &instanceBuffers[i], &instanceAllocations[i], &allocResult) != VK_SUCCESS) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create instance buffer %u", i);
+            return false;
+        }
+        instanceMappedPtrs[i] = allocResult.pMappedData;
+    }
+
+    // Allocate descriptor sets using a temporary pool
+    // Note: In production, use a proper descriptor pool manager
+    auto poolSize = vk::DescriptorPoolSize{}
+        .setType(vk::DescriptorType::eStorageBuffer)
+        .setDescriptorCount(framesInFlight);
+
+    auto poolInfo = vk::DescriptorPoolCreateInfo{}
+        .setMaxSets(framesInFlight)
+        .setPoolSizes(poolSize);
+
+    VkDescriptorPool pool;
+    try {
+        pool = vkDevice.createDescriptorPool(poolInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create instanced shadow descriptor pool: %s", e.what());
+        return false;
+    }
+
+    std::vector<vk::DescriptorSetLayout> layouts(framesInFlight, vk::DescriptorSetLayout(instancedShadowDescriptorSetLayout));
+    auto allocInfoDS = vk::DescriptorSetAllocateInfo{}
+        .setDescriptorPool(pool)
+        .setSetLayouts(layouts);
+
+    try {
+        instancedShadowDescriptorSets = vkDevice.allocateDescriptorSets(allocInfoDS);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate instanced shadow descriptor sets: %s", e.what());
+        return false;
+    }
+
+    // Update descriptor sets with buffer bindings
+    for (uint32_t i = 0; i < framesInFlight; i++) {
+        auto bufferInfoDS = vk::DescriptorBufferInfo{}
+            .setBuffer(instanceBuffers[i])
+            .setOffset(0)
+            .setRange(VK_WHOLE_SIZE);
+
+        auto writeDS = vk::WriteDescriptorSet{}
+            .setDstSet(instancedShadowDescriptorSets[i])
+            .setDstBinding(Bindings::SHADOW_INSTANCES)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setBufferInfo(bufferInfoDS);
+
+        vkDevice.updateDescriptorSets(writeDS, nullptr);
+    }
+
+    SDL_Log("Created instanced shadow resources: %u frames, %u max instances", framesInFlight, MAX_SHADOW_INSTANCES);
+    return true;
+}
+
+bool ShadowSystem::createInstancedShadowPipeline() {
+    vk::Device vkDevice(device);
+
+    // Create pipeline layout with both main descriptor set (for UBO) and instanced set (for SSBO)
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex)
+        .setOffset(0)
+        .setSize(sizeof(InstancedShadowPushConstants));
+
+    std::array<vk::DescriptorSetLayout, 2> setLayouts = {
+        vk::DescriptorSetLayout(mainDescriptorSetLayout),           // Set 0: UBO with cascade matrices
+        vk::DescriptorSetLayout(instancedShadowDescriptorSetLayout) // Set 1: Instance SSBO
+    };
+
+    auto layoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayouts(setLayouts)
+        .setPushConstantRanges(pushConstantRange);
+
+    try {
+        instancedShadowPipelineLayout = vkDevice.createPipelineLayout(layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create instanced shadow pipeline layout: %s", e.what());
+        return false;
+    }
+
+    // Create pipeline using the instanced shader
+    auto binding = Vertex::getBindingDescription();
+    auto attrsArr = Vertex::getAttributeDescriptions();
+    std::vector<VkVertexInputAttributeDescription> attrs(attrsArr.begin(), attrsArr.end());
+
+    GraphicsPipelineFactory factory(device);
+    factory.applyPreset(GraphicsPipelineFactory::Preset::Shadow)
+           .setShaders(shaderPath + "/shadow_instanced.vert.spv", shaderPath + "/shadow.frag.spv")
+           .setRenderPass(shadowRenderPass)
+           .setPipelineLayout(instancedShadowPipelineLayout)
+           .setExtent({SHADOW_MAP_SIZE, SHADOW_MAP_SIZE})
+           .setVertexInput({binding}, attrs)
+           .setDepthBias(1.25f, 1.75f);
+
+    if (!factory.build(instancedShadowPipeline)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create instanced shadow pipeline");
+        return false;
+    }
+
+    SDL_Log("Created instanced shadow pipeline");
+    return true;
+}
+
+void ShadowSystem::destroyInstancedShadowResources() {
+    vk::Device vkDevice(device);
+
+    for (uint32_t i = 0; i < instanceBuffers.size(); i++) {
+        if (instanceBuffers[i] != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, instanceBuffers[i], instanceAllocations[i]);
+        }
+    }
+    instanceBuffers.clear();
+    instanceAllocations.clear();
+    instanceMappedPtrs.clear();
+
+    // Note: Descriptor sets are freed when pool is destroyed
+    instancedShadowDescriptorSets.clear();
+
+    if (instancedShadowPipeline != VK_NULL_HANDLE) {
+        vkDevice.destroyPipeline(instancedShadowPipeline);
+        instancedShadowPipeline = VK_NULL_HANDLE;
+    }
+    if (instancedShadowPipelineLayout != VK_NULL_HANDLE) {
+        vkDevice.destroyPipelineLayout(instancedShadowPipelineLayout);
+        instancedShadowPipelineLayout = VK_NULL_HANDLE;
+    }
+    if (instancedShadowDescriptorSetLayout != VK_NULL_HANDLE) {
+        vkDevice.destroyDescriptorSetLayout(instancedShadowDescriptorSetLayout);
+        instancedShadowDescriptorSetLayout = VK_NULL_HANDLE;
+    }
+}
+
+void ShadowSystem::drawShadowSceneInstanced(
+    VkCommandBuffer cmd,
+    uint32_t frameIndex,
+    uint32_t cascadeIndex,
+    const std::vector<Renderable>& sceneObjects)
+{
+    if (sceneObjects.empty() || instancedShadowPipeline == VK_NULL_HANDLE) return;
+    if (frameIndex >= instanceMappedPtrs.size()) return;
+
+    vk::CommandBuffer vkCmd(cmd);
+
+    // Group objects by mesh pointer (objects sharing the same mesh can be instanced)
+    std::unordered_map<const Mesh*, std::vector<const Renderable*>> meshGroups;
+    for (const auto& obj : sceneObjects) {
+        if (!obj.castsShadow || !obj.mesh) continue;
+        meshGroups[obj.mesh].push_back(&obj);
+    }
+
+    if (meshGroups.empty()) return;
+
+    // Upload all instance transforms to the buffer
+    auto* instanceData = static_cast<glm::mat4*>(instanceMappedPtrs[frameIndex]);
+    uint32_t totalInstances = 0;
+
+    // Build instance data and track offsets per mesh group
+    struct MeshBatch {
+        const Mesh* mesh;
+        uint32_t instanceOffset;
+        uint32_t instanceCount;
+    };
+    std::vector<MeshBatch> batches;
+    batches.reserve(meshGroups.size());
+
+    for (const auto& [mesh, objects] : meshGroups) {
+        if (totalInstances + objects.size() > MAX_SHADOW_INSTANCES) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Shadow instance limit reached (%u), skipping remaining objects", MAX_SHADOW_INSTANCES);
+            break;
+        }
+
+        MeshBatch batch;
+        batch.mesh = mesh;
+        batch.instanceOffset = totalInstances;
+        batch.instanceCount = static_cast<uint32_t>(objects.size());
+
+        for (const auto* obj : objects) {
+            instanceData[totalInstances++] = obj->transform;
+        }
+
+        batches.push_back(batch);
+    }
+
+    if (batches.empty()) return;
+
+    // Bind instanced shadow pipeline and descriptor sets
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, instancedShadowPipeline);
+
+    // Draw each mesh batch with instancing
+    for (const auto& batch : batches) {
+        vk::Buffer vb[] = {batch.mesh->getVertexBuffer()};
+        vk::DeviceSize offsets[] = {0};
+        vkCmd.bindVertexBuffers(0, 1, vb, offsets);
+        vkCmd.bindIndexBuffer(batch.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+
+        InstancedShadowPushConstants push{};
+        push.cascadeIndex = cascadeIndex;
+        push.instanceOffset = batch.instanceOffset;
+
+        vkCmd.pushConstants<InstancedShadowPushConstants>(
+            instancedShadowPipelineLayout,
+            vk::ShaderStageFlagBits::eVertex,
+            0, push);
+
+        vkCmd.drawIndexed(batch.mesh->getIndexCount(), batch.instanceCount, 0, 0, 0);
+        DIAG_RECORD_DRAW(); // One draw call, multiple instances
+    }
+}
+
 void ShadowSystem::calculateCascadeSplits(float nearClip, float farClip, float lambda, std::vector<float>& splits) {
     splits.resize(NUM_SHADOW_CASCADES + 1);
     splits[0] = nearClip;
@@ -453,6 +708,11 @@ void ShadowSystem::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex,
                                      const ComputeCallback& preCascadeComputeCallback) {
     vk::CommandBuffer vkCmd(cmd);
 
+    // Check if instanced rendering is available
+    bool useInstanced = instancedShadowPipeline != VK_NULL_HANDLE &&
+                        frameIndex < instancedShadowDescriptorSets.size() &&
+                        !sceneObjects.empty();
+
     for (uint32_t cascade = 0; cascade < NUM_SHADOW_CASCADES; cascade++) {
         // Run pre-cascade compute pass (GPU culling) BEFORE the render pass
         if (preCascadeComputeCallback) {
@@ -469,12 +729,54 @@ void ShadowSystem::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex,
             .setClearValues(shadowClear);
 
         vkCmd.beginRenderPass(shadowPassInfo, vk::SubpassContents::eInline);
-        vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline);
-        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, shadowPipelineLayout,
-                                 0, vk::DescriptorSet(descriptorSet), {});
 
-        drawShadowScene(cmd, shadowPipelineLayout, cascade, cascadeMatrices[cascade],
-                        sceneObjects, terrainDrawCallback, grassDrawCallback, treeDrawCallback, skinnedDrawCallback);
+        if (useInstanced) {
+            // Use instanced rendering for scene objects (rocks, detritus, etc.)
+            // Bind descriptor sets for instanced pipeline
+            std::array<vk::DescriptorSet, 2> descSets = {
+                vk::DescriptorSet(descriptorSet),
+                vk::DescriptorSet(instancedShadowDescriptorSets[frameIndex])
+            };
+            vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, instancedShadowPipeline);
+            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, instancedShadowPipelineLayout,
+                                     0, descSets, {});
+
+            drawShadowSceneInstanced(cmd, frameIndex, cascade, sceneObjects);
+
+            // Switch back to regular pipeline for callbacks (terrain, grass, trees)
+            vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline);
+            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, shadowPipelineLayout,
+                                     0, vk::DescriptorSet(descriptorSet), {});
+        } else {
+            // Fallback: per-object rendering
+            vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, shadowPipeline);
+            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, shadowPipelineLayout,
+                                     0, vk::DescriptorSet(descriptorSet), {});
+
+            // Draw scene objects individually
+            for (const auto& obj : sceneObjects) {
+                if (!obj.castsShadow) continue;
+
+                ShadowPushConstants push{};
+                push.model = obj.transform;
+                push.cascadeIndex = static_cast<int>(cascade);
+                vkCmd.pushConstants<ShadowPushConstants>(
+                    shadowPipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, push);
+
+                vk::Buffer vb[] = {obj.mesh->getVertexBuffer()};
+                vk::DeviceSize offsets[] = {0};
+                vkCmd.bindVertexBuffers(0, 1, vb, offsets);
+                vkCmd.bindIndexBuffer(obj.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+                vkCmd.drawIndexed(obj.mesh->getIndexCount(), 1, 0, 0, 0);
+                DIAG_RECORD_DRAW();
+            }
+        }
+
+        // Call terrain/grass/tree/skinned callbacks
+        if (terrainDrawCallback) terrainDrawCallback(cmd, cascade, cascadeMatrices[cascade]);
+        if (grassDrawCallback) grassDrawCallback(cmd, cascade, cascadeMatrices[cascade]);
+        if (treeDrawCallback) treeDrawCallback(cmd, cascade, cascadeMatrices[cascade]);
+        if (skinnedDrawCallback) skinnedDrawCallback(cmd, cascade, cascadeMatrices[cascade]);
 
         vkCmd.endRenderPass();
     }

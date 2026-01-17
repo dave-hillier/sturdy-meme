@@ -1370,7 +1370,8 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
     bool hasCharacter = systems_->scene().getSceneBuilder().hasCharacter();
 
     size_t detritusCount = systems_->detritus() ? systems_->detritus()->getSceneObjects().size() : 0;
-    allObjects.reserve(sceneObjects.size() + systems_->rock().getSceneObjects().size() + detritusCount);
+    size_t rockCount = systems_->rock().getSceneObjects().size();
+    allObjects.reserve(sceneObjects.size() + rockCount + detritusCount);
     for (size_t i = 0; i < sceneObjects.size(); ++i) {
         // Skip player character - rendered with skinned shadow pipeline
         if (hasCharacter && i == playerIndex) {

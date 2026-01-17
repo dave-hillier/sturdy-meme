@@ -282,9 +282,10 @@ void VegetationContentGenerator::finalizeTreeSystems(
         SDL_Log("VegetationContentGenerator: ImpostorCullSystem updated with %u trees", impostorCull->getTreeCount());
     }
 
-    // Update TreeRenderer spatial index
+    // Update TreeRenderer spatial index and branch culling data
     if (treeRenderer) {
         treeRenderer->updateSpatialIndex(treeSystem);
+        treeRenderer->updateBranchCullingData(treeSystem, treeLOD);
     }
 
     // Initialize TreeLODSystem descriptor sets

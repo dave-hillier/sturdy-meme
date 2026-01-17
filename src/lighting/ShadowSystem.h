@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -204,4 +205,31 @@ private:
     // Skinned mesh shadow pipeline (for GPU-skinned characters)
     VkPipeline skinnedShadowPipeline = VK_NULL_HANDLE;
     VkPipelineLayout skinnedShadowPipelineLayout = VK_NULL_HANDLE;
+
+    // Instanced shadow rendering (batches scene objects by mesh)
+    static constexpr uint32_t MAX_SHADOW_INSTANCES = 512;  // Max instances per frame
+    VkPipeline instancedShadowPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout instancedShadowPipelineLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout instancedShadowDescriptorSetLayout = VK_NULL_HANDLE;
+    std::vector<vk::DescriptorSet> instancedShadowDescriptorSets;  // Per frame
+    std::vector<VkBuffer> instanceBuffers;      // Per frame
+    std::vector<VmaAllocation> instanceAllocations;  // Per frame
+    std::vector<void*> instanceMappedPtrs;      // Persistently mapped
+
+    // Push constants for instanced shadow rendering
+    struct InstancedShadowPushConstants {
+        uint32_t cascadeIndex;
+        uint32_t instanceOffset;
+    };
+
+    bool createInstancedShadowPipeline();
+    bool createInstancedShadowResources();
+    void destroyInstancedShadowResources();
+
+    // Draw scene objects using instanced rendering (batches by mesh)
+    void drawShadowSceneInstanced(
+        VkCommandBuffer cmd,
+        uint32_t frameIndex,
+        uint32_t cascadeIndex,
+        const std::vector<Renderable>& sceneObjects);
 };

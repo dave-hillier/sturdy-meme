@@ -244,6 +244,11 @@
 #define BINDING_TREE_BRANCH_SHADOW_INSTANCES   9   // Instance SSBO for vertex shader
 
 // =============================================================================
+// Scene Object Shadow Instancing Descriptor Set
+// =============================================================================
+#define BINDING_SHADOW_INSTANCES               0   // Instance SSBO (model matrices) for instanced shadow rendering
+
+// =============================================================================
 // Leaf Compute Shader Descriptor Set
 // =============================================================================
 #define BINDING_LEAF_COMPUTE_INPUT         0   // Input particle buffer
@@ -661,6 +666,9 @@ constexpr uint32_t TREE_BRANCH_SHADOW_INDIRECT  = BINDING_TREE_BRANCH_SHADOW_IND
 constexpr uint32_t TREE_BRANCH_SHADOW_UNIFORMS  = BINDING_TREE_BRANCH_SHADOW_UNIFORMS;
 constexpr uint32_t TREE_BRANCH_SHADOW_GROUPS    = BINDING_TREE_BRANCH_SHADOW_GROUPS;
 constexpr uint32_t TREE_BRANCH_SHADOW_INSTANCES = BINDING_TREE_BRANCH_SHADOW_INSTANCES;
+
+// Scene Object Shadow Instancing
+constexpr uint32_t SHADOW_INSTANCES           = BINDING_SHADOW_INSTANCES;
 
 // Leaf Compute
 constexpr uint32_t LEAF_COMPUTE_INPUT     = BINDING_LEAF_COMPUTE_INPUT;

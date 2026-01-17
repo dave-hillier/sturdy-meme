@@ -700,6 +700,7 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_impostor_shadow.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch_shadow_cull.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch_shadow_instanced.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow_instanced.vert.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -794,6 +795,7 @@ if(SHADER_COMPILE_CMD)
         tree_leaf.vert tree_leaf.frag
         tree_shadow.vert
         tree_branch_shadow_instanced.vert
+        shadow_instanced.vert
         tree_branch_shadow_cull.comp
         tree_leaf_shadow.vert tree_leaf_shadow.frag
         tree_geometry.comp tree_leaf.comp tree_leaf_cull.comp tree_filter.comp tree_leaf_cull_phase3.comp tree_impostor_cull.comp tree_cell_cull.comp
@@ -1115,6 +1117,7 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_impostor_shadow.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch_shadow_cull.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch_shadow_instanced.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow_instanced.vert.spv
     )
 
     # Source shaders used for UBO reflection (curated subset that defines complete UBO structures)
