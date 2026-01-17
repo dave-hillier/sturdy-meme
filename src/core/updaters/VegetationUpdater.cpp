@@ -83,6 +83,12 @@ void VegetationUpdater::updateTreeDescriptors(RendererSystems& systems, const Fr
             leafTex->getSampler(),
             systems.globalBuffers().snowBuffers.buffers[frame.frameIndex]);
     }
+
+    // Update instanced shadow descriptor sets with UBO for cascadeViewProj matrices
+    systems.treeRenderer()->updateInstancedShadowDescriptorSets(
+        frame.frameIndex,
+        systems.globalBuffers().uniformBuffers.buffers[frame.frameIndex]);
+
     systems.profiler().endCpuZone("Update:TreeDesc");
 }
 

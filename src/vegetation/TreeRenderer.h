@@ -144,6 +144,9 @@ public:
     // Update branch culling data (call when trees change)
     void updateBranchCullingData(const TreeSystem& treeSystem, const TreeLODSystem* lodSystem);
 
+    // Update instanced shadow descriptor sets with UBO (must be called each frame)
+    void updateInstancedShadowDescriptorSets(uint32_t frameIndex, vk::Buffer uniformBuffer);
+
     // Check if branch shadow culling is available (subsystem initialized)
     bool isBranchShadowCullingAvailable() const;
 

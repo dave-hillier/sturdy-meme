@@ -621,6 +621,30 @@ void TreeRenderer::updateBranchCullingData(const TreeSystem& treeSystem, const T
     }
 }
 
+void TreeRenderer::updateInstancedShadowDescriptorSets(uint32_t frameIndex, vk::Buffer uniformBuffer) {
+    if (branchShadowInstancedDescriptorSets_.empty() ||
+        frameIndex >= branchShadowInstancedDescriptorSets_.size()) {
+        return;
+    }
+
+    vk::Device vkDevice(device_);
+    vk::DescriptorSet dstSet = branchShadowInstancedDescriptorSets_[frameIndex];
+
+    auto uboBufferInfo = vk::DescriptorBufferInfo{}
+        .setBuffer(uniformBuffer)
+        .setOffset(0)
+        .setRange(VK_WHOLE_SIZE);
+
+    auto uboWrite = vk::WriteDescriptorSet{}
+        .setDstSet(dstSet)
+        .setDstBinding(Bindings::TREE_GFX_UBO)
+        .setDstArrayElement(0)
+        .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+        .setBufferInfo(uboBufferInfo);
+
+    vkDevice.updateDescriptorSets(uboWrite, nullptr);
+}
+
 bool TreeRenderer::isBranchShadowCullingAvailable() const {
     return branchShadowCulling_ && branchShadowCulling_->isEnabled();
 }
