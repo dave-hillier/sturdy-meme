@@ -7,6 +7,7 @@
 #include "PipelineBuilder.h"
 #include "ComputePipelineBuilder.h"
 #include "DescriptorManager.h"
+#include "QueueSubmitDiagnostics.h"
 #include "UBOs.h"
 #include "VmaResources.h"
 #include "core/vulkan/BarrierHelpers.h"
@@ -960,6 +961,7 @@ void GrassSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float t
         0, grassPush);
 
     cmd.drawIndirect(indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
+    DIAG_RECORD_DRAW();
 }
 
 void GrassSystem::recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex) {
@@ -988,6 +990,7 @@ void GrassSystem::recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex, f
         0, grassPush);
 
     cmd.drawIndirect(indirectBuffers.buffers[readSet], 0, 1, sizeof(VkDrawIndirectCommand));
+    DIAG_RECORD_DRAW();
 }
 
 void GrassSystem::setSnowMask(vk::Device device, vk::ImageView snowMaskView, vk::Sampler snowMaskSampler) {

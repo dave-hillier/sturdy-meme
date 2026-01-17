@@ -11,6 +11,7 @@
 class TaskScheduler;
 class TaskGroup;
 class ThreadedCommandPool;
+struct QueueSubmitDiagnostics;
 
 /**
  * FrameGraph - Dependency-driven render pass scheduling.
@@ -68,6 +69,10 @@ public:
         // The execute function should call commandBuffer.executeCommands(secondaryBuffers)
         // inside the render pass
         std::vector<vk::CommandBuffer>* secondaryBuffers = nullptr;
+
+        // Command diagnostics - passes should increment these counters
+        // when recording commands (draw calls, dispatches, etc.)
+        QueueSubmitDiagnostics* diagnostics = nullptr;
     };
 
     using PassFunction = std::function<void(RenderContext&)>;

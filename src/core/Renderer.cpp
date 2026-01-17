@@ -10,6 +10,7 @@
 #include "VmaResources.h"
 #include "Bindings.h"
 #include "InitProfiler.h"
+#include "QueueSubmitDiagnostics.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/pipeline/FrameGraphBuilder.h"
 #include "core/FrameUpdater.h"
@@ -251,6 +252,7 @@ void Renderer::setupFrameGraph() {
         state
     );
 }
+
 
 // Note: initCoreVulkanResources(), initDescriptorInfrastructure(), initSubsystems(),
 // and initResizeCoordinator() are implemented in RendererInitPhases.cpp
@@ -761,9 +763,12 @@ bool Renderer::render(const Camera& camera) {
     systems_->profiler().endCpuZone("Wait:FenceSync");
 
     systems_->profiler().beginCpuZone("Wait:AcquireImage");
+    auto acquireStart = std::chrono::high_resolution_clock::now();
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX,
                                             frameSync_.currentImageAvailableSemaphore(), VK_NULL_HANDLE, &imageIndex);
+    auto acquireEnd = std::chrono::high_resolution_clock::now();
+    qsDiag.acquireImageTimeMs = std::chrono::duration<float, std::milli>(acquireEnd - acquireStart).count();
     systems_->profiler().endCpuZone("Wait:AcquireImage");
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -797,10 +802,18 @@ bool Renderer::render(const Camera& camera) {
     // Begin CPU profiling for this frame
     systems_->profiler().beginCpuZone("UniformUpdates");
 
+    // Track UBO bandwidth
+    CommandCounter bandwidthCounter(&qsDiag);
+
     // Update uniform buffer data
     {
         systems_->profiler().beginCpuZone("UniformUpdates:UBO");
         updateUniformBuffer(frameSync_.currentIndex(), camera);
+        // Track bandwidth: main UBO + dynamic UBO copy + snow + cloudShadow + lights
+        bandwidthCounter.recordUboUpdate(sizeof(UniformBufferObject) * 2);  // regular + dynamic
+        bandwidthCounter.recordUboUpdate(sizeof(SnowUBO));
+        bandwidthCounter.recordUboUpdate(sizeof(CloudShadowUBO));
+        bandwidthCounter.recordSsboUpdate(sizeof(LightBuffer));
         systems_->profiler().endCpuZone("UniformUpdates:UBO");
     }
 
@@ -810,6 +823,8 @@ bool Renderer::render(const Camera& camera) {
         SceneBuilder& sceneBuilder = systems_->scene().getSceneBuilder();
         AnimatedCharacter* character = sceneBuilder.hasCharacter() ? &sceneBuilder.getAnimatedCharacter() : nullptr;
         systems_->skinnedMesh().updateBoneMatrices(frameSync_.currentIndex(), character);
+        // Track bone SSBO bandwidth (128 bones * mat4)
+        bandwidthCounter.recordSsboUpdate(128 * sizeof(glm::mat4));
         systems_->profiler().endCpuZone("UniformUpdates:Bones");
     }
 
@@ -844,6 +859,7 @@ bool Renderer::render(const Camera& camera) {
 
     // Begin command buffer recording
     systems_->profiler().beginCpuZone("CmdBufferRecord");
+    auto recordStart = std::chrono::high_resolution_clock::now();
 
     vk::CommandBuffer vkCmd(commandBuffers[frame.frameIndex]);
     vkCmd.reset();
@@ -854,6 +870,9 @@ bool Renderer::render(const Camera& camera) {
     // Get reference to diagnostics for command counting
     auto& cmdDiag = systems_->profiler().getQueueSubmitDiagnostics();
 
+    // Set global diagnostics for subsystems that don't have direct access
+    ScopedDiagnostics scopedDiag(&cmdDiag);
+
     // Begin command capture if requested
     auto& cmdCapture = systems_->profiler().getCommandCapture();
     cmdCapture.beginFrame(systems_->profiler().getFrameNumber());
@@ -863,7 +882,7 @@ bool Renderer::render(const Camera& camera) {
 
     // Build render resources and context for pipeline stages
     RenderResources resources = buildRenderResources(imageIndex);
-    RenderContext ctx(cmd, frame.frameIndex, frame, resources);
+    RenderContext ctx(cmd, frame.frameIndex, frame, resources, &cmdDiag);
 
     if (useFrameGraph) {
         // ===== FRAME GRAPH EXECUTION PATH =====
@@ -877,7 +896,9 @@ bool Renderer::render(const Camera& camera) {
             // Phase 4: Secondary command buffer support
             .threadedCommandPool = &threadedCommandPool_,
             .renderPass = vk::RenderPass(systems_->postProcess().getHDRRenderPass()),
-            .framebuffer = vk::Framebuffer(systems_->postProcess().getHDRFramebuffer())
+            .framebuffer = vk::Framebuffer(systems_->postProcess().getHDRFramebuffer()),
+            // Command diagnostics - passes increment these counters
+            .diagnostics = &cmdDiag
         };
 
         // Execute all passes in dependency order
@@ -1012,6 +1033,9 @@ bool Renderer::render(const Camera& camera) {
 
     vkCmd.end();
 
+    auto recordEnd = std::chrono::high_resolution_clock::now();
+    cmdDiag.commandRecordTimeMs = std::chrono::duration<float, std::milli>(recordEnd - recordStart).count();
+
     systems_->profiler().endCpuZone("CmdBufferRecord");
 
     // Queue submission
@@ -1056,6 +1080,7 @@ bool Renderer::render(const Camera& camera) {
         .setSwapchains(swapChains)
         .setImageIndices(imageIndex);
 
+    auto presentStart = std::chrono::high_resolution_clock::now();
     try {
         auto presentResult = vk::Queue(presentQueue).presentKHR(presentInfo);
         if (presentResult == vk::Result::eSuboptimalKHR) {
@@ -1072,6 +1097,8 @@ bool Renderer::render(const Camera& camera) {
     } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to present swapchain image: %s", e.what());
     }
+    auto presentEnd = std::chrono::high_resolution_clock::now();
+    cmdDiag.presentTimeMs = std::chrono::duration<float, std::milli>(presentEnd - presentStart).count();
 
     systems_->profiler().endCpuZone("Wait:Present");
 

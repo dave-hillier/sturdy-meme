@@ -3,6 +3,7 @@
 #include "GraphicsPipelineFactory.h"
 #include "VmaResources.h"
 #include "DescriptorManager.h"
+#include "debug/QueueSubmitDiagnostics.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <array>
@@ -540,6 +541,7 @@ void WaterSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
     vkCmd.bindIndexBuffer(waterMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
     vkCmd.drawIndexed(waterMesh->getIndexCount(), 1, 0, 0, 0);
+    DIAG_RECORD_DRAW();
 }
 
 void WaterSystem::recordMeshDraw(VkCommandBuffer cmd) {
@@ -550,6 +552,7 @@ void WaterSystem::recordMeshDraw(VkCommandBuffer cmd) {
     vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
     vkCmd.bindIndexBuffer(waterMesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
     vkCmd.drawIndexed(waterMesh->getIndexCount(), 1, 0, 0, 0);
+    DIAG_RECORD_DRAW();
 }
 
 void WaterSystem::updateTide(float tideHeight) {

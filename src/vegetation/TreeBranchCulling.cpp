@@ -265,6 +265,14 @@ void TreeBranchCulling::updateTreeData(const TreeSystem& treeSystem, const TreeL
 
     numTrees_ = static_cast<uint32_t>(instances.size());
 
+    // Clamp to buffer capacity to prevent overflow
+    if (numTrees_ > maxTrees_) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "TreeBranchCulling: Tree count %u exceeds buffer capacity %u, clamping",
+                    numTrees_, maxTrees_);
+        numTrees_ = maxTrees_;
+    }
+
     // Build mesh groups by archetype/mesh index
     std::unordered_map<uint32_t, std::vector<uint32_t>> treesByMesh;
     for (uint32_t i = 0; i < numTrees_; ++i) {
@@ -297,6 +305,14 @@ void TreeBranchCulling::updateTreeData(const TreeSystem& treeSystem, const TreeL
         else if (barkType == "oak") group.barkTypeIndex = 1;
         else if (barkType == "pine") group.barkTypeIndex = 2;
         else if (barkType == "willow") group.barkTypeIndex = 3;
+
+        // Check mesh group capacity
+        if (meshGroups_.size() >= maxMeshGroups_) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "TreeBranchCulling: Mesh group count exceeds capacity %u, skipping remaining groups",
+                        maxMeshGroups_);
+            break;
+        }
 
         meshGroups_.push_back(group);
 

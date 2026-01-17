@@ -4,6 +4,7 @@
 #include "CullCommon.h"
 #include "Mesh.h"
 #include "ShaderLoader.h"
+#include "QueueSubmitDiagnostics.h"
 #include "shaders/bindings.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 
@@ -968,6 +969,7 @@ void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
 
     bindBillboardBuffers(vkCmd);
     vkCmd.drawIndexed(billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
+    DIAG_RECORD_DRAW();
 }
 
 void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameIndex,
@@ -987,6 +989,7 @@ void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameInd
 
     bindBillboardBuffers(vkCmd);
     vkCmd.drawIndexed(billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
+    DIAG_RECORD_DRAW();
 }
 
 void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frameIndex,
@@ -1007,6 +1010,7 @@ void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frame
 
     bindBillboardBuffers(vkCmd, gpuInstanceBuffer);
     vkCmd.drawIndexedIndirect(indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+    DIAG_RECORD_DRAW();
 }
 
 void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t frameIndex,
@@ -1027,6 +1031,7 @@ void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t
 
     bindBillboardBuffers(vkCmd, gpuInstanceBuffer);
     vkCmd.drawIndexedIndirect(indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+    DIAG_RECORD_DRAW();
 }
 
 const TreeLODState& TreeLODSystem::getTreeLODState(uint32_t treeIndex) const {

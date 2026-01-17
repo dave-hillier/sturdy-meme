@@ -4,6 +4,7 @@
 #include "Bindings.h"
 #include "UBOs.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "debug/QueueSubmitDiagnostics.h"
 
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
@@ -287,4 +288,5 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmd.bindIndexBuffer(skinnedMesh.getIndexBuffer(), 0, vk::IndexType::eUint32);
 
     vkCmd.drawIndexed(skinnedMesh.getIndexCount(), 1, 0, 0, 0);
+    DIAG_RECORD_DRAW();
 }

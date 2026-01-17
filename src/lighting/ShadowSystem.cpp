@@ -4,6 +4,7 @@
 #include "Mesh.h"
 #include "PipelineBuilder.h"
 #include "GraphicsPipelineFactory.h"
+#include "debug/QueueSubmitDiagnostics.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -433,6 +434,7 @@ void ShadowSystem::drawShadowScene(
         vkCmd.bindVertexBuffers(0, 1, vb, offsets);
         vkCmd.bindIndexBuffer(obj.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
         vkCmd.drawIndexed(obj.mesh->getIndexCount(), 1, 0, 0, 0);
+        DIAG_RECORD_DRAW();
     }
 
     if (terrainCallback) terrainCallback(cmd, cascadeOrFaceIndex, lightMatrix);
@@ -504,6 +506,7 @@ void ShadowSystem::recordSkinnedMeshShadow(VkCommandBuffer cmd, uint32_t cascade
     vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
     vkCmd.bindIndexBuffer(mesh.getIndexBuffer(), 0, vk::IndexType::eUint32);
     vkCmd.drawIndexed(mesh.getIndexCount(), 1, 0, 0, 0);
+    DIAG_RECORD_DRAW();
 }
 
 void ShadowSystem::renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex,

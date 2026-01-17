@@ -47,9 +47,9 @@ public:
         gpuProfiler_.reset();
     }
 
-    // Move-only (owns GPU resources)
-    Profiler(Profiler&& other) noexcept = default;
-    Profiler& operator=(Profiler&& other) noexcept = default;
+    // Non-copyable, non-movable (owns GPU resources, contains atomics)
+    Profiler(Profiler&& other) noexcept = delete;
+    Profiler& operator=(Profiler&& other) noexcept = delete;
     Profiler(const Profiler&) = delete;
     Profiler& operator=(const Profiler&) = delete;
 

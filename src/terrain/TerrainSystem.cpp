@@ -4,6 +4,7 @@
 #include "TerrainEffects.h"
 #include "DescriptorManager.h"
 #include "GpuProfiler.h"
+#include "QueueSubmitDiagnostics.h"
 #include "UBOs.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
@@ -944,9 +945,11 @@ void TerrainSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex) {
 
         // Indexed instanced draw
         vkCmd.drawIndexedIndirect(buffers->getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+        DIAG_RECORD_DRAW();
     } else {
         // Direct vertex draw (no vertex buffer - vertices generated from gl_VertexIndex)
         vkCmd.drawIndirect(buffers->getIndirectDrawBuffer(), 0, 1, sizeof(VkDrawIndirectCommand));
+        DIAG_RECORD_DRAW();
     }
 }
 
@@ -1060,9 +1063,11 @@ void TerrainSystem::recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex,
         // Use shadow indirect draw buffer if culling, else main indirect buffer
         VkBuffer drawBuffer = useCulled ? buffers->getShadowIndirectDrawBuffer() : buffers->getIndirectDrawBuffer();
         vkCmd.drawIndexedIndirect(drawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
+        DIAG_RECORD_DRAW();
     } else {
         VkBuffer drawBuffer = useCulled ? buffers->getShadowIndirectDrawBuffer() : buffers->getIndirectDrawBuffer();
         vkCmd.drawIndirect(drawBuffer, 0, 1, sizeof(VkDrawIndirectCommand));
+        DIAG_RECORD_DRAW();
     }
 }
 

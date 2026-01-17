@@ -322,9 +322,9 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
 
     // Queue Submit Diagnostics Section
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.8f, 1.0f));
-    if (ImGui::CollapsingHeader("QUEUE SUBMIT DIAGNOSTICS")) {
-        ImGui::PopStyleColor();
-
+    ImGui::Text("QUEUE SUBMIT DIAGNOSTICS");
+    ImGui::PopStyleColor();
+    {
         const auto& diag = profiler.getQueueSubmitDiagnostics();
 
         // Validation layer warning (most common cause of high submit time)
@@ -349,13 +349,46 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
             ImGui::PopStyleColor();
         }
 
-        // Queue submit time
-        ImGui::Text("Queue Submit Time: %.3f ms", diag.queueSubmitTimeMs);
-        if (diag.queueSubmitTimeMs > 1.0f) {
-            ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-            ImGui::Text("(HIGH - check validation layers or driver)");
+        // Timing breakdown table
+        ImGui::Text("Frame Timing Breakdown:");
+        if (ImGui::BeginTable("TimingBreakdown", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+            ImGui::TableSetupColumn("Phase", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+            ImGui::TableHeadersRow();
+
+            auto addTimingRow = [](const char* name, float timeMs, float warnThreshold = 0.0f) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::Text("%s", name);
+                ImGui::TableNextColumn();
+                if (warnThreshold > 0.0f && timeMs > warnThreshold) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+                    ImGui::Text("%.3f", timeMs);
+                    ImGui::PopStyleColor();
+                } else {
+                    ImGui::Text("%.3f", timeMs);
+                }
+            };
+
+            addTimingRow("Acquire Image", diag.acquireImageTimeMs, 2.0f);
+            addTimingRow("Command Record", diag.commandRecordTimeMs, 5.0f);
+            addTimingRow("Queue Submit", diag.queueSubmitTimeMs, 1.0f);
+            addTimingRow("Present", diag.presentTimeMs, 2.0f);
+
+            // Total
+            float totalTimeMs = diag.acquireImageTimeMs + diag.commandRecordTimeMs +
+                               diag.queueSubmitTimeMs + diag.presentTimeMs;
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 1.0f, 1.0f));
+            ImGui::Text("Total (excl. fence)");
             ImGui::PopStyleColor();
+            ImGui::TableNextColumn();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 1.0f, 1.0f));
+            ImGui::Text("%.3f", totalTimeMs);
+            ImGui::PopStyleColor();
+
+            ImGui::EndTable();
         }
 
         ImGui::Spacing();
@@ -381,13 +414,13 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
                 }
             };
 
-            addRow("Draw Calls", diag.drawCallCount, 500);
-            addRow("Compute Dispatches", diag.dispatchCount, 100);
-            addRow("Pipeline Binds", diag.pipelineBindCount, 100);
-            addRow("Descriptor Set Binds", diag.descriptorSetBindCount, 200);
-            addRow("Push Constants", diag.pushConstantCount, 200);
-            addRow("Render Passes", diag.renderPassCount, 20);
-            addRow("Pipeline Barriers", diag.pipelineBarrierCount, 50);
+            addRow("Draw Calls", diag.getDrawCallCount(), 500);
+            addRow("Compute Dispatches", diag.getDispatchCount(), 100);
+            addRow("Pipeline Binds", diag.getPipelineBindCount(), 100);
+            addRow("Descriptor Set Binds", diag.getDescriptorSetBindCount(), 200);
+            addRow("Push Constants", diag.getPushConstantCount(), 200);
+            addRow("Render Passes", diag.getRenderPassCount(), 20);
+            addRow("Pipeline Barriers", diag.getPipelineBarrierCount(), 50);
 
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
@@ -402,6 +435,94 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
             ImGui::EndTable();
         }
 
+        // Per-pass breakdown
+        uint32_t passCount = diag.getPassCount();
+        if (passCount > 0) {
+            ImGui::Spacing();
+            ImGui::Text("Per-Pass Breakdown:");
+            if (ImGui::BeginTable("PassStats", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+                ImGui::TableSetupColumn("Pass", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableSetupColumn("Draws", ImGuiTableColumnFlags_WidthFixed, 50.0f);
+                ImGui::TableSetupColumn("Dispatches", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+                ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+                ImGui::TableHeadersRow();
+
+                for (uint32_t i = 0; i < passCount && i < QueueSubmitDiagnostics::MAX_PASS_STATS; ++i) {
+                    const auto& pass = diag.passStats[i];
+                    if (pass.name) {
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%s", pass.name);
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%u", pass.drawCalls);
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%u", pass.dispatches);
+                        ImGui::TableNextColumn();
+                        if (pass.recordTimeMs > 1.0f) {
+                            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
+                            ImGui::Text("%.3f", pass.recordTimeMs);
+                            ImGui::PopStyleColor();
+                        } else {
+                            ImGui::Text("%.3f", pass.recordTimeMs);
+                        }
+                    }
+                }
+
+                ImGui::EndTable();
+            }
+        }
+
+        // Bandwidth/Memory stats
+        ImGui::Spacing();
+        ImGui::Text("Bandwidth & Memory:");
+        if (ImGui::BeginTable("BandwidthStats", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+            ImGui::TableSetupColumn("Type", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+            ImGui::TableHeadersRow();
+
+            auto addBandwidthRow = [](const char* name, uint64_t bytes) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::Text("%s", name);
+                ImGui::TableNextColumn();
+                if (bytes >= 1024 * 1024) {
+                    ImGui::Text("%.2f MB", bytes / (1024.0f * 1024.0f));
+                } else if (bytes >= 1024) {
+                    ImGui::Text("%.2f KB", bytes / 1024.0f);
+                } else {
+                    ImGui::Text("%llu B", static_cast<unsigned long long>(bytes));
+                }
+            };
+
+            addBandwidthRow("UBO Updates", diag.getUboUpdateBytes());
+            addBandwidthRow("SSBO Updates", diag.getSsboUpdateBytes());
+            addBandwidthRow("Push Constants", diag.getPushConstantBytes());
+
+            // Total
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 1.0f, 1.0f));
+            ImGui::Text("Total Bandwidth");
+            ImGui::PopStyleColor();
+            ImGui::TableNextColumn();
+            uint64_t totalBytes = diag.getTotalBandwidthBytes();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 1.0f, 1.0f));
+            if (totalBytes >= 1024 * 1024) {
+                ImGui::Text("%.2f MB", totalBytes / (1024.0f * 1024.0f));
+            } else if (totalBytes >= 1024) {
+                ImGui::Text("%.2f KB", totalBytes / 1024.0f);
+            } else {
+                ImGui::Text("%llu B", static_cast<unsigned long long>(totalBytes));
+            }
+            ImGui::PopStyleColor();
+
+            ImGui::EndTable();
+        }
+
+        // Memory barrier stats
+        ImGui::Text("Memory Barriers: %u buffer, %u image",
+                    diag.getBufferBarrierCount(), diag.getImageBarrierCount());
+
         // Interpretation help
         ImGui::Spacing();
         ImGui::TextDisabled("High submit time causes:");
@@ -409,6 +530,7 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
         ImGui::TextDisabled("  - Many commands (batch draws, use indirect)");
         ImGui::TextDisabled("  - Driver overhead (reduce state changes)");
         ImGui::TextDisabled("  - Implicit sync (GPU not done with prev frame)");
+        ImGui::TextDisabled("  - High bandwidth (large buffer updates)");
 
         // Command capture controls
         ImGui::Spacing();
@@ -498,8 +620,6 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
                 ImGui::TreePop();
             }
         }
-    } else {
-        ImGui::PopStyleColor();
     }
 
     ImGui::Spacing();

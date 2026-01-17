@@ -4,6 +4,7 @@
 #include "DescriptorManager.h"
 #include "Mesh.h"
 #include "Bindings.h"
+#include "QueueSubmitDiagnostics.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
@@ -680,6 +681,7 @@ void TreeRenderer::render(vk::CommandBuffer cmd, uint32_t frameIndex, float time
             vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
             vkCmd.bindIndexBuffer(renderable.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
             vkCmd.drawIndexed(renderable.mesh->getIndexCount(), 1, 0, 0, 0);
+            DIAG_RECORD_DRAW();
         }
     }
 
@@ -729,6 +731,7 @@ void TreeRenderer::render(vk::CommandBuffer cmd, uint32_t frameIndex, float time
             vk::DeviceSize commandOffset = leafType * sizeof(VkDrawIndexedIndirectCommand);
             vkCmd.drawIndexedIndirect(leafCulling_->getIndirectBuffer(frameIndex),
                                       commandOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
+            DIAG_RECORD_DRAW();
         }
     } else {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
@@ -802,6 +805,7 @@ void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
 
                         vkCmd.drawIndexedIndirect(branchShadowCulling_->getIndirectBuffer(frameIndex),
                                                   group.indirectOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
+                        DIAG_RECORD_DRAW();
                     }
                 }
             }
@@ -841,6 +845,7 @@ void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
                     vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
                     vkCmd.bindIndexBuffer(renderable.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
                     vkCmd.drawIndexed(renderable.mesh->getIndexCount(), 1, 0, 0, 0);
+                    DIAG_RECORD_DRAW();
                 }
             }
         }
@@ -894,6 +899,7 @@ void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
                 vk::DeviceSize commandOffset = leafType * sizeof(VkDrawIndexedIndirectCommand);
                 vkCmd.drawIndexedIndirect(leafCulling_->getIndirectBuffer(frameIndex),
                                           commandOffset, 1, sizeof(VkDrawIndexedIndirectCommand));
+                DIAG_RECORD_DRAW();
             }
         } else {
             // Direct draw path (fallback)
@@ -936,6 +942,7 @@ void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
                     0, push);
 
                 vkCmd.drawIndexed(sharedQuad.getIndexCount(), drawInfo.instanceCount, 0, 0, 0);
+                DIAG_RECORD_DRAW();
                 leafTreeIndex++;
             }
         }

@@ -7,6 +7,8 @@
 
 #include "FrameData.h"
 
+struct QueueSubmitDiagnostics;
+
 /**
  * RenderResources - Snapshot of shared rendering resources
  *
@@ -57,12 +59,15 @@ struct RenderContext {
     uint32_t frameIndex = 0;
     const FrameData& frame;
     const RenderResources& resources;
+    QueueSubmitDiagnostics* diagnostics = nullptr;  // Optional command counting
 
     // Constructor to ensure references are always valid
     RenderContext(VkCommandBuffer cmdBuffer, uint32_t frameIdx,
-                  const FrameData& frameData, const RenderResources& res)
+                  const FrameData& frameData, const RenderResources& res,
+                  QueueSubmitDiagnostics* diag = nullptr)
         : cmd(cmdBuffer)
         , frameIndex(frameIdx)
         , frame(frameData)
-        , resources(res) {}
+        , resources(res)
+        , diagnostics(diag) {}
 };
