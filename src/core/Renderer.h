@@ -273,9 +273,6 @@ private:
     bool initSkinnedMeshRenderer();
     bool createSkinnedMeshRendererDescriptorSets();
 
-    // Hi-Z occlusion culling
-    void updateHiZObjectData();
-
     // Initialize control subsystems (called after systems are ready)
     void initControlSubsystems();
 };

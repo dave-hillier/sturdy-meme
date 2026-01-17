@@ -17,6 +17,10 @@
 #include "VmaResources.h"
 #include "core/ImageBuilder.h"
 
+// Forward declarations for object gathering
+class SceneManager;
+class RockSystem;
+
 // GPU-side object data for culling (matches shader struct)
 struct alignas(16) CullObjectData {
     glm::vec4 boundingSphere;   // xyz = center (world space), w = radius
@@ -105,6 +109,10 @@ public:
 
     // Submit objects to be culled (call once when scene changes)
     void updateObjectData(const std::vector<CullObjectData>& objects);
+
+    // Gather objects from scene and rock systems for culling
+    // Converts Renderables to CullObjectData and updates internal buffers
+    void gatherObjects(const SceneManager& scene, const RockSystem& rock);
 
     // Record Hi-Z pyramid generation compute pass
     // Call AFTER the main depth pass completes

@@ -5,6 +5,8 @@
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
+#include "scene/SceneManager.h"
+#include "vegetation/RockSystem.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -384,6 +386,65 @@ void HiZSystem::updateObjectData(const std::vector<CullObjectData>& objects) {
     void* mappedData = objectDataBuffer_.map();
     memcpy(mappedData, objects.data(), sizeof(CullObjectData) * objectCount);
     objectDataBuffer_.unmap();
+}
+
+void HiZSystem::gatherObjects(const SceneManager& scene, const RockSystem& rock) {
+    std::vector<CullObjectData> cullObjects;
+
+    // Gather scene objects for culling
+    const auto& sceneObjects = scene.getRenderables();
+    for (size_t i = 0; i < sceneObjects.size(); ++i) {
+        const auto& obj = sceneObjects[i];
+        if (obj.mesh == nullptr) continue;
+
+        // Get local AABB and transform to world space
+        const AABB& localBounds = obj.mesh->getBounds();
+        AABB worldBounds = localBounds.transformed(obj.transform);
+
+        CullObjectData cullData{};
+
+        // Calculate bounding sphere from transformed AABB
+        glm::vec3 center = worldBounds.getCenter();
+        glm::vec3 extents = worldBounds.getExtents();
+        float radius = glm::length(extents);
+
+        cullData.boundingSphere = glm::vec4(center, radius);
+        cullData.aabbMin = glm::vec4(worldBounds.min, 0.0f);
+        cullData.aabbMax = glm::vec4(worldBounds.max, 0.0f);
+        cullData.meshIndex = static_cast<uint32_t>(i);
+        cullData.firstIndex = 0;  // Single mesh per object
+        cullData.indexCount = obj.mesh->getIndexCount();
+        cullData.vertexOffset = 0;
+
+        cullObjects.push_back(cullData);
+    }
+
+    // Also add procedural rocks
+    const auto& rockObjects = rock.getSceneObjects();
+    for (size_t i = 0; i < rockObjects.size(); ++i) {
+        const auto& obj = rockObjects[i];
+        if (obj.mesh == nullptr) continue;
+
+        const AABB& localBounds = obj.mesh->getBounds();
+        AABB worldBounds = localBounds.transformed(obj.transform);
+
+        CullObjectData cullData{};
+        glm::vec3 center = worldBounds.getCenter();
+        glm::vec3 extents = worldBounds.getExtents();
+        float radius = glm::length(extents);
+
+        cullData.boundingSphere = glm::vec4(center, radius);
+        cullData.aabbMin = glm::vec4(worldBounds.min, 0.0f);
+        cullData.aabbMax = glm::vec4(worldBounds.max, 0.0f);
+        cullData.meshIndex = static_cast<uint32_t>(sceneObjects.size() + i);
+        cullData.firstIndex = 0;
+        cullData.indexCount = obj.mesh->getIndexCount();
+        cullData.vertexOffset = 0;
+
+        cullObjects.push_back(cullData);
+    }
+
+    updateObjectData(cullObjects);
 }
 
 void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex) {
