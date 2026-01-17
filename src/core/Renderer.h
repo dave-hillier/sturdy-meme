@@ -1,8 +1,6 @@
 #pragma once
 
 #include <vulkan/vulkan.hpp>
-#include <vk_mem_alloc.h>
-#include <VkBootstrap.h>
 #include <SDL3/SDL.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -10,24 +8,15 @@
 #include <functional>
 #include <optional>
 #include <memory>
-#include <unordered_map>
 
 #include "Camera.h"
-#include "DescriptorManager.h"
 #include "VulkanContext.h"
-#include "UBOs.h"
-#include "FrameData.h"
-#include "RenderContext.h"
-#include "VmaResources.h"
 #include "RendererSystems.h"
 #include "PerformanceToggles.h"
 #include "TripleBuffering.h"
 #include "RendererCore.h"
-#include "vulkan/AsyncTransferManager.h"
-#include "vulkan/ThreadedCommandPool.h"
-#include "pipeline/FrameGraph.h"
-#include "loading/LoadJobFactory.h"
-#include "asset/AssetRegistry.h"
+#include "RenderingInfrastructure.h"
+#include "DescriptorInfrastructure.h"
 #include "passes/ShadowPassRecorder.h"
 #include "passes/HDRPassRecorder.h"
 
@@ -156,17 +145,17 @@ public:
     std::string getShaderPath() const { return resourcePath + "/shaders"; }
     const std::string& getResourcePath() const { return resourcePath; }
 
-    // Multi-threading infrastructure (from video: async transfers, threaded command pools, frame graph)
-    AsyncTransferManager& getAsyncTransferManager() { return asyncTransferManager_; }
-    const AsyncTransferManager& getAsyncTransferManager() const { return asyncTransferManager_; }
-    ThreadedCommandPool& getThreadedCommandPool() { return threadedCommandPool_; }
-    const ThreadedCommandPool& getThreadedCommandPool() const { return threadedCommandPool_; }
-    FrameGraph& getFrameGraph() { return frameGraph_; }
-    const FrameGraph& getFrameGraph() const { return frameGraph_; }
-    Loading::AsyncTextureUploader& getAsyncTextureUploader() { return asyncTextureUploader_; }
-    const Loading::AsyncTextureUploader& getAsyncTextureUploader() const { return asyncTextureUploader_; }
-    AssetRegistry& getAssetRegistry() { return assetRegistry_; }
-    const AssetRegistry& getAssetRegistry() const { return assetRegistry_; }
+    // Multi-threading infrastructure (delegated to RenderingInfrastructure)
+    AsyncTransferManager& getAsyncTransferManager() { return renderingInfra_.asyncTransferManager(); }
+    const AsyncTransferManager& getAsyncTransferManager() const { return renderingInfra_.asyncTransferManager(); }
+    ThreadedCommandPool& getThreadedCommandPool() { return renderingInfra_.threadedCommandPool(); }
+    const ThreadedCommandPool& getThreadedCommandPool() const { return renderingInfra_.threadedCommandPool(); }
+    FrameGraph& getFrameGraph() { return renderingInfra_.frameGraph(); }
+    const FrameGraph& getFrameGraph() const { return renderingInfra_.frameGraph(); }
+    Loading::AsyncTextureUploader& getAsyncTextureUploader() { return renderingInfra_.asyncTextureUploader(); }
+    const Loading::AsyncTextureUploader& getAsyncTextureUploader() const { return renderingInfra_.asyncTextureUploader(); }
+    AssetRegistry& getAssetRegistry() { return renderingInfra_.assetRegistry(); }
+    const AssetRegistry& getAssetRegistry() const { return renderingInfra_.assetRegistry(); }
 
     // Performance control
     PerformanceToggles& getPerformanceToggles() { return perfToggles; }
@@ -188,10 +177,6 @@ private:
     void initResizeCoordinator();         // resize registration
 
     bool createSyncObjects();
-    bool createDescriptorSetLayout();
-    void addCommonDescriptorBindings(DescriptorManager::LayoutBuilder& builder);
-    bool createGraphicsPipeline();
-    bool createDescriptorPool();
     bool createDescriptorSets();
 
     // Render pass recording helpers (pure - only record commands, no state mutation)
@@ -212,9 +197,8 @@ private:
     // All rendering subsystems - managed with automatic lifecycle
     std::unique_ptr<RendererSystems> systems_;
 
-    std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
-    std::optional<vk::raii::PipelineLayout> pipelineLayout_;
-    std::optional<vk::raii::Pipeline> graphicsPipeline_;
+    // Descriptor and pipeline infrastructure (extracted from Renderer)
+    DescriptorInfrastructure descriptorInfra_;
 
     bool physicsDebugEnabled = false;
     glm::mat4 lastViewProj{1.0f};  // Cached view-projection for debug rendering
@@ -223,8 +207,6 @@ private:
     // Performance toggles for debugging
     PerformanceToggles perfToggles;
 
-
-    std::optional<DescriptorManager::Pool> descriptorManagerPool;
 
     // Triple buffering: frame synchronization and indexing
     TripleBuffering frameSync_;
@@ -236,14 +218,8 @@ private:
     std::unique_ptr<ShadowPassRecorder> shadowPassRecorder_;
     std::unique_ptr<HDRPassRecorder> hdrPassRecorder_;
 
-    // Multi-threading infrastructure
-    AsyncTransferManager asyncTransferManager_;
-    ThreadedCommandPool threadedCommandPool_;
-    FrameGraph frameGraph_;
-    Loading::AsyncTextureUploader asyncTextureUploader_;
-
-    // Centralized asset management
-    AssetRegistry assetRegistry_;
+    // Multi-threading and asset infrastructure (extracted from Renderer)
+    RenderingInfrastructure renderingInfra_;
 
     // Convenience accessor for frame count (matches TripleBuffering::DEFAULT_FRAME_COUNT)
     static constexpr int MAX_FRAMES_IN_FLIGHT = TripleBuffering::DEFAULT_FRAME_COUNT;
