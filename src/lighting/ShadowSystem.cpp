@@ -24,6 +24,7 @@ std::unique_ptr<ShadowSystem> ShadowSystem::create(const InitContext& ctx,
                                                     VkDescriptorSetLayout mainDescriptorSetLayout_,
                                                     VkDescriptorSetLayout skinnedDescriptorSetLayout_) {
     InitInfo info;
+    info.raiiDevice = ctx.raiiDevice;
     info.device = ctx.device;
     info.physicalDevice = ctx.physicalDevice;
     info.allocator = ctx.allocator;
@@ -40,6 +41,7 @@ ShadowSystem::~ShadowSystem() {
 }
 
 bool ShadowSystem::initInternal(const InitInfo& info) {
+    raiiDevice = info.raiiDevice;
     device = info.device;
     physicalDevice = info.physicalDevice;
     allocator = info.allocator;
@@ -76,7 +78,7 @@ void ShadowSystem::cleanup() {
         if (fb != VK_NULL_HANDLE) vkDevice.destroyFramebuffer(fb);
     }
     cascadeFramebuffers.clear();
-    csmResources.destroy(device, allocator);
+    csmResources.reset();  // RAII cleanup
 
     // Dynamic shadow cleanup
     destroyDynamicShadowResources();
@@ -133,12 +135,17 @@ bool ShadowSystem::createShadowRenderPass() {
 }
 
 bool ShadowSystem::createShadowResources() {
+    if (!raiiDevice) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "ShadowSystem::createShadowResources: raiiDevice is null");
+        return false;
+    }
+
     DepthArrayConfig cfg;
-    cfg.extent = {SHADOW_MAP_SIZE, SHADOW_MAP_SIZE};
-    cfg.format = VK_FORMAT_D32_SFLOAT;
+    cfg.extent = vk::Extent2D{SHADOW_MAP_SIZE, SHADOW_MAP_SIZE};
+    cfg.format = vk::Format::eD32Sfloat;
     cfg.arrayLayers = NUM_SHADOW_CASCADES;
 
-    if (!::createDepthArrayResources(device, allocator, cfg, csmResources)) {
+    if (!::createDepthArrayResources(*raiiDevice, allocator, cfg, csmResources)) {
         return false;
     }
 
@@ -146,7 +153,7 @@ bool ShadowSystem::createShadowResources() {
     vk::Device vkDevice(device);
     cascadeFramebuffers.resize(NUM_SHADOW_CASCADES);
     for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
-        vk::ImageView layerView(csmResources.layerViews[i]);
+        vk::ImageView layerView(*csmResources.layerViews[i]);
         auto framebufferInfo = vk::FramebufferCreateInfo{}
             .setRenderPass(shadowRenderPass)
             .setAttachments(layerView)
@@ -220,6 +227,11 @@ bool ShadowSystem::createDynamicShadowPipeline() {
 }
 
 bool ShadowSystem::createDynamicShadowResources() {
+    if (!raiiDevice) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "ShadowSystem::createDynamicShadowResources: raiiDevice is null");
+        return false;
+    }
+
     pointShadowResources.resize(framesInFlight);
     spotShadowResources.resize(framesInFlight);
     pointShadowFramebuffers.resize(framesInFlight);
@@ -228,12 +240,13 @@ bool ShadowSystem::createDynamicShadowResources() {
     for (uint32_t frame = 0; frame < framesInFlight; frame++) {
         // Point lights: cubemap array (6 faces per light)
         DepthArrayConfig pointCfg;
-        pointCfg.extent = {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
+        pointCfg.extent = vk::Extent2D{DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
+        pointCfg.format = vk::Format::eD32Sfloat;
         pointCfg.arrayLayers = MAX_SHADOW_CASTING_LIGHTS * 6;
         pointCfg.cubeCompatible = true;
         pointCfg.createSampler = (frame == 0);  // Only first frame needs sampler
 
-        if (!::createDepthArrayResources(device, allocator, pointCfg, pointShadowResources[frame])) {
+        if (!::createDepthArrayResources(*raiiDevice, allocator, pointCfg, pointShadowResources[frame])) {
             return false;
         }
 
@@ -241,7 +254,7 @@ bool ShadowSystem::createDynamicShadowResources() {
         vk::Device vkDevice(device);
         pointShadowFramebuffers[frame].resize(6);
         for (uint32_t i = 0; i < 6; i++) {
-            vk::ImageView layerView(pointShadowResources[frame].layerViews[i]);
+            vk::ImageView layerView(*pointShadowResources[frame].layerViews[i]);
             auto framebufferInfo = vk::FramebufferCreateInfo{}
                 .setRenderPass(shadowRenderPass)
                 .setAttachments(layerView)
@@ -258,18 +271,19 @@ bool ShadowSystem::createDynamicShadowResources() {
 
         // Spot lights: 2D array
         DepthArrayConfig spotCfg;
-        spotCfg.extent = {DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
+        spotCfg.extent = vk::Extent2D{DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
+        spotCfg.format = vk::Format::eD32Sfloat;
         spotCfg.arrayLayers = MAX_SHADOW_CASTING_LIGHTS;
         spotCfg.createSampler = (frame == 0);
 
-        if (!::createDepthArrayResources(device, allocator, spotCfg, spotShadowResources[frame])) {
+        if (!::createDepthArrayResources(*raiiDevice, allocator, spotCfg, spotShadowResources[frame])) {
             return false;
         }
 
         // Create spot shadow framebuffers
         spotShadowFramebuffers[frame].resize(MAX_SHADOW_CASTING_LIGHTS);
         for (uint32_t i = 0; i < MAX_SHADOW_CASTING_LIGHTS; i++) {
-            vk::ImageView layerView(spotShadowResources[frame].layerViews[i]);
+            vk::ImageView layerView(*spotShadowResources[frame].layerViews[i]);
             auto framebufferInfo = vk::FramebufferCreateInfo{}
                 .setRenderPass(shadowRenderPass)
                 .setAttachments(layerView)
@@ -299,8 +313,8 @@ void ShadowSystem::destroyDynamicShadowResources() {
             if (fb != VK_NULL_HANDLE) vkDevice.destroyFramebuffer(fb);
         }
         spotShadowFramebuffers[frame].clear();
-        if (frame < pointShadowResources.size()) pointShadowResources[frame].destroy(device, allocator);
-        if (frame < spotShadowResources.size()) spotShadowResources[frame].destroy(device, allocator);
+        if (frame < pointShadowResources.size()) pointShadowResources[frame].reset();
+        if (frame < spotShadowResources.size()) spotShadowResources[frame].reset();
     }
 }
 

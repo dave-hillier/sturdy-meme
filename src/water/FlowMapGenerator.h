@@ -75,7 +75,7 @@ public:
                                 const Config& config);
 
     // Access the generated flow map
-    VkImageView getFlowMapView() const { return flowMapView; }
+    VkImageView getFlowMapView() const { return flowMapView_ ? **flowMapView_ : VK_NULL_HANDLE; }
     VkSampler getFlowMapSampler() const { return flowMapSampler_ ? **flowMapSampler_ : VK_NULL_HANDLE; }
     VkImage getFlowMapImage() const { return flowMapImage; }
 
@@ -119,7 +119,7 @@ private:
 
     VkImage flowMapImage = VK_NULL_HANDLE;
     VmaAllocation flowMapAllocation = VK_NULL_HANDLE;
-    VkImageView flowMapView = VK_NULL_HANDLE;
+    std::optional<vk::raii::ImageView> flowMapView_;
     std::optional<vk::raii::Sampler> flowMapSampler_;
 
     // CPU-side flow data

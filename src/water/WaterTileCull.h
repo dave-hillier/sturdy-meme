@@ -46,7 +46,9 @@ public:
     };
 
     // Push constants for tile cull compute
-    struct TileCullPushConstants {
+    // alignas(16) ensures proper alignment for SIMD operations on glm::mat4.
+    // Without this, O3-optimized aligned SSE/AVX loads can crash.
+    struct alignas(16) TileCullPushConstants {
         glm::mat4 viewProjMatrix;
         glm::vec4 waterPlane;     // xyz = normal, w = -distance
         glm::vec4 cameraPos;      // xyz = position, w = unused
@@ -160,7 +162,7 @@ private:
     std::optional<vk::raii::Pipeline> computePipeline_;
     std::optional<vk::raii::PipelineLayout> computePipelineLayout_;
     std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    std::optional<vk::raii::DescriptorPool> descriptorPool_;
     std::vector<VkDescriptorSet> descriptorSets;
 
     // Depth texture sampler for tile culling (RAII-managed)

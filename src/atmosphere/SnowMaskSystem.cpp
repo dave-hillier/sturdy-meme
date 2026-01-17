@@ -224,10 +224,12 @@ void SnowMaskSystem::updateUniforms(uint32_t frameIndex, float deltaTime, bool i
         0.0f
     );
 
+    // Bounds check: frameIndex must be within range
+    if (frameIndex >= uniformBuffers.mappedPointers.size()) return;
     memcpy(uniformBuffers.mappedPointers[frameIndex], &uniforms, sizeof(SnowMaskUniforms));
 
     // Copy interaction sources to buffer
-    if (!currentInteractions.empty()) {
+    if (!currentInteractions.empty() && frameIndex < interactionBuffers.mappedPointers.size()) {
         size_t copySize = sizeof(SnowInteractionSource) * std::min(currentInteractions.size(),
                                                                     static_cast<size_t>(MAX_INTERACTIONS));
         memcpy(interactionBuffers.mappedPointers[frameIndex], currentInteractions.data(), copySize);

@@ -11,7 +11,7 @@ bool AsyncTransferManager::initialize(VulkanContext& context) {
         return true;
     }
 
-    context_ = &context;
+    context_.emplace(context);
     device_ = context.getVkDevice();
     transferQueue_ = context.getVkTransferQueue();
     transferQueueFamily_ = context.getTransferQueueFamily();
@@ -151,7 +151,7 @@ TransferHandle AsyncTransferManager::submitBufferTransfer(
     cmd.end();
 
     // Create fence for transfer completion
-    vk::raii::Fence fence(context_->getRaiiDevice(),
+    vk::raii::Fence fence(context_->get().getRaiiDevice(),
         vk::FenceCreateInfo{});
 
     // Submit to transfer queue
@@ -300,7 +300,7 @@ TransferHandle AsyncTransferManager::submitImageTransfer(
     cmd.end();
 
     // Create fence for transfer completion
-    vk::raii::Fence fence(context_->getRaiiDevice(),
+    vk::raii::Fence fence(context_->get().getRaiiDevice(),
         vk::FenceCreateInfo{});
 
     // Submit to transfer queue

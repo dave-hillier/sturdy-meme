@@ -3,103 +3,101 @@
 #include <fstream>
 #include <vector>
 
-bool PipelineCache::init(VkDevice dev, const std::string& filePath) {
-    device = dev;
-    cacheFilePath = filePath;
+PipelineCache::~PipelineCache() {
+    shutdown();
+}
+
+bool PipelineCache::init(const vk::raii::Device& raiiDevice, const std::string& filePath) {
+    device_ = &raiiDevice;
+    cacheFilePath_ = filePath;
 
     // Try to load existing cache data from file
     std::vector<char> cacheData;
     if (loadFromFile()) {
-        std::ifstream file(cacheFilePath, std::ios::binary | std::ios::ate);
+        std::ifstream file(cacheFilePath_, std::ios::binary | std::ios::ate);
         if (file.is_open()) {
             size_t fileSize = static_cast<size_t>(file.tellg());
             cacheData.resize(fileSize);
             file.seekg(0);
             file.read(cacheData.data(), fileSize);
             file.close();
-            SDL_Log("PipelineCache: Loaded %zu bytes from %s", fileSize, cacheFilePath.c_str());
+            SDL_Log("PipelineCache: Loaded %zu bytes from %s", fileSize, cacheFilePath_.c_str());
         }
     }
 
-    VkPipelineCacheCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    createInfo.initialDataSize = cacheData.size();
-    createInfo.pInitialData = cacheData.empty() ? nullptr : cacheData.data();
+    auto createInfo = vk::PipelineCacheCreateInfo{}
+        .setInitialDataSize(cacheData.size())
+        .setPInitialData(cacheData.empty() ? nullptr : cacheData.data());
 
-    VkResult result = vkCreatePipelineCache(device, &createInfo, nullptr, &pipelineCache);
-    if (result != VK_SUCCESS) {
+    try {
+        pipelineCache_.emplace(*device_, createInfo);
+        SDL_Log("PipelineCache: Initialized successfully");
+        return true;
+    } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-            "PipelineCache: Failed to create pipeline cache (VkResult=%d)", static_cast<int>(result));
+            "PipelineCache: Failed to create pipeline cache: %s", e.what());
 
         // Try again without initial data in case cache is corrupted
         if (!cacheData.empty()) {
             SDL_Log("PipelineCache: Retrying without initial data");
-            createInfo.initialDataSize = 0;
-            createInfo.pInitialData = nullptr;
-            result = vkCreatePipelineCache(device, &createInfo, nullptr, &pipelineCache);
-            if (result != VK_SUCCESS) {
+            try {
+                auto emptyCreateInfo = vk::PipelineCacheCreateInfo{};
+                pipelineCache_.emplace(*device_, emptyCreateInfo);
+                SDL_Log("PipelineCache: Initialized successfully (with empty cache)");
+                return true;
+            } catch (const vk::SystemError& e2) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                    "PipelineCache: Failed to create empty pipeline cache (VkResult=%d)", static_cast<int>(result));
+                    "PipelineCache: Failed to create empty pipeline cache: %s", e2.what());
                 return false;
             }
-        } else {
-            return false;
         }
+        return false;
     }
-
-    SDL_Log("PipelineCache: Initialized successfully");
-    return true;
 }
 
 void PipelineCache::shutdown() {
-    if (pipelineCache != VK_NULL_HANDLE && device != VK_NULL_HANDLE) {
+    if (pipelineCache_) {
         saveToFile();
-        vkDestroyPipelineCache(device, pipelineCache, nullptr);
-        pipelineCache = VK_NULL_HANDLE;
+        pipelineCache_.reset();  // RAII handles destruction
     }
-    device = VK_NULL_HANDLE;
+    device_ = nullptr;
 }
 
 bool PipelineCache::loadFromFile() {
-    std::ifstream file(cacheFilePath, std::ios::binary);
+    std::ifstream file(cacheFilePath_, std::ios::binary);
     return file.good();
 }
 
 bool PipelineCache::saveToFile() {
-    if (pipelineCache == VK_NULL_HANDLE || device == VK_NULL_HANDLE) {
+    if (!pipelineCache_ || !device_) {
         return false;
     }
 
-    // Get cache data size
-    size_t cacheSize = 0;
-    VkResult result = vkGetPipelineCacheData(device, pipelineCache, &cacheSize, nullptr);
-    if (result != VK_SUCCESS || cacheSize == 0) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-            "PipelineCache: No cache data to save (VkResult=%d, size=%zu)",
-            static_cast<int>(result), cacheSize);
-        return false;
-    }
+    try {
+        // Get cache data using vulkan-hpp
+        auto cacheData = pipelineCache_->getData();
+        if (cacheData.empty()) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "PipelineCache: No cache data to save");
+            return false;
+        }
 
-    // Get cache data
-    std::vector<char> cacheData(cacheSize);
-    result = vkGetPipelineCacheData(device, pipelineCache, &cacheSize, cacheData.data());
-    if (result != VK_SUCCESS) {
+        // Write to file
+        std::ofstream file(cacheFilePath_, std::ios::binary);
+        if (!file.is_open()) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                "PipelineCache: Failed to open %s for writing", cacheFilePath_.c_str());
+            return false;
+        }
+
+        file.write(reinterpret_cast<const char*>(cacheData.data()), cacheData.size());
+        file.close();
+
+        SDL_Log("PipelineCache: Saved %zu bytes to %s", cacheData.size(), cacheFilePath_.c_str());
+        return true;
+    } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-            "PipelineCache: Failed to get cache data (VkResult=%d)", static_cast<int>(result));
+            "PipelineCache: Failed to get cache data: %s", e.what());
         return false;
     }
-
-    // Write to file
-    std::ofstream file(cacheFilePath, std::ios::binary);
-    if (!file.is_open()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-            "PipelineCache: Failed to open %s for writing", cacheFilePath.c_str());
-        return false;
-    }
-
-    file.write(cacheData.data(), cacheSize);
-    file.close();
-
-    SDL_Log("PipelineCache: Saved %zu bytes to %s", cacheSize, cacheFilePath.c_str());
-    return true;
 }

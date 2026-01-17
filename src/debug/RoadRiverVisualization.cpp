@@ -28,11 +28,11 @@ void RoadRiverVisualization::addToDebugLines(DebugLineSystem& debugLines) {
 void RoadRiverVisualization::rebuildCache() {
     cachedLineVertices_.clear();
 
-    if (config_.showRivers && waterData_ != nullptr) {
+    if (config_.showRivers && waterData_) {
         buildRiverCones();
     }
 
-    if (config_.showRoads && roadNetwork_ != nullptr) {
+    if (config_.showRoads && roadNetwork_) {
         buildRoadCones();
     }
 
@@ -83,7 +83,7 @@ void RoadRiverVisualization::buildRiverCones() {
     const float coneLength = config_.coneLength;
     const float heightOffset = config_.heightAboveGround;
 
-    for (const auto& river : waterData_->rivers) {
+    for (const auto& river : waterData_->get().rivers) {
         if (river.controlPoints.size() < 2) continue;
 
         // Walk along the river spline and place cones at regular intervals
@@ -133,9 +133,9 @@ void RoadRiverVisualization::buildRoadCones() {
     const float heightOffset = config_.heightAboveGround;
 
     // Road coordinates are in 0-terrainSize space, need to convert to centered world space
-    const float halfTerrain = roadNetwork_->terrainSize * 0.5f;
+    const float halfTerrain = roadNetwork_->get().terrainSize * 0.5f;
 
-    for (const auto& road : roadNetwork_->roads) {
+    for (const auto& road : roadNetwork_->get().roads) {
         if (road.controlPoints.size() < 2) continue;
 
         // Walk along the road spline and place bidirectional cones
@@ -183,12 +183,12 @@ void RoadRiverVisualization::buildRoadCones() {
 }
 
 float RoadRiverVisualization::getTerrainHeight(float x, float z) const {
-    if (tileCache_ == nullptr) {
+    if (!tileCache_) {
         return 0.0f;
     }
 
     float height;
-    if (!tileCache_->getHeightAt(x, z, height)) {
+    if (!tileCache_->get().getHeightAt(x, z, height)) {
         return 0.0f;
     }
 

@@ -1,7 +1,9 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
 #include <string>
+#include <optional>
 
 /**
  * PipelineCache - Manages Vulkan pipeline cache with disk persistence
@@ -11,14 +13,14 @@
  *
  * Usage:
  *   PipelineCache cache;
- *   cache.init(device, "pipeline_cache.bin");
+ *   cache.init(raiiDevice, "pipeline_cache.bin");
  *   // Use cache.getCache() when creating pipelines
  *   cache.shutdown(); // Saves cache to disk
  */
 class PipelineCache {
 public:
     PipelineCache() = default;
-    ~PipelineCache() = default;
+    ~PipelineCache();
 
     // Non-copyable
     PipelineCache(const PipelineCache&) = delete;
@@ -26,11 +28,11 @@ public:
 
     /**
      * Initialize the pipeline cache
-     * @param device The Vulkan device
+     * @param raiiDevice The Vulkan RAII device
      * @param cacheFilePath Path to the cache file (loaded if exists)
      * @return true on success
      */
-    bool init(VkDevice device, const std::string& cacheFilePath = "pipeline_cache.bin");
+    bool init(const vk::raii::Device& raiiDevice, const std::string& cacheFilePath = "pipeline_cache.bin");
 
     /**
      * Shutdown and save cache to disk
@@ -40,7 +42,7 @@ public:
     /**
      * Get the pipeline cache handle for use in pipeline creation
      */
-    VkPipelineCache getCache() const { return pipelineCache; }
+    VkPipelineCache getCache() const { return pipelineCache_ ? **pipelineCache_ : VK_NULL_HANDLE; }
 
     /**
      * Save the current cache state to disk
@@ -52,7 +54,7 @@ public:
 private:
     bool loadFromFile();
 
-    VkDevice device = VK_NULL_HANDLE;
-    VkPipelineCache pipelineCache = VK_NULL_HANDLE;
-    std::string cacheFilePath;
+    const vk::raii::Device* device_ = nullptr;
+    std::optional<vk::raii::PipelineCache> pipelineCache_;
+    std::string cacheFilePath_;
 };

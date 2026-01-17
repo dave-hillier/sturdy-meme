@@ -21,7 +21,9 @@ AsyncStartupLoader::~AsyncStartupLoader() {
 }
 
 bool AsyncStartupLoader::init(const InitInfo& info) {
-    loadingRenderer_ = info.loadingRenderer;
+    if (info.loadingRenderer) {
+        loadingRenderer_.emplace(*info.loadingRenderer);
+    }
     resourcePath_ = info.resourcePath;
 
     jobQueue_ = LoadJobQueue::create(info.workerCount);
@@ -184,8 +186,8 @@ void AsyncStartupLoader::runLoadingLoop() {
         // Render loading screen frame
         if (loadingRenderer_) {
             LoadProgress progress = getProgress();
-            loadingRenderer_->setProgress(progress.getProgress());
-            loadingRenderer_->render();
+            loadingRenderer_->get().setProgress(progress.getProgress());
+            loadingRenderer_->get().render();
         }
 
         // Keep window responsive

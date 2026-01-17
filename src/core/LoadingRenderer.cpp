@@ -17,13 +17,12 @@ LoadingRenderer::~LoadingRenderer() {
 }
 
 bool LoadingRenderer::init(const InitInfo& info) {
-    ctx_ = info.vulkanContext;
-    shaderPath_ = info.shaderPath;
-
-    if (!ctx_) {
+    if (!info.vulkanContext) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "LoadingRenderer: VulkanContext is null");
         return false;
     }
+    ctx_.emplace(*info.vulkanContext);
+    shaderPath_ = info.shaderPath;
 
     if (!createRenderPass()) return false;
     if (!createFramebuffers()) return false;
@@ -42,8 +41,8 @@ bool LoadingRenderer::init(const InitInfo& info) {
 }
 
 bool LoadingRenderer::createRenderPass() {
-    const auto& device = ctx_->getRaiiDevice();
-    vk::Format swapchainFormat = static_cast<vk::Format>(ctx_->getVkSwapchainImageFormat());
+    const auto& device = ctx_->get().getRaiiDevice();
+    vk::Format swapchainFormat = static_cast<vk::Format>(ctx_->get().getVkSwapchainImageFormat());
 
     // Single color attachment, no depth
     auto colorAttachment = vk::AttachmentDescription{}
@@ -87,9 +86,9 @@ bool LoadingRenderer::createRenderPass() {
 }
 
 bool LoadingRenderer::createFramebuffers() {
-    const auto& device = ctx_->getRaiiDevice();
-    const auto& imageViews = ctx_->getSwapchainImageViews();
-    VkExtent2D extent = ctx_->getVkSwapchainExtent();
+    const auto& device = ctx_->get().getRaiiDevice();
+    const auto& imageViews = ctx_->get().getSwapchainImageViews();
+    VkExtent2D extent = ctx_->get().getVkSwapchainExtent();
 
     framebuffers_.clear();
     framebuffers_.reserve(imageViews.size());
@@ -114,8 +113,8 @@ bool LoadingRenderer::createFramebuffers() {
 }
 
 bool LoadingRenderer::createPipeline() {
-    const auto& device = ctx_->getRaiiDevice();
-    VkDevice rawDevice = ctx_->getVkDevice();
+    const auto& device = ctx_->get().getRaiiDevice();
+    VkDevice rawDevice = ctx_->get().getVkDevice();
 
     // Load shaders
     std::string vertPath = shaderPath_ + "/loading.vert.spv";
@@ -240,8 +239,8 @@ bool LoadingRenderer::createPipeline() {
 }
 
 bool LoadingRenderer::createCommandPool() {
-    const auto& device = ctx_->getRaiiDevice();
-    uint32_t queueFamily = ctx_->getGraphicsQueueFamily();
+    const auto& device = ctx_->get().getRaiiDevice();
+    uint32_t queueFamily = ctx_->get().getGraphicsQueueFamily();
 
     auto poolInfo = vk::CommandPoolCreateInfo{}
         .setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer)
@@ -255,7 +254,7 @@ bool LoadingRenderer::createCommandPool() {
     }
 
     // Allocate command buffers (one per swapchain image)
-    uint32_t imageCount = ctx_->getSwapchainImageCount();
+    uint32_t imageCount = ctx_->get().getSwapchainImageCount();
     commandBuffers_.resize(imageCount);
 
     VkCommandBufferAllocateInfo allocInfo{};
@@ -264,7 +263,7 @@ bool LoadingRenderer::createCommandPool() {
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandBufferCount = imageCount;
 
-    if (vkAllocateCommandBuffers(ctx_->getVkDevice(), &allocInfo, commandBuffers_.data()) != VK_SUCCESS) {
+    if (vkAllocateCommandBuffers(ctx_->get().getVkDevice(), &allocInfo, commandBuffers_.data()) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "LoadingRenderer: Failed to allocate command buffers");
         return false;
     }
@@ -273,7 +272,7 @@ bool LoadingRenderer::createCommandPool() {
 }
 
 bool LoadingRenderer::createSyncObjects() {
-    const auto& device = ctx_->getRaiiDevice();
+    const auto& device = ctx_->get().getRaiiDevice();
 
     try {
         imageAvailableSemaphore_.emplace(device, vk::SemaphoreCreateInfo{});
@@ -293,9 +292,9 @@ bool LoadingRenderer::createSyncObjects() {
 bool LoadingRenderer::render() {
     if (!initialized_) return false;
 
-    const auto& device = ctx_->getRaiiDevice();
-    VkDevice rawDevice = ctx_->getVkDevice();
-    VkExtent2D extent = ctx_->getVkSwapchainExtent();
+    const auto& device = ctx_->get().getRaiiDevice();
+    VkDevice rawDevice = ctx_->get().getVkDevice();
+    VkExtent2D extent = ctx_->get().getVkSwapchainExtent();
 
     // Skip if window is minimized
     if (extent.width == 0 || extent.height == 0) {
@@ -312,7 +311,7 @@ bool LoadingRenderer::render() {
 
     // Acquire swapchain image
     uint32_t imageIndex;
-    VkResult result = vkAcquireNextImageKHR(rawDevice, ctx_->getVkSwapchain(),
+    VkResult result = vkAcquireNextImageKHR(rawDevice, ctx_->get().getVkSwapchain(),
                                             UINT64_MAX, **imageAvailableSemaphore_,
                                             VK_NULL_HANDLE, &imageIndex);
 
@@ -407,7 +406,7 @@ bool LoadingRenderer::render() {
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    if (vkQueueSubmit(ctx_->getVkGraphicsQueue(), 1, &submitInfo, **inFlightFence_) != VK_SUCCESS) {
+    if (vkQueueSubmit(ctx_->get().getVkGraphicsQueue(), 1, &submitInfo, **inFlightFence_) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "LoadingRenderer: Failed to submit draw command");
         return false;
     }
@@ -418,12 +417,12 @@ bool LoadingRenderer::render() {
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores = signalSemaphores;
 
-    VkSwapchainKHR swapchains[] = {ctx_->getVkSwapchain()};
+    VkSwapchainKHR swapchains[] = {ctx_->get().getVkSwapchain()};
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = swapchains;
     presentInfo.pImageIndices = &imageIndex;
 
-    vkQueuePresentKHR(ctx_->getVkPresentQueue(), &presentInfo);
+    vkQueuePresentKHR(ctx_->get().getVkPresentQueue(), &presentInfo);
 
     return true;
 }
@@ -431,7 +430,7 @@ bool LoadingRenderer::render() {
 void LoadingRenderer::cleanup() {
     if (!initialized_) return;
 
-    VkDevice device = ctx_->getVkDevice();
+    VkDevice device = ctx_->get().getVkDevice();
 
     // Wait for GPU to finish
     vkDeviceWaitIdle(device);

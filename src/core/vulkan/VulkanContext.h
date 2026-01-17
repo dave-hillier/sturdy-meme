@@ -82,6 +82,9 @@ public:
 
     const vkb::Device& getVkbDevice() const { return vkbDevice; }
 
+    // Check if validation layers are enabled (useful for diagnostics)
+    bool hasValidationLayers() const { return vkbInstance.debug_messenger != VK_NULL_HANDLE; }
+
     // Check if instance phase is complete (for two-phase init)
     bool isInstanceReady() const { return instanceReady; }
 

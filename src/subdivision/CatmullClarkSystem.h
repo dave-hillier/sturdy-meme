@@ -15,7 +15,8 @@
 #include "VmaResources.h"
 
 // Push constants for rendering
-struct CatmullClarkPushConstants {
+// alignas(16) required for SIMD operations on glm::mat4
+struct alignas(16) CatmullClarkPushConstants {
     glm::mat4 model;
 };
 

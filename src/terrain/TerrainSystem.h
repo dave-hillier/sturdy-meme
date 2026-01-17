@@ -27,12 +27,14 @@
 class GpuProfiler;
 
 // Push constants for terrain rendering
-struct TerrainPushConstants {
+// alignas(16) required for SIMD operations on glm::mat4
+struct alignas(16) TerrainPushConstants {
     glm::mat4 model;
 };
 
 // Push constants for shadow pass
-struct TerrainShadowPushConstants {
+// alignas(16) required for SIMD operations on glm::mat4
+struct alignas(16) TerrainShadowPushConstants {
     glm::mat4 lightViewProj;
     float terrainSize;
     float heightScale;
@@ -85,7 +87,8 @@ struct TerrainFrustumCullPushConstants {
 };
 
 // Push constants for shadow cascade culling
-struct TerrainShadowCullPushConstants {
+// alignas(16) required for SIMD operations on glm::mat4
+struct alignas(16) TerrainShadowCullPushConstants {
     glm::mat4 lightViewProj;           // Light's view-projection matrix
     glm::vec4 lightFrustumPlanes[6];   // Frustum planes from lightViewProj
     float terrainSize;

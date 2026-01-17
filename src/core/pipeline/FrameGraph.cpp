@@ -3,6 +3,7 @@
 #include "vulkan/ThreadedCommandPool.h"
 #include <SDL3/SDL_log.h>
 #include <algorithm>
+#include <atomic>
 #include <queue>
 #include <sstream>
 
@@ -223,9 +224,23 @@ void FrameGraph::execute(RenderContext& context, TaskScheduler* scheduler) {
         } else {
             // Execute passes sequentially
             for (PassId id : level) {
+                // Bounds check
+                if (id >= passes_.size()) {
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                        "FrameGraph: Invalid pass ID %u (max %zu)", id, passes_.size());
+                    continue;
+                }
+
                 if (!passes_[id].enabled) continue;
 
                 const auto& config = passes_[id].config;
+
+                // Skip passes with null execute function
+                if (!config.execute) {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "FrameGraph: Skipping pass %s with null execute function", config.name.c_str());
+                    continue;
+                }
 
                 // Check if this pass uses secondary command buffers for parallel recording
                 if (config.canUseSecondary &&
@@ -254,48 +269,104 @@ void FrameGraph::executeWithSecondaryBuffers(
     uint32_t numSlots = config.secondarySlots;
     ThreadedCommandPool* pool = context.threadedCommandPool;
 
+    // Validate inputs
+    if (numSlots == 0 || !pool || !scheduler || !config.secondaryRecord) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "FrameGraph: Invalid parameters for secondary buffer execution (pass: %s)",
+            config.name.c_str());
+        // Fall back to standard execution
+        if (config.execute) {
+            config.execute(context);
+        }
+        return;
+    }
+
+    // Validate render pass and framebuffer for inheritance
+    if (!context.renderPass || !context.framebuffer) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "FrameGraph: Missing renderPass or framebuffer for secondary buffers (pass: %s)",
+            config.name.c_str());
+        if (config.execute) {
+            config.execute(context);
+        }
+        return;
+    }
+
     // Allocate secondary command buffers for each slot
     std::vector<vk::CommandBuffer> secondaryBuffers(numSlots);
+    std::atomic<uint32_t> failureCount{0};
 
     // Create a task group for parallel recording
     TaskGroup group;
 
     for (uint32_t slot = 0; slot < numSlots; ++slot) {
         scheduler->submit([&, slot]() {
-            // Get thread ID for command pool allocation
-            uint32_t threadId = TaskScheduler::instance().getCurrentThreadId();
+            try {
+                // Get thread ID for command pool allocation
+                uint32_t threadId = TaskScheduler::instance().getCurrentThreadId();
 
-            // Allocate secondary buffer from thread's pool
-            vk::CommandBuffer secondary = pool->allocateSecondary(context.frameIndex, threadId);
+                // Allocate secondary buffer from thread's pool
+                vk::CommandBuffer secondary = pool->allocateSecondary(context.frameIndex, threadId);
+                if (!secondary) {
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                        "FrameGraph: Failed to allocate secondary buffer for slot %u", slot);
+                    failureCount.fetch_add(1, std::memory_order_relaxed);
+                    return;
+                }
 
-            // Begin secondary command buffer with render pass inheritance
-            auto inheritance = vk::CommandBufferInheritanceInfo{}
-                .setRenderPass(context.renderPass)
-                .setSubpass(0)
-                .setFramebuffer(context.framebuffer);
+                // Begin secondary command buffer with render pass inheritance
+                auto inheritance = vk::CommandBufferInheritanceInfo{}
+                    .setRenderPass(context.renderPass)
+                    .setSubpass(0)
+                    .setFramebuffer(context.framebuffer);
 
-            secondary.begin(vk::CommandBufferBeginInfo{}
-                .setFlags(vk::CommandBufferUsageFlagBits::eRenderPassContinue |
-                          vk::CommandBufferUsageFlagBits::eOneTimeSubmit)
-                .setPInheritanceInfo(&inheritance));
+                secondary.begin(vk::CommandBufferBeginInfo{}
+                    .setFlags(vk::CommandBufferUsageFlagBits::eRenderPassContinue |
+                              vk::CommandBufferUsageFlagBits::eOneTimeSubmit)
+                    .setPInheritanceInfo(&inheritance));
 
-            // Create context for this secondary buffer
-            RenderContext secondaryCtx = context;
-            secondaryCtx.commandBuffer = secondary;
+                // Create context for this secondary buffer
+                RenderContext secondaryCtx = context;
+                secondaryCtx.commandBuffer = secondary;
 
-            // Record commands for this slot
-            config.secondaryRecord(secondaryCtx, slot);
+                // Record commands for this slot
+                config.secondaryRecord(secondaryCtx, slot);
 
-            // End secondary buffer
-            secondary.end();
+                // End secondary buffer
+                secondary.end();
 
-            // Store for later execution
-            secondaryBuffers[slot] = secondary;
+                // Store for later execution
+                secondaryBuffers[slot] = secondary;
+            } catch (const vk::SystemError& e) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                    "FrameGraph: Vulkan error in secondary buffer slot %u: %s", slot, e.what());
+                failureCount.fetch_add(1, std::memory_order_relaxed);
+            } catch (const std::exception& e) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                    "FrameGraph: Exception in secondary buffer slot %u: %s", slot, e.what());
+                failureCount.fetch_add(1, std::memory_order_relaxed);
+            } catch (...) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                    "FrameGraph: Unknown exception in secondary buffer slot %u", slot);
+                failureCount.fetch_add(1, std::memory_order_relaxed);
+            }
         }, &group);
     }
 
     // Wait for all secondary buffers to be recorded
     group.wait();
+
+    // Check if any slots failed
+    if (failureCount.load(std::memory_order_relaxed) > 0) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+            "FrameGraph: %u/%u secondary buffer slots failed for pass %s",
+            failureCount.load(), numSlots, config.name.c_str());
+        // Filter out null buffers
+        secondaryBuffers.erase(
+            std::remove_if(secondaryBuffers.begin(), secondaryBuffers.end(),
+                          [](vk::CommandBuffer buf) { return !buf; }),
+            secondaryBuffers.end());
+    }
 
     // Pass the secondary buffers to the execute function
     // The execute function is responsible for:
@@ -303,7 +374,9 @@ void FrameGraph::executeWithSecondaryBuffers(
     // 2. Calling commandBuffer.executeCommands(secondaryBuffers)
     // 3. Ending the render pass
     context.secondaryBuffers = &secondaryBuffers;
-    config.execute(context);
+    if (config.execute) {
+        config.execute(context);
+    }
     context.secondaryBuffers = nullptr;
 }
 

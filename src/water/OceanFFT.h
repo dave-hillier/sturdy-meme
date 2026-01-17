@@ -243,7 +243,7 @@ private:
     std::optional<vk::raii::DescriptorSetLayout> displacementDescLayout_;
 
     // Descriptor pool and sets
-    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    std::optional<vk::raii::DescriptorPool> descriptorPool_;
     std::vector<VkDescriptorSet> spectrumDescSets;
     std::vector<VkDescriptorSet> timeEvolutionDescSets;
     std::vector<VkDescriptorSet> fftDescSets;       // Multiple for ping-pong

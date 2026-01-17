@@ -20,7 +20,8 @@
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
 
 // Push constants for shadow rendering
-struct ShadowPushConstants {
+// alignas(16) required for SIMD operations on glm::mat4
+struct alignas(16) ShadowPushConstants {
     glm::mat4 model;
     int cascadeIndex;  // Which cascade we're rendering to
     int padding[3];    // Padding to align
@@ -33,6 +34,7 @@ public:
 
     // Configuration for shadow system initialization
     struct InitInfo {
+        const vk::raii::Device* raiiDevice = nullptr;  // For RAII resource creation
         VkDevice device;
         VkPhysicalDevice physicalDevice;
         VmaAllocator allocator;
@@ -86,8 +88,8 @@ public:
     void bindSkinnedShadowPipeline(VkCommandBuffer cmd, VkDescriptorSet descriptorSet);
 
     // CSM resource accessors (for binding in main shader)
-    VkImageView getShadowImageView() const { return csmResources.arrayView; }
-    VkSampler getShadowSampler() const { return csmResources.sampler; }
+    VkImageView getShadowImageView() const { return csmResources.getArrayView(); }
+    VkSampler getShadowSampler() const { return csmResources.getSampler(); }
     VkRenderPass getShadowRenderPass() const { return shadowRenderPass; }
     VkPipeline getShadowPipeline() const { return shadowPipeline; }
     VkPipelineLayout getShadowPipelineLayout() const { return shadowPipelineLayout; }
@@ -100,10 +102,15 @@ public:
     uint32_t getShadowMapSize() const { return SHADOW_MAP_SIZE; }
 
     // Dynamic shadow resource accessors (for binding in main shader)
-    VkImageView getPointShadowArrayView(uint32_t frameIndex) const { return pointShadowResources[frameIndex].arrayView; }
-    VkSampler getPointShadowSampler() const { return pointShadowResources.empty() ? VK_NULL_HANDLE : pointShadowResources[0].sampler; }
-    VkImageView getSpotShadowArrayView(uint32_t frameIndex) const { return spotShadowResources[frameIndex].arrayView; }
-    VkSampler getSpotShadowSampler() const { return spotShadowResources.empty() ? VK_NULL_HANDLE : spotShadowResources[0].sampler; }
+    // Bounds-checked accessors to prevent O3 UB from OOB access
+    VkImageView getPointShadowArrayView(uint32_t frameIndex) const {
+        return frameIndex < pointShadowResources.size() ? pointShadowResources[frameIndex].getArrayView() : VK_NULL_HANDLE;
+    }
+    VkSampler getPointShadowSampler() const { return pointShadowResources.empty() ? VK_NULL_HANDLE : pointShadowResources[0].getSampler(); }
+    VkImageView getSpotShadowArrayView(uint32_t frameIndex) const {
+        return frameIndex < spotShadowResources.size() ? spotShadowResources[frameIndex].getArrayView() : VK_NULL_HANDLE;
+    }
+    VkSampler getSpotShadowSampler() const { return spotShadowResources.empty() ? VK_NULL_HANDLE : spotShadowResources[0].getSampler(); }
 
     // Dynamic shadow rendering (placeholder for future implementation)
     void renderDynamicShadows(VkCommandBuffer cmd, uint32_t frameIndex,
@@ -158,6 +165,7 @@ private:
     glm::mat4 calculateCascadeMatrix(const glm::vec3& lightDir, const Camera& camera, float nearSplit, float farSplit);
 
     // Vulkan handles (not owned)
+    const vk::raii::Device* raiiDevice = nullptr;
     VkDevice device = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;

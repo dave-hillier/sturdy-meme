@@ -6,6 +6,8 @@
 
 #include <glm/glm.hpp>
 #include <vector>
+#include <optional>
+#include <functional>
 
 class DebugLineSystem;
 class TerrainTileCache;
@@ -42,9 +44,21 @@ public:
     const RoadRiverVisConfig& getConfig() const { return config_; }
 
     // Set data sources (marks cache dirty)
-    void setWaterData(const WaterPlacementData* waterData) { waterData_ = waterData; dirty_ = true; }
-    void setRoadNetwork(const RoadNetwork* roadNetwork) { roadNetwork_ = roadNetwork; dirty_ = true; }
-    void setTerrainTileCache(const TerrainTileCache* tileCache) { tileCache_ = tileCache; dirty_ = true; }
+    void setWaterData(const WaterPlacementData* waterData) {
+        if (waterData) waterData_.emplace(*waterData);
+        else waterData_.reset();
+        dirty_ = true;
+    }
+    void setRoadNetwork(const RoadNetwork* roadNetwork) {
+        if (roadNetwork) roadNetwork_.emplace(*roadNetwork);
+        else roadNetwork_.reset();
+        dirty_ = true;
+    }
+    void setTerrainTileCache(const TerrainTileCache* tileCache) {
+        if (tileCache) tileCache_.emplace(*tileCache);
+        else tileCache_.reset();
+        dirty_ = true;
+    }
 
     // Force rebuild of cached geometry
     void invalidateCache() { dirty_ = true; }
@@ -73,9 +87,9 @@ private:
     float getTerrainHeight(float x, float z) const;
 
     RoadRiverVisConfig config_;
-    const WaterPlacementData* waterData_ = nullptr;
-    const RoadNetwork* roadNetwork_ = nullptr;
-    const TerrainTileCache* tileCache_ = nullptr;
+    std::optional<std::reference_wrapper<const WaterPlacementData>> waterData_;
+    std::optional<std::reference_wrapper<const RoadNetwork>> roadNetwork_;
+    std::optional<std::reference_wrapper<const TerrainTileCache>> tileCache_;
 
     // Cached line vertices (pairs for each line segment)
     std::vector<CachedVertex> cachedLineVertices_;

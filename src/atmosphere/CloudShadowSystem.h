@@ -20,7 +20,8 @@
 // that properly account for cloud density, height, and movement.
 
 // Uniforms for cloud shadow compute shader (must match GLSL layout)
-struct CloudShadowUniforms {
+// alignas(16) required for SIMD operations on glm::mat4
+struct alignas(16) CloudShadowUniforms {
     glm::mat4 worldToShadowUV;   // Transform world XZ to shadow map UV
     glm::vec4 toSunDirection;      // xyz = direction toward sun, w = intensity
     glm::vec4 windOffset;        // xyz = wind offset for cloud animation, w = time

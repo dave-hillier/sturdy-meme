@@ -51,16 +51,12 @@ bool WaterTileCull::initInternal(const InitInfo& info) {
 }
 
 void WaterTileCull::cleanup() {
-    if (device == VK_NULL_HANDLE) return;
+    if (!raiiDevice_) return;
 
-    vkDeviceWaitIdle(device);
-
-    if (descriptorPool != VK_NULL_HANDLE) {
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-        descriptorPool = VK_NULL_HANDLE;
-    }
+    raiiDevice_->waitIdle();
 
     // RAII wrappers handle cleanup automatically - just reset them
+    descriptorPool_.reset();
     computePipeline_.reset();
     computePipelineLayout_.reset();
     descriptorSetLayout_.reset();
@@ -100,11 +96,8 @@ void WaterTileCull::resize(VkExtent2D newExtent) {
 
         createBuffers();
 
-        // Recreate descriptor sets
-        if (descriptorPool != VK_NULL_HANDLE) {
-            vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-            descriptorPool = VK_NULL_HANDLE;
-        }
+        // Recreate descriptor sets (RAII handles cleanup)
+        descriptorPool_.reset();
         createDescriptorSets();
     }
 
@@ -163,54 +156,47 @@ bool WaterTileCull::createComputePipeline() {
     // 2: Counter buffer (storage)
     // 3: Indirect draw buffer (storage)
 
-    auto makeComputeBinding = [](uint32_t binding, VkDescriptorType type) {
-        VkDescriptorSetLayoutBinding b{};
-        b.binding = binding;
-        b.descriptorType = type;
-        b.descriptorCount = 1;
-        b.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        return b;
+    auto makeComputeBinding = [](uint32_t binding, vk::DescriptorType type) {
+        return vk::DescriptorSetLayoutBinding{}
+            .setBinding(binding)
+            .setDescriptorType(type)
+            .setDescriptorCount(1)
+            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
     };
 
-    std::array<VkDescriptorSetLayoutBinding, 4> bindings = {
-        makeComputeBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
-        makeComputeBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-        makeComputeBinding(2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
-        makeComputeBinding(3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+    std::array<vk::DescriptorSetLayoutBinding, 4> bindings = {
+        makeComputeBinding(0, vk::DescriptorType::eCombinedImageSampler),
+        makeComputeBinding(1, vk::DescriptorType::eStorageBuffer),
+        makeComputeBinding(2, vk::DescriptorType::eStorageBuffer),
+        makeComputeBinding(3, vk::DescriptorType::eStorageBuffer)
     };
 
-    VkDescriptorSetLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
-    layoutInfo.pBindings = bindings.data();
+    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
+        .setBindings(bindings);
 
-    VkDescriptorSetLayout rawDescLayout = VK_NULL_HANDLE;
-    if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &rawDescLayout) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull descriptor set layout");
+    try {
+        descriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull descriptor set layout: %s", e.what());
         return false;
     }
-    descriptorSetLayout_.emplace(*raiiDevice_, rawDescLayout);
 
     // Push constant range
-    VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-    pushConstantRange.offset = 0;
-    pushConstantRange.size = sizeof(TileCullPushConstants);
+    auto pushConstantRange = vk::PushConstantRange{}
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute)
+        .setOffset(0)
+        .setSize(sizeof(TileCullPushConstants));
 
-    VkDescriptorSetLayout rawLayout = **descriptorSetLayout_;
-    VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-    pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 1;
-    pipelineLayoutInfo.pSetLayouts = &rawLayout;
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+    auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayouts(**descriptorSetLayout_)
+        .setPushConstantRanges(pushConstantRange);
 
-    VkPipelineLayout rawPipelineLayout = VK_NULL_HANDLE;
-    if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &rawPipelineLayout) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull pipeline layout");
+    try {
+        computePipelineLayout_.emplace(*raiiDevice_, pipelineLayoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull pipeline layout: %s", e.what());
         return false;
     }
-    computePipelineLayout_.emplace(*raiiDevice_, rawPipelineLayout);
 
     if (!ComputePipelineBuilder(*raiiDevice_)
             .setShader(shaderPath + "/water_tile_cull.comp.spv")
@@ -234,34 +220,40 @@ bool WaterTileCull::createComputePipeline() {
 }
 
 bool WaterTileCull::createDescriptorSets() {
-    std::array<VkDescriptorPoolSize, 2> poolSizes{};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = framesInFlight;
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    poolSizes[1].descriptorCount = framesInFlight * 3;  // tile, counter, indirect
+    std::array<vk::DescriptorPoolSize, 2> poolSizes = {
+        vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(framesInFlight),
+        vk::DescriptorPoolSize{}
+            .setType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(framesInFlight * 3)  // tile, counter, indirect
+    };
 
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-    poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = framesInFlight;
+    auto poolInfo = vk::DescriptorPoolCreateInfo{}
+        .setPoolSizes(poolSizes)
+        .setMaxSets(framesInFlight);
 
-    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull descriptor pool");
+    try {
+        descriptorPool_.emplace(*raiiDevice_, poolInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull descriptor pool: %s", e.what());
         return false;
     }
 
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, **descriptorSetLayout_);
+    std::vector<vk::DescriptorSetLayout> layouts(framesInFlight, **descriptorSetLayout_);
 
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = framesInFlight;
-    allocInfo.pSetLayouts = layouts.data();
+    auto allocInfo = vk::DescriptorSetAllocateInfo{}
+        .setDescriptorPool(**descriptorPool_)
+        .setSetLayouts(layouts);
 
-    descriptorSets.resize(framesInFlight);
-    if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate tile cull descriptor sets");
+    try {
+        auto allocatedSets = vk::Device(device).allocateDescriptorSets(allocInfo);
+        descriptorSets.resize(framesInFlight);
+        for (uint32_t i = 0; i < framesInFlight; ++i) {
+            descriptorSets[i] = allocatedSets[i];
+        }
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate tile cull descriptor sets: %s", e.what());
         return false;
     }
 
@@ -274,7 +266,13 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
                                     const glm::vec3& cameraPos,
                                     float waterLevel,
                                     VkImageView depthView) {
-    if (!enabled || descriptorSets.empty()) {
+    // Bounds check: frameIndex must be within descriptorSets range.
+    // Without this, O3 vectorization of OOB access can cause crashes.
+    // Also validate all required resources are initialized.
+    if (!enabled || frameIndex >= descriptorSets.size() || descriptorSets.empty() ||
+        !computePipeline_ || !depthSampler_ || !computePipelineLayout_ ||
+        !tileBuffer_.get() || !counterBuffer_.get() ||
+        !indirectDrawBuffer_.get() || !counterReadbackBuffer_.get()) {
         return;
     }
 

@@ -145,7 +145,7 @@ private:
     // Return staging buffer to pool for reuse
     void releaseStagingBuffer(VmaBuffer buffer);
 
-    VulkanContext* context_ = nullptr;
+    std::optional<std::reference_wrapper<VulkanContext>> context_;
     vk::Device device_;
     vk::Queue transferQueue_;
     uint32_t transferQueueFamily_ = 0;

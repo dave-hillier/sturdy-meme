@@ -3,6 +3,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <optional>
+#include <functional>
 #include "SceneNode.h"
 
 /**
@@ -127,7 +129,7 @@ private:
 
     // Third-person camera settings
     glm::vec3 thirdPersonTarget_;
-    SceneNode* thirdPersonTargetNode_ = nullptr;  // Optional: follow a scene node
+    std::optional<std::reference_wrapper<SceneNode>> thirdPersonTargetNode_;  // Optional: follow a scene node
     float thirdPersonDistance_;
     float thirdPersonMinDistance_;
     float thirdPersonMaxDistance_;

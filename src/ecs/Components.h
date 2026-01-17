@@ -223,7 +223,8 @@ struct BoundingSphere {
 };
 
 // Model matrix cache - computed from transform for rendering
-struct ModelMatrix {
+// alignas(16) required for SIMD operations on glm::mat4
+struct alignas(16) ModelMatrix {
     glm::mat4 matrix{1.0f};
 };
 

@@ -7,6 +7,7 @@
 #include <vector>
 #include <array>
 #include <optional>
+#include "VmaResources.h"
 
 // ============================================================================
 // Render Pass Configuration
@@ -128,38 +129,32 @@ inline std::optional<vk::raii::RenderPass> createRenderPass(
 }
 
 // ============================================================================
-// Depth Resources
+// Depth Resources (RAII)
 // ============================================================================
 
 struct DepthResources {
-    VkImage image = VK_NULL_HANDLE;
-    VmaAllocation allocation = VK_NULL_HANDLE;
-    VkImageView view = VK_NULL_HANDLE;
-    VkSampler sampler = VK_NULL_HANDLE;
-    VkFormat format = VK_FORMAT_D32_SFLOAT;
+    VmaImage image;
+    std::optional<vk::raii::ImageView> view;
+    std::optional<vk::raii::Sampler> sampler;
+    vk::Format format = vk::Format::eD32Sfloat;
 
-    void destroy(VkDevice device, VmaAllocator allocator) {
-        if (sampler != VK_NULL_HANDLE) {
-            vkDestroySampler(device, sampler, nullptr);
-            sampler = VK_NULL_HANDLE;
-        }
-        if (view != VK_NULL_HANDLE) {
-            vkDestroyImageView(device, view, nullptr);
-            view = VK_NULL_HANDLE;
-        }
-        if (image != VK_NULL_HANDLE) {
-            vmaDestroyImage(allocator, image, allocation);
-            image = VK_NULL_HANDLE;
-            allocation = VK_NULL_HANDLE;
-        }
+    // Get raw handles for compatibility with existing code
+    VkImage getImage() const { return image.get(); }
+    VkImageView getView() const { return view ? **view : VK_NULL_HANDLE; }
+    VkSampler getSampler() const { return sampler ? **sampler : VK_NULL_HANDLE; }
+
+    void reset() {
+        sampler.reset();
+        view.reset();
+        image.reset();
     }
 };
 
 inline bool createDepthResources(
-    VkDevice device,
+    const vk::raii::Device& device,
     VmaAllocator allocator,
-    VkExtent2D extent,
-    VkFormat format,
+    vk::Extent2D extent,
+    vk::Format format,
     DepthResources& outResources)
 {
     outResources.format = format;
@@ -169,7 +164,7 @@ inline bool createDepthResources(
         .setExtent(vk::Extent3D{extent.width, extent.height, 1})
         .setMipLevels(1)
         .setArrayLayers(1)
-        .setFormat(static_cast<vk::Format>(format))
+        .setFormat(format)
         .setTiling(vk::ImageTiling::eOptimal)
         .setInitialLayout(vk::ImageLayout::eUndefined)
         .setUsage(vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled)
@@ -179,67 +174,56 @@ inline bool createDepthResources(
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo,
-                       &outResources.image, &outResources.allocation, nullptr) != VK_SUCCESS) {
+    if (!VmaImage::create(allocator, imageInfo, allocInfo, outResources.image)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image");
         return false;
     }
 
-    auto viewInfo = vk::ImageViewCreateInfo{}
-        .setImage(outResources.image)
-        .setViewType(vk::ImageViewType::e2D)
-        .setFormat(static_cast<vk::Format>(format))
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eDepth)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
+    try {
+        auto viewInfo = vk::ImageViewCreateInfo{}
+            .setImage(outResources.image.get())
+            .setViewType(vk::ImageViewType::e2D)
+            .setFormat(format)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
 
-    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo),
-                          nullptr, &outResources.view) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image view");
-        outResources.destroy(device, allocator);
+        outResources.view = vk::raii::ImageView(device, viewInfo);
+
+        // Create depth sampler for Hi-Z pyramid generation using SamplerFactory
+        auto samplerOpt = SamplerFactory::createSamplerNearestClamp(device);
+        if (!samplerOpt) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth sampler");
+            outResources.reset();
+            return false;
+        }
+        outResources.sampler = std::move(*samplerOpt);
+
+        return true;
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth resources: %s", e.what());
+        outResources.reset();
         return false;
     }
-
-    // Create depth sampler for Hi-Z pyramid generation
-    // Note: Equivalent to SamplerFactory::createSamplerNearestClamp() for RAII code paths
-    auto samplerInfo = vk::SamplerCreateInfo{}
-        .setMagFilter(vk::Filter::eNearest)
-        .setMinFilter(vk::Filter::eNearest)
-        .setMipmapMode(vk::SamplerMipmapMode::eNearest)
-        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
-        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge)
-        .setMinLod(0.0f)
-        .setMaxLod(0.0f);
-
-    if (vkCreateSampler(device, reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo),
-                        nullptr, &outResources.sampler) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth sampler");
-        outResources.destroy(device, allocator);
-        return false;
-    }
-
-    return true;
 }
 
 inline bool createDepthImageAndView(
-    VkDevice device,
+    const vk::raii::Device& device,
     VmaAllocator allocator,
-    VkExtent2D extent,
-    VkFormat format,
-    VkImage& outImage,
-    VmaAllocation& outAllocation,
-    VkImageView& outView)
+    vk::Extent2D extent,
+    vk::Format format,
+    VmaImage& outImage,
+    std::optional<vk::raii::ImageView>& outView)
 {
     auto imageInfo = vk::ImageCreateInfo{}
         .setImageType(vk::ImageType::e2D)
         .setExtent(vk::Extent3D{extent.width, extent.height, 1})
         .setMipLevels(1)
         .setArrayLayers(1)
-        .setFormat(static_cast<vk::Format>(format))
+        .setFormat(format)
         .setTiling(vk::ImageTiling::eOptimal)
         .setInitialLayout(vk::ImageLayout::eUndefined)
         .setUsage(vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled)
@@ -249,79 +233,68 @@ inline bool createDepthImageAndView(
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo,
-                       &outImage, &outAllocation, nullptr) != VK_SUCCESS) {
+    if (!VmaImage::create(allocator, imageInfo, allocInfo, outImage)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image");
         return false;
     }
 
-    auto viewInfo = vk::ImageViewCreateInfo{}
-        .setImage(outImage)
-        .setViewType(vk::ImageViewType::e2D)
-        .setFormat(static_cast<vk::Format>(format))
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eDepth)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
+    try {
+        auto viewInfo = vk::ImageViewCreateInfo{}
+            .setImage(outImage.get())
+            .setViewType(vk::ImageViewType::e2D)
+            .setFormat(format)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1));
 
-    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&viewInfo),
-                          nullptr, &outView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image view");
-        vmaDestroyImage(allocator, outImage, outAllocation);
-        outImage = VK_NULL_HANDLE;
-        outAllocation = VK_NULL_HANDLE;
+        outView = vk::raii::ImageView(device, viewInfo);
+        return true;
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth image view: %s", e.what());
+        outImage.reset();
         return false;
     }
-
-    return true;
 }
 
 // ============================================================================
-// Depth Array Resources (for shadow maps)
+// Depth Array Resources (for shadow maps) - RAII
 // ============================================================================
 
 struct DepthArrayConfig {
-    VkExtent2D extent;
-    VkFormat format = VK_FORMAT_D32_SFLOAT;
+    vk::Extent2D extent;
+    vk::Format format = vk::Format::eD32Sfloat;
     uint32_t arrayLayers = 1;
     bool cubeCompatible = false;
     bool createSampler = true;
 };
 
 struct DepthArrayResources {
-    VkImage image = VK_NULL_HANDLE;
-    VmaAllocation allocation = VK_NULL_HANDLE;
-    VkImageView arrayView = VK_NULL_HANDLE;
-    std::vector<VkImageView> layerViews;
-    VkSampler sampler = VK_NULL_HANDLE;
+    VmaImage image;
+    std::optional<vk::raii::ImageView> arrayView;
+    std::vector<vk::raii::ImageView> layerViews;
+    std::optional<vk::raii::Sampler> sampler;
 
-    void destroy(VkDevice device, VmaAllocator allocator) {
-        if (sampler != VK_NULL_HANDLE) {
-            vkDestroySampler(device, sampler, nullptr);
-            sampler = VK_NULL_HANDLE;
-        }
-        for (auto& view : layerViews) {
-            if (view != VK_NULL_HANDLE) {
-                vkDestroyImageView(device, view, nullptr);
-            }
-        }
+    // Get raw handles for compatibility with existing code
+    VkImage getImage() const { return image.get(); }
+    VkImageView getArrayView() const { return arrayView ? **arrayView : VK_NULL_HANDLE; }
+    VkImageView getLayerView(size_t index) const {
+        return index < layerViews.size() ? *layerViews[index] : VK_NULL_HANDLE;
+    }
+    VkSampler getSampler() const { return sampler ? **sampler : VK_NULL_HANDLE; }
+
+    void reset() {
+        sampler.reset();
         layerViews.clear();
-        if (arrayView != VK_NULL_HANDLE) {
-            vkDestroyImageView(device, arrayView, nullptr);
-            arrayView = VK_NULL_HANDLE;
-        }
-        if (image != VK_NULL_HANDLE) {
-            vmaDestroyImage(allocator, image, allocation);
-            image = VK_NULL_HANDLE;
-            allocation = VK_NULL_HANDLE;
-        }
+        arrayView.reset();
+        image.reset();
     }
 };
 
 inline bool createDepthArrayResources(
-    VkDevice device,
+    const vk::raii::Device& device,
     VmaAllocator allocator,
     const DepthArrayConfig& config,
     DepthArrayResources& outResources)
@@ -331,7 +304,7 @@ inline bool createDepthArrayResources(
         .setExtent(vk::Extent3D{config.extent.width, config.extent.height, 1})
         .setMipLevels(1)
         .setArrayLayers(config.arrayLayers)
-        .setFormat(static_cast<vk::Format>(config.format))
+        .setFormat(config.format)
         .setTiling(vk::ImageTiling::eOptimal)
         .setInitialLayout(vk::ImageLayout::eUndefined)
         .setUsage(vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled)
@@ -344,73 +317,57 @@ inline bool createDepthArrayResources(
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
-    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo,
-                       &outResources.image, &outResources.allocation, nullptr) != VK_SUCCESS) {
+    if (!VmaImage::create(allocator, imageInfo, allocInfo, outResources.image)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth array image");
         return false;
     }
 
-    auto arrayViewInfo = vk::ImageViewCreateInfo{}
-        .setImage(outResources.image)
-        .setViewType(config.cubeCompatible ? vk::ImageViewType::eCubeArray : vk::ImageViewType::e2DArray)
-        .setFormat(static_cast<vk::Format>(config.format))
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eDepth)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(config.arrayLayers));
-
-    if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&arrayViewInfo),
-                          nullptr, &outResources.arrayView) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth array view");
-        outResources.destroy(device, allocator);
-        return false;
-    }
-
-    outResources.layerViews.resize(config.arrayLayers);
-    for (uint32_t i = 0; i < config.arrayLayers; i++) {
-        auto layerViewInfo = vk::ImageViewCreateInfo{}
-            .setImage(outResources.image)
-            .setViewType(vk::ImageViewType::e2D)
-            .setFormat(static_cast<vk::Format>(config.format))
+    try {
+        auto arrayViewInfo = vk::ImageViewCreateInfo{}
+            .setImage(outResources.image.get())
+            .setViewType(config.cubeCompatible ? vk::ImageViewType::eCubeArray : vk::ImageViewType::e2DArray)
+            .setFormat(config.format)
             .setSubresourceRange(vk::ImageSubresourceRange{}
                 .setAspectMask(vk::ImageAspectFlagBits::eDepth)
                 .setBaseMipLevel(0)
                 .setLevelCount(1)
-                .setBaseArrayLayer(i)
-                .setLayerCount(1));
+                .setBaseArrayLayer(0)
+                .setLayerCount(config.arrayLayers));
 
-        if (vkCreateImageView(device, reinterpret_cast<const VkImageViewCreateInfo*>(&layerViewInfo),
-                              nullptr, &outResources.layerViews[i]) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth layer view %u", i);
-            outResources.destroy(device, allocator);
-            return false;
+        outResources.arrayView = vk::raii::ImageView(device, arrayViewInfo);
+
+        outResources.layerViews.reserve(config.arrayLayers);
+        for (uint32_t i = 0; i < config.arrayLayers; i++) {
+            auto layerViewInfo = vk::ImageViewCreateInfo{}
+                .setImage(outResources.image.get())
+                .setViewType(vk::ImageViewType::e2D)
+                .setFormat(config.format)
+                .setSubresourceRange(vk::ImageSubresourceRange{}
+                    .setAspectMask(vk::ImageAspectFlagBits::eDepth)
+                    .setBaseMipLevel(0)
+                    .setLevelCount(1)
+                    .setBaseArrayLayer(i)
+                    .setLayerCount(1));
+
+            outResources.layerViews.emplace_back(device, layerViewInfo);
         }
-    }
 
-    if (config.createSampler) {
-        // Note: Equivalent to SamplerFactory::createSamplerShadowComparison() for RAII code paths
-        auto samplerInfo = vk::SamplerCreateInfo{}
-            .setMagFilter(vk::Filter::eLinear)
-            .setMinFilter(vk::Filter::eLinear)
-            .setMipmapMode(vk::SamplerMipmapMode::eNearest)
-            .setAddressModeU(vk::SamplerAddressMode::eClampToBorder)
-            .setAddressModeV(vk::SamplerAddressMode::eClampToBorder)
-            .setAddressModeW(vk::SamplerAddressMode::eClampToBorder)
-            .setBorderColor(vk::BorderColor::eFloatOpaqueWhite)
-            .setCompareEnable(vk::True)
-            .setCompareOp(vk::CompareOp::eLess);
-
-        if (vkCreateSampler(device, reinterpret_cast<const VkSamplerCreateInfo*>(&samplerInfo),
-                            nullptr, &outResources.sampler) != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth array sampler");
-            outResources.destroy(device, allocator);
-            return false;
+        if (config.createSampler) {
+            auto samplerOpt = SamplerFactory::createSamplerShadowComparison(device);
+            if (!samplerOpt) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth array sampler");
+                outResources.reset();
+                return false;
+            }
+            outResources.sampler = std::move(*samplerOpt);
         }
-    }
 
-    return true;
+        return true;
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create depth array resources: %s", e.what());
+        outResources.reset();
+        return false;
+    }
 }
 
 // ============================================================================

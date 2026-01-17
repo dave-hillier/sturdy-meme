@@ -3,6 +3,7 @@
 #include <vulkan/vulkan_raii.hpp>
 #include <SDL3/SDL_vulkan.h>
 #include <SDL3/SDL_log.h>
+#include <cstdlib>
 
 // Required for dynamic dispatch loader - only define in one .cpp file
 VULKAN_HPP_DEFAULT_DISPATCH_LOADER_DYNAMIC_STORAGE
@@ -92,8 +93,22 @@ void VulkanContext::shutdown() {
 
 bool VulkanContext::createInstance() {
     vkb::InstanceBuilder builder;
+
+    // Disable validation layers in release builds for performance
+    // Validation layers add significant overhead to vkQueueSubmit
+#ifdef NDEBUG
+    constexpr bool enableValidation = false;
+#else
+    // Can be overridden via environment variable for profiling debug builds
+    const bool enableValidation = (std::getenv("DISABLE_VULKAN_VALIDATION") == nullptr);
+#endif
+
+    if (!enableValidation) {
+        SDL_Log("Vulkan validation layers disabled");
+    }
+
     auto instRet = builder.set_app_name("Vulkan Game")
-        .request_validation_layers(true)
+        .request_validation_layers(enableValidation)
         .use_default_debug_messenger()
         .require_api_version(1, 2, 0)
         .build();
@@ -278,5 +293,5 @@ uint32_t VulkanContext::getTransferQueueFamily() const {
 }
 
 bool VulkanContext::createPipelineCache() {
-    return pipelineCache.init(device, "pipeline_cache.bin");
+    return pipelineCache.init(*raiiDevice_, "pipeline_cache.bin");
 }

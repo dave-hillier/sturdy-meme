@@ -141,7 +141,7 @@ private:
     VkDevice storedDevice = VK_NULL_HANDLE;
 
     // Asset registry for centralized resource management
-    AssetRegistry* assetRegistry_ = nullptr;
+    std::optional<std::reference_wrapper<AssetRegistry>> assetRegistry_;
 
     // Meshes (static RAII-managed)
     std::unique_ptr<Mesh> cubeMesh;

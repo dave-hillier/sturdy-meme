@@ -17,7 +17,8 @@ constexpr size_t MAX_SCENE_INSTANCES = 4096;
 
 // Per-instance data for scene objects (must match SceneInstance in shader)
 // Layout: std430 (tightly packed with alignment rules)
-struct SceneInstanceData {
+// alignas(16) required for SIMD operations on glm::mat4
+struct alignas(16) SceneInstanceData {
     glm::mat4 model;              // 64 bytes, offset 0
     glm::vec4 materialParams;     // 16 bytes, offset 64 (roughness, metallic, emissiveIntensity, opacity)
     glm::vec4 emissiveColor;      // 16 bytes, offset 80 (rgb=color, a=unused)

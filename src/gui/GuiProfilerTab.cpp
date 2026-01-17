@@ -3,6 +3,8 @@
 #include "core/interfaces/IProfilerControl.h"
 #include "Profiler.h"
 #include "InitProfiler.h"
+#include "QueueSubmitDiagnostics.h"
+#include "CommandCapture.h"
 
 #include <imgui.h>
 #include <algorithm>
@@ -312,6 +314,192 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
                 ImGui::TextDisabled("No flamegraph captures yet");
             }
         }
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // Queue Submit Diagnostics Section
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.8f, 1.0f));
+    if (ImGui::CollapsingHeader("QUEUE SUBMIT DIAGNOSTICS")) {
+        ImGui::PopStyleColor();
+
+        const auto& diag = profiler.getQueueSubmitDiagnostics();
+
+        // Validation layer warning (most common cause of high submit time)
+        if (diag.validationLayersEnabled) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+            ImGui::TextWrapped("WARNING: Validation layers enabled! This adds significant overhead to vkQueueSubmit.");
+            ImGui::PopStyleColor();
+            ImGui::Spacing();
+        }
+
+        // Fence status - helps identify GPU-bound vs CPU-bound
+        ImGui::Text("Fence Status:");
+        if (diag.fenceWasAlreadySignaled) {
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
+            ImGui::Text("Already signaled (GPU was idle)");
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
+            ImGui::Text("Waited %.2f ms (GPU still working)", diag.fenceWaitTimeMs);
+            ImGui::PopStyleColor();
+        }
+
+        // Queue submit time
+        ImGui::Text("Queue Submit Time: %.3f ms", diag.queueSubmitTimeMs);
+        if (diag.queueSubmitTimeMs > 1.0f) {
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+            ImGui::Text("(HIGH - check validation layers or driver)");
+            ImGui::PopStyleColor();
+        }
+
+        ImGui::Spacing();
+
+        // Command counts table
+        ImGui::Text("Command Buffer Stats:");
+        if (ImGui::BeginTable("CmdStats", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
+            ImGui::TableSetupColumn("Command Type", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Count", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+            ImGui::TableHeadersRow();
+
+            auto addRow = [](const char* name, uint32_t count, uint32_t warnThreshold = 0) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::Text("%s", name);
+                ImGui::TableNextColumn();
+                if (warnThreshold > 0 && count > warnThreshold) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
+                    ImGui::Text("%u", count);
+                    ImGui::PopStyleColor();
+                } else {
+                    ImGui::Text("%u", count);
+                }
+            };
+
+            addRow("Draw Calls", diag.drawCallCount, 500);
+            addRow("Compute Dispatches", diag.dispatchCount, 100);
+            addRow("Pipeline Binds", diag.pipelineBindCount, 100);
+            addRow("Descriptor Set Binds", diag.descriptorSetBindCount, 200);
+            addRow("Push Constants", diag.pushConstantCount, 200);
+            addRow("Render Passes", diag.renderPassCount, 20);
+            addRow("Pipeline Barriers", diag.pipelineBarrierCount, 50);
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 1.0f, 1.0f));
+            ImGui::Text("Total Commands");
+            ImGui::PopStyleColor();
+            ImGui::TableNextColumn();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.8f, 1.0f, 1.0f));
+            ImGui::Text("%u", diag.totalCommandCount());
+            ImGui::PopStyleColor();
+
+            ImGui::EndTable();
+        }
+
+        // Interpretation help
+        ImGui::Spacing();
+        ImGui::TextDisabled("High submit time causes:");
+        ImGui::TextDisabled("  - Validation layers (disable for release)");
+        ImGui::TextDisabled("  - Many commands (batch draws, use indirect)");
+        ImGui::TextDisabled("  - Driver overhead (reduce state changes)");
+        ImGui::TextDisabled("  - Implicit sync (GPU not done with prev frame)");
+
+        // Command capture controls
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        auto& capture = profiler.getCommandCapture();
+        ImGui::Text("Command Capture:");
+
+        bool continuous = capture.isContinuousCapture();
+        if (ImGui::Checkbox("Continuous", &continuous)) {
+            capture.setContinuousCapture(continuous);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Capture Frame")) {
+            capture.requestSingleCapture();
+        }
+        ImGui::SameLine();
+        if (capture.hasCapture()) {
+            if (ImGui::Button("Copy Report")) {
+                std::string report = capture.generateReport();
+                ImGui::SetClipboardText(report.c_str());
+            }
+        }
+
+        // Show last capture summary
+        if (capture.hasCapture()) {
+            const auto& frame = capture.getLastCapture();
+            ImGui::Text("Last capture: Frame %llu, %zu commands",
+                       static_cast<unsigned long long>(frame.frameNumber),
+                       frame.commands.size());
+
+            // Collapsible command list
+            if (ImGui::TreeNode("Command List")) {
+                // Show commands grouped by source
+                std::string currentSource;
+                for (size_t i = 0; i < frame.commands.size() && i < 500; ++i) {
+                    const auto& cmd = frame.commands[i];
+
+                    if (cmd.source != currentSource) {
+                        currentSource = cmd.source;
+                        ImGui::Spacing();
+                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.8f, 1.0f, 1.0f));
+                        ImGui::Text("[%s]", currentSource.c_str());
+                        ImGui::PopStyleColor();
+                    }
+
+                    // Color by command type
+                    ImVec4 color = ImVec4(0.8f, 0.8f, 0.8f, 1.0f);
+                    switch (cmd.type) {
+                        case CommandType::Draw:
+                        case CommandType::DrawIndexed:
+                        case CommandType::DrawIndirect:
+                        case CommandType::DrawIndexedIndirect:
+                            color = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);  // Green for draws
+                            break;
+                        case CommandType::Dispatch:
+                        case CommandType::DispatchIndirect:
+                            color = ImVec4(1.0f, 0.8f, 0.4f, 1.0f);  // Orange for compute
+                            break;
+                        case CommandType::BeginRenderPass:
+                        case CommandType::EndRenderPass:
+                            color = ImVec4(0.4f, 0.8f, 1.0f, 1.0f);  // Cyan for render passes
+                            break;
+                        case CommandType::PipelineBarrier:
+                            color = ImVec4(1.0f, 0.4f, 0.4f, 1.0f);  // Red for barriers
+                            break;
+                        default:
+                            break;
+                    }
+
+                    ImGui::PushStyleColor(ImGuiCol_Text, color);
+                    ImGui::Text("  %s", commandTypeName(cmd.type));
+                    ImGui::PopStyleColor();
+
+                    if (!cmd.details.empty()) {
+                        ImGui::SameLine();
+                        ImGui::TextDisabled("(%s)", cmd.details.c_str());
+                    }
+                }
+
+                if (frame.commands.size() > 500) {
+                    ImGui::TextDisabled("... and %zu more commands",
+                                       frame.commands.size() - 500);
+                }
+
+                ImGui::TreePop();
+            }
+        }
+    } else {
+        ImGui::PopStyleColor();
     }
 
     ImGui::Spacing();

@@ -7,6 +7,7 @@
 #include <string>
 #include <memory>
 #include <optional>
+#include <functional>
 
 class VulkanContext;
 
@@ -86,7 +87,7 @@ private:
         float _pad;
     };
 
-    VulkanContext* ctx_ = nullptr;  // Borrowed, not owned
+    std::optional<std::reference_wrapper<VulkanContext>> ctx_;  // Borrowed, not owned
     std::string shaderPath_;
 
     // Render resources (all managed with RAII via vulkan-hpp)

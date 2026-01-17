@@ -76,6 +76,7 @@
 #include <limits>
 #include <algorithm>
 #include <numeric>
+#include <chrono>
 
 std::unique_ptr<Renderer> Renderer::create(const InitInfo& info) {
     std::unique_ptr<Renderer> instance(new Renderer());
@@ -239,6 +240,7 @@ void Renderer::setupFrameGraph() {
         .name = "Compute",
         .execute = [this](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             systems_->profiler().beginCpuZone("ComputeDispatch");
             renderPipeline.computeStage.execute(*renderCtx);
             systems_->profiler().endCpuZone("ComputeDispatch");
@@ -253,6 +255,7 @@ void Renderer::setupFrameGraph() {
         .name = "Shadow",
         .execute = [this, lastSunIntensity](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             if (*lastSunIntensity > 0.001f && perfToggles.shadowPass) {
                 systems_->profiler().beginCpuZone("ShadowRecord");
                 systems_->profiler().beginGpuZone(ctx.commandBuffer, "ShadowPass");
@@ -273,6 +276,7 @@ void Renderer::setupFrameGraph() {
         .name = "Froxel",
         .execute = [this](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             systems_->postProcess().setCameraPlanes(
                 renderCtx->frame.nearPlane, renderCtx->frame.farPlane);
             if (renderPipeline.froxelStageFn && (perfToggles.froxelFog || perfToggles.atmosphereLUT)) {
@@ -293,6 +297,7 @@ void Renderer::setupFrameGraph() {
 
             if (perfToggles.waterGBuffer &&
                 systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
+                systems_->hasWaterTileCull() &&
                 systems_->waterTileCull().wasWaterVisibleLastFrame(ctx.frameIndex)) {
                 systems_->profiler().beginGpuZone(ctx.commandBuffer, "WaterGBuffer");
                 systems_->waterGBuffer().beginRenderPass(ctx.commandBuffer);
@@ -323,6 +328,7 @@ void Renderer::setupFrameGraph() {
         .name = "HDR",
         .execute = [this](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             if (hdrPassEnabled) {
                 systems_->profiler().beginCpuZone("RenderPassRecord");
                 if (ctx.secondaryBuffers && !ctx.secondaryBuffers->empty()) {
@@ -342,6 +348,7 @@ void Renderer::setupFrameGraph() {
         .secondarySlots = 3,  // 3 parallel recording slots
         .secondaryRecord = [this](FrameGraph::RenderContext& ctx, uint32_t slot) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             recordHDRPassSecondarySlot(ctx.commandBuffer, ctx.frameIndex,
                                        renderCtx->frame.time, slot);
         }
@@ -352,6 +359,7 @@ void Renderer::setupFrameGraph() {
         .name = "SSR",
         .execute = [this](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             if (hdrPassEnabled && perfToggles.ssr && systems_->ssr().isEnabled()) {
                 systems_->profiler().beginGpuZone(ctx.commandBuffer, "SSR");
                 systems_->ssr().recordCompute(ctx.commandBuffer, ctx.frameIndex,
@@ -371,6 +379,7 @@ void Renderer::setupFrameGraph() {
     auto waterTileCull = frameGraph_.addPass({
         .name = "WaterTileCull",
         .execute = [this](FrameGraph::RenderContext& ctx) {
+            if (!ctx.userData) return;
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
             if (hdrPassEnabled && perfToggles.waterTileCull && systems_->waterTileCull().isEnabled()) {
                 systems_->profiler().beginGpuZone(ctx.commandBuffer, "WaterTileCull");
@@ -393,6 +402,7 @@ void Renderer::setupFrameGraph() {
         .execute = [this](FrameGraph::RenderContext& ctx) {
             if (renderPipeline.postStage.hiZRecordFn) {
                 RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+                if (!renderCtx) return;
                 renderPipeline.postStage.hiZRecordFn(*renderCtx);
             }
         },
@@ -407,6 +417,7 @@ void Renderer::setupFrameGraph() {
         .execute = [this](FrameGraph::RenderContext& ctx) {
             if (systems_->postProcess().isBloomEnabled() && renderPipeline.postStage.bloomRecordFn) {
                 RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+                if (!renderCtx) return;
                 renderPipeline.postStage.bloomRecordFn(*renderCtx);
             }
         },
@@ -436,6 +447,7 @@ void Renderer::setupFrameGraph() {
         .name = "PostProcess",
         .execute = [this](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
             systems_->profiler().beginGpuZone(ctx.commandBuffer, "PostProcess");
             systems_->postProcess().recordPostProcess(ctx.commandBuffer, ctx.frameIndex,
                 *framebuffers_[ctx.imageIndex], renderCtx->frame.deltaTime, guiRenderCallback);
@@ -657,15 +669,17 @@ bool Renderer::createRenderPass() {
 
 bool Renderer::createDepthResources() {
     DepthResources depth;
+    vk::Extent2D extent{vulkanContext_->getVkSwapchainExtent().width,
+                        vulkanContext_->getVkSwapchainExtent().height};
     if (!::createDepthResources(
-            vulkanContext_->getVkDevice(), vulkanContext_->getAllocator(),
-            vulkanContext_->getVkSwapchainExtent(), depthFormat, depth)) {
+            vulkanContext_->getRaiiDevice(), vulkanContext_->getAllocator(),
+            extent, static_cast<vk::Format>(depthFormat), depth)) {
         return false;
     }
-    depthImage_ = ManagedImage::fromRaw(vulkanContext_->getAllocator(), depth.image, depth.allocation);
-    depthImageView_.emplace(vulkanContext_->getRaiiDevice(), depth.view);
-    // Wrap raw sampler in vk::raii::Sampler (takes ownership)
-    depthSampler_.emplace(vulkanContext_->getRaiiDevice(), depth.sampler);
+    // Move RAII resources from temporary DepthResources to member fields
+    depthImage_ = std::move(depth.image);
+    depthImageView_ = std::move(depth.view);
+    depthSampler_ = std::move(depth.sampler);
     return true;
 }
 
@@ -977,10 +991,22 @@ bool Renderer::render(const Camera& camera) {
     // Begin CPU profiling for this frame (must be before any CPU zones)
     systems_->profiler().beginCpuFrame();
 
+    // Reset queue submit diagnostics for this frame
+    auto& qsDiag = systems_->profiler().getQueueSubmitDiagnostics();
+    qsDiag.reset();
+    qsDiag.validationLayersEnabled = vulkanContext_->hasValidationLayers();
+
     // Frame synchronization - use non-blocking check first to avoid unnecessary waits
     // With triple buffering, the fence is often already signaled
     systems_->profiler().beginCpuZone("Wait:FenceSync");
+
+    // Track fence status for diagnostics
+    qsDiag.fenceWasAlreadySignaled = frameSync_.isCurrentFenceSignaled();
+    auto fenceStart = std::chrono::high_resolution_clock::now();
     frameSync_.waitForCurrentFrameIfNeeded();
+    auto fenceEnd = std::chrono::high_resolution_clock::now();
+    qsDiag.fenceWaitTimeMs = std::chrono::duration<float, std::milli>(fenceEnd - fenceStart).count();
+
     systems_->profiler().endCpuZone("Wait:FenceSync");
 
     systems_->profiler().beginCpuZone("Wait:AcquireImage");
@@ -1263,6 +1289,13 @@ bool Renderer::render(const Camera& camera) {
 
     VkCommandBuffer cmd = commandBuffers[frame.frameIndex];
 
+    // Get reference to diagnostics for command counting
+    auto& cmdDiag = systems_->profiler().getQueueSubmitDiagnostics();
+
+    // Begin command capture if requested
+    auto& cmdCapture = systems_->profiler().getCommandCapture();
+    cmdCapture.beginFrame(systems_->profiler().getFrameNumber());
+
     // Begin GPU profiling frame
     systems_->profiler().beginGpuFrame(cmd, frame.frameIndex);
 
@@ -1301,7 +1334,10 @@ bool Renderer::render(const Camera& camera) {
         if (lastSunIntensity > 0.001f && perfToggles.shadowPass) {
             systems_->profiler().beginCpuZone("ShadowRecord");
             systems_->profiler().beginGpuZone(cmd, "ShadowPass");
+            cmdDiag.renderPassCount++;  // Shadow cascade render pass
+            cmdCapture.recordBeginRenderPass("ShadowSystem", "ShadowCascades");
             recordShadowPass(cmd, frame.frameIndex, frame.time, frame.cameraPosition);
+            cmdCapture.recordEndRenderPass("ShadowSystem");
             systems_->profiler().endGpuZone(cmd, "ShadowPass");
             systems_->profiler().endCpuZone("ShadowRecord");
         }
@@ -1316,18 +1352,23 @@ bool Renderer::render(const Camera& camera) {
         // Skip if water was not visible last frame (temporal culling) or disabled
         if (perfToggles.waterGBuffer &&
             systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
+            systems_->hasWaterTileCull() &&
             systems_->waterTileCull().wasWaterVisibleLastFrame(frame.frameIndex)) {
             systems_->profiler().beginGpuZone(cmd, "WaterGBuffer");
+            cmdDiag.renderPassCount++;  // Water G-buffer pass
             systems_->waterGBuffer().beginRenderPass(cmd);
 
             // Bind G-buffer pipeline and descriptor set
             vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, systems_->waterGBuffer().getPipeline());
+            cmdDiag.pipelineBindCount++;
             vk::DescriptorSet gbufferDescSet = systems_->waterGBuffer().getDescriptorSet(frame.frameIndex);
             vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                      systems_->waterGBuffer().getPipelineLayout(), 0, gbufferDescSet, {});
+            cmdDiag.descriptorSetBindCount++;
 
             // Draw water mesh
             systems_->water().recordMeshDraw(cmd);
+            cmdDiag.drawCallCount++;
 
             systems_->waterGBuffer().endRenderPass(cmd);
             systems_->profiler().endGpuZone(cmd, "WaterGBuffer");
@@ -1338,13 +1379,17 @@ bool Renderer::render(const Camera& camera) {
         // contains granular HDR:* sub-zones. Nesting would confuse the profiler.
         if (hdrPassEnabled) {
             systems_->profiler().beginCpuZone("RenderPassRecord");
+            cmdDiag.renderPassCount++;  // HDR main render pass
+            cmdCapture.recordBeginRenderPass("HDRPass", "MainScene");
             recordHDRPass(cmd, frame.frameIndex, frame.time);
+            cmdCapture.recordEndRenderPass("HDRPass");
             systems_->profiler().endCpuZone("RenderPassRecord");
 
             // Screen-Space Reflections compute pass (Phase 10)
             // Computes SSR for next frame's water - uses current scene for temporal stability
             if (perfToggles.ssr && systems_->ssr().isEnabled()) {
                 systems_->profiler().beginGpuZone(cmd, "SSR");
+                cmdDiag.dispatchCount++;  // SSR compute
                 systems_->ssr().recordCompute(cmd, frame.frameIndex,
                                         systems_->postProcess().getHDRColorView(),
                                         systems_->postProcess().getHDRDepthView(),
@@ -1355,8 +1400,10 @@ bool Renderer::render(const Camera& camera) {
 
             // Water tile culling compute pass (Phase 7)
             // Determines which screen tiles contain water for optimized rendering
-            if (perfToggles.waterTileCull && systems_->waterTileCull().isEnabled()) {
+            if (perfToggles.waterTileCull && systems_->hasWaterTileCull() &&
+                systems_->waterTileCull().isEnabled()) {
                 systems_->profiler().beginGpuZone(cmd, "WaterTileCull");
+                cmdDiag.dispatchCount++;  // Water tile cull compute
                 glm::mat4 viewProj = frame.projection * frame.view;
                 systems_->waterTileCull().recordTileCull(cmd, frame.frameIndex,
                                               viewProj, frame.cameraPosition,
@@ -1368,16 +1415,19 @@ bool Renderer::render(const Camera& camera) {
 
         // Hi-Z pyramid and Bloom via pipeline post stage
         if (renderPipeline.postStage.hiZRecordFn) {
+            cmdDiag.dispatchCount++;  // Hi-Z compute
             renderPipeline.postStage.hiZRecordFn(ctx);
         }
         // Only run bloom passes if bloom is enabled (skip for performance)
         if (systems_->postProcess().isBloomEnabled() && renderPipeline.postStage.bloomRecordFn) {
+            cmdDiag.dispatchCount += 2;  // Bloom downsample + upsample
             renderPipeline.postStage.bloomRecordFn(ctx);
         }
 
         // Bilateral grid for local tone mapping (if enabled)
         if (systems_->postProcess().isLocalToneMapEnabled()) {
             systems_->profiler().beginGpuZone(cmd, "BilateralGrid");
+            cmdDiag.dispatchCount++;  // Bilateral grid compute
             systems_->bilateralGrid().recordBilateralGrid(cmd, frame.frameIndex,
                                                            systems_->postProcess().getHDRColorView());
             systems_->profiler().endGpuZone(cmd, "BilateralGrid");
@@ -1386,12 +1436,17 @@ bool Renderer::render(const Camera& camera) {
         // Post-process pass (with optional GUI overlay callback)
         // Note: This is not in postStage because it needs framebuffer and guiRenderCallback
         systems_->profiler().beginGpuZone(cmd, "PostProcess");
+        cmdDiag.renderPassCount++;  // Post-process render pass
+        cmdDiag.drawCallCount++;    // Full-screen quad
         systems_->postProcess().recordPostProcess(cmd, frame.frameIndex, *framebuffers_[imageIndex], frame.deltaTime, guiRenderCallback);
         systems_->profiler().endGpuZone(cmd, "PostProcess");
     }
 
     // End GPU profiling frame
     systems_->profiler().endGpuFrame(cmd, frame.frameIndex);
+
+    // End command capture
+    cmdCapture.endFrame();
 
     vkCmd.end();
 
@@ -1411,7 +1466,12 @@ bool Renderer::render(const Camera& camera) {
         .setSignalSemaphores(signalSemaphores);
 
     try {
+        // Track queue submit time for diagnostics
+        auto submitStart = std::chrono::high_resolution_clock::now();
         vk::Queue(graphicsQueue).submit(submitInfo, frameSync_.currentFence());
+        auto submitEnd = std::chrono::high_resolution_clock::now();
+        systems_->profiler().getQueueSubmitDiagnostics().queueSubmitTimeMs =
+            std::chrono::duration<float, std::milli>(submitEnd - submitStart).count();
     } catch (const vk::DeviceLostError&) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Device lost during queue submit");
         systems_->profiler().endCpuZone("QueueSubmit");
@@ -1462,7 +1522,9 @@ bool Renderer::render(const Camera& camera) {
     systems_->leaf().advanceBufferSet();
 
     // Update water tile cull visibility tracking (uses absolute frame counter)
-    systems_->waterTileCull().endFrame(frameSync_.currentIndex());
+    if (systems_->hasWaterTileCull()) {
+        systems_->waterTileCull().endFrame(frameSync_.currentIndex());
+    }
 
     frameSync_.advance();
 
@@ -1507,19 +1569,19 @@ void Renderer::destroyFramebuffers() {
 bool Renderer::recreateDepthResources(VkExtent2D newExtent) {
     destroyDepthImageAndView();
 
-    VkImage rawImage = VK_NULL_HANDLE;
-    VmaAllocation rawAllocation = VK_NULL_HANDLE;
-    VkImageView rawView = VK_NULL_HANDLE;
+    vk::Extent2D extent{newExtent.width, newExtent.height};
+    VmaImage newImage;
+    std::optional<vk::raii::ImageView> newView;
 
     if (!::createDepthImageAndView(
-        vulkanContext_->getVkDevice(), vulkanContext_->getAllocator(),
-        newExtent, depthFormat,
-        rawImage, rawAllocation, rawView)) {
+        vulkanContext_->getRaiiDevice(), vulkanContext_->getAllocator(),
+        extent, static_cast<vk::Format>(depthFormat),
+        newImage, newView)) {
         return false;
     }
 
-    depthImage_ = ManagedImage::fromRaw(vulkanContext_->getAllocator(), rawImage, rawAllocation);
-    depthImageView_.emplace(vulkanContext_->getRaiiDevice(), rawView);
+    depthImage_ = std::move(newImage);
+    depthImageView_ = std::move(newView);
     return true;
 }
 
@@ -1863,7 +1925,8 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
     }
 
     // Render woodland detritus (fallen branches - uses its own descriptor sets)
-    if (systems_->detritus() && !detritusDescriptorSets.empty()) {
+    // Bounds check: frameIndex must be within range, not just non-empty
+    if (systems_->detritus() && frameIndex < detritusDescriptorSets.size()) {
         VkDescriptorSet detritusDescSet = detritusDescriptorSets[frameIndex];
         for (const auto& detritus : systems_->detritus()->getSceneObjects()) {
             renderObject(detritus, detritusDescSet);
@@ -1963,7 +2026,8 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
 
     // Draw water surface (after opaque geometry, blended)
     // Use temporal tile culling: skip if no tiles were visible last frame
-    if (systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
+    if (!systems_->hasWaterTileCull() ||
+        systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
         systems_->profiler().beginGpuZone(cmd, "HDR:Water");
         systems_->water().recordDraw(cmd, frameIndex);
         systems_->profiler().endGpuZone(cmd, "HDR:Water");
@@ -2086,7 +2150,8 @@ void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
         systems_->grass().recordDraw(cmd, frameIndex, grassTime);
         systems_->profiler().endGpuZone(cmd, "HDR:Grass");
 
-        if (systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
+        if (!systems_->hasWaterTileCull() ||
+            systems_->waterTileCull().wasWaterVisibleLastFrame(frameIndex)) {
             systems_->profiler().beginGpuZone(cmd, "HDR:Water");
             systems_->water().recordDraw(cmd, frameIndex);
             systems_->profiler().endGpuZone(cmd, "HDR:Water");
