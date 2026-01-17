@@ -54,9 +54,7 @@ void LookAtIKSolver::solve(
         }
 
         Joint& spineJoint = skeleton.joints[lookAt.spineBoneIndex];
-        glm::mat4 parentGlobal = lookAt.spineBoneIndex >= 0 && spineJoint.parentIndex >= 0
-            ? globalTransforms[spineJoint.parentIndex]
-            : glm::mat4(1.0f);
+        glm::mat4 parentGlobal = skeleton.getParentGlobalTransform(lookAt.spineBoneIndex, globalTransforms);
         applyBoneRotation(spineJoint, lookAt.currentSpineRotation, parentGlobal, 1.0f);
     }
 
@@ -73,9 +71,7 @@ void LookAtIKSolver::solve(
         }
 
         Joint& neckJoint = skeleton.joints[lookAt.neckBoneIndex];
-        glm::mat4 parentGlobal = neckJoint.parentIndex >= 0
-            ? globalTransforms[neckJoint.parentIndex]
-            : glm::mat4(1.0f);
+        glm::mat4 parentGlobal = skeleton.getParentGlobalTransform(lookAt.neckBoneIndex, globalTransforms);
         applyBoneRotation(neckJoint, lookAt.currentNeckRotation, parentGlobal, 1.0f);
     }
 
@@ -92,9 +88,7 @@ void LookAtIKSolver::solve(
         }
 
         Joint& headJoint = skeleton.joints[lookAt.headBoneIndex];
-        glm::mat4 parentGlobal = headJoint.parentIndex >= 0
-            ? globalTransforms[headJoint.parentIndex]
-            : glm::mat4(1.0f);
+        glm::mat4 parentGlobal = skeleton.getParentGlobalTransform(lookAt.headBoneIndex, globalTransforms);
         applyBoneRotation(headJoint, lookAt.currentHeadRotation, parentGlobal, 1.0f);
     }
 }
