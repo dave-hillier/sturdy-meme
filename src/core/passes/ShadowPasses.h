@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FrameGraph.h"
+#include <glm/glm.hpp>
 
 class RendererSystems;
 struct PerformanceToggles;
