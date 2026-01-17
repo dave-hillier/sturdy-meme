@@ -78,6 +78,8 @@ set(SOURCES
     src/core/material/MaterialRegistry.cpp
     src/core/asset/AssetRegistry.cpp
     src/core/RenderableBuilder.cpp
+    src/core/HierarchicalPose.cpp
+    src/core/PoseBlend.cpp
     # Atmosphere
     src/atmosphere/TimeSystem.cpp
     src/atmosphere/CelestialCalculator.cpp
