@@ -61,6 +61,16 @@ set(SOURCES
     src/core/vulkan/ThreadedCommandPool.cpp
     src/core/threading/TaskScheduler.cpp
     src/core/pipeline/FrameGraph.cpp
+    src/core/pipeline/FrameGraphBuilder.cpp
+    src/core/passes/ComputePasses.cpp
+    src/core/passes/ShadowPasses.cpp
+    src/core/passes/WaterPasses.cpp
+    src/core/passes/HDRPass.cpp
+    src/core/passes/PostPasses.cpp
+    src/core/FrameUpdater.cpp
+    src/core/updaters/VegetationUpdater.cpp
+    src/core/updaters/AtmosphereUpdater.cpp
+    src/core/updaters/EnvironmentUpdater.cpp
     src/core/LoadingRenderer.cpp
     src/core/loading/LoadJobQueue.cpp
     src/core/loading/AsyncStartupLoader.cpp

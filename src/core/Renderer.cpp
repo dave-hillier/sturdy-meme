@@ -11,6 +11,8 @@
 #include "Bindings.h"
 #include "InitProfiler.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/pipeline/FrameGraphBuilder.h"
+#include "core/FrameUpdater.h"
 
 // Subsystem includes for render loop
 // Core systems
@@ -217,288 +219,37 @@ void Renderer::syncPerformanceToggles() {
 }
 
 void Renderer::setupFrameGraph() {
-    // Clear any existing passes
-    frameGraph_.clear();
+    // Build callbacks for frame graph passes
+    FrameGraphBuilder::Callbacks callbacks;
+    callbacks.recordShadowPass = [this](VkCommandBuffer cmd, uint32_t frameIndex, float time, const glm::vec3& cameraPos) {
+        recordShadowPass(cmd, frameIndex, time, cameraPos);
+    };
+    callbacks.recordHDRPass = [this](VkCommandBuffer cmd, uint32_t frameIndex, float time) {
+        recordHDRPass(cmd, frameIndex, time);
+    };
+    callbacks.recordHDRPassWithSecondaries = [this](VkCommandBuffer cmd, uint32_t frameIndex, float time, const std::vector<vk::CommandBuffer>& secondaries) {
+        recordHDRPassWithSecondaries(cmd, frameIndex, time, secondaries);
+    };
+    callbacks.recordHDRPassSecondarySlot = [this](VkCommandBuffer cmd, uint32_t frameIndex, float time, uint32_t slot) {
+        recordHDRPassSecondarySlot(cmd, frameIndex, time, slot);
+    };
+    callbacks.guiRenderCallback = &guiRenderCallback;
 
-    // Capture state needed by pass lambdas
-    float* lastSunIntensity = &this->lastSunIntensity;
+    // Build state references for frame graph passes
+    FrameGraphBuilder::State state;
+    state.lastSunIntensity = &lastSunIntensity;
+    state.hdrPassEnabled = &hdrPassEnabled;
+    state.perfToggles = &perfToggles;
+    state.framebuffers = &framebuffers_;
 
-    // ===== PASS DEFINITIONS =====
-    // The frame graph organizes passes by dependencies, enabling parallel execution
-    // where possible. The dependency structure is:
-    //
-    //   ComputeStage ──┬──> ShadowPass ──┐
-    //                  ├──> Froxel ──────┼──> HDR ──┬──> SSR ─────────┐
-    //                  └──> WaterGBuffer ┘          ├──> WaterTileCull┼──> PostProcess
-    //                                               ├──> HiZ ──> Bloom┤
-    //                                               └──> BilateralGrid┘
-    //
-    // Shadow and Froxel can run in parallel after Compute completes.
-
-    // Compute pass - runs all GPU compute dispatches
-    auto compute = frameGraph_.addPass({
-        .name = "Compute",
-        .execute = [this](FrameGraph::RenderContext& ctx) {
-            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-            if (!renderCtx) return;
-            systems_->profiler().beginCpuZone("ComputeDispatch");
-            renderPipeline.computeStage.execute(*renderCtx);
-            systems_->profiler().endCpuZone("ComputeDispatch");
-        },
-        .canUseSecondary = false,
-        .mainThreadOnly = true,
-        .priority = 100  // Highest priority - runs first
-    });
-
-    // Shadow pass - renders shadow maps for cascaded shadows
-    auto shadow = frameGraph_.addPass({
-        .name = "Shadow",
-        .execute = [this, lastSunIntensity](FrameGraph::RenderContext& ctx) {
-            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-            if (!renderCtx) return;
-            if (*lastSunIntensity > 0.001f && perfToggles.shadowPass) {
-                systems_->profiler().beginCpuZone("ShadowRecord");
-                systems_->profiler().beginGpuZone(ctx.commandBuffer, "ShadowPass");
-                recordShadowPass(ctx.commandBuffer, ctx.frameIndex,
-                                renderCtx->frame.time, renderCtx->frame.cameraPosition);
-                systems_->profiler().endGpuZone(ctx.commandBuffer, "ShadowPass");
-                systems_->profiler().endCpuZone("ShadowRecord");
-            }
-        },
-        .canUseSecondary = false,
-        .mainThreadOnly = true,
-        .priority = 50
-    });
-
-    // Froxel/Atmosphere pass - volumetric fog and atmosphere LUTs
-    // Can run in parallel with Shadow since they don't share resources
-    auto froxel = frameGraph_.addPass({
-        .name = "Froxel",
-        .execute = [this](FrameGraph::RenderContext& ctx) {
-            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-            if (!renderCtx) return;
-            systems_->postProcess().setCameraPlanes(
-                renderCtx->frame.nearPlane, renderCtx->frame.farPlane);
-            if (renderPipeline.froxelStageFn && (perfToggles.froxelFog || perfToggles.atmosphereLUT)) {
-                renderPipeline.froxelStageFn(*renderCtx);
-            }
-        },
-        .canUseSecondary = false,
-        .mainThreadOnly = false,  // Can run parallel with Shadow
-        .priority = 50
-    });
-
-    // Water G-buffer pass - renders water to mini G-buffer
-    auto waterGBuffer = frameGraph_.addPass({
-        .name = "WaterGBuffer",
-        .execute = [this](FrameGraph::RenderContext& ctx) {
-            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-            vk::CommandBuffer vkCmd(ctx.commandBuffer);
-
-            if (perfToggles.waterGBuffer &&
-                systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
-                systems_->hasWaterTileCull() &&
-                systems_->waterTileCull().wasWaterVisibleLastFrame(ctx.frameIndex)) {
-                systems_->profiler().beginGpuZone(ctx.commandBuffer, "WaterGBuffer");
-                systems_->waterGBuffer().beginRenderPass(ctx.commandBuffer);
-
-                vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics,
-                                   systems_->waterGBuffer().getPipeline());
-                vk::DescriptorSet gbufferDescSet =
-                    systems_->waterGBuffer().getDescriptorSet(ctx.frameIndex);
-                vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                                        systems_->waterGBuffer().getPipelineLayout(),
-                                        0, gbufferDescSet, {});
-
-                systems_->water().recordMeshDraw(ctx.commandBuffer);
-                systems_->waterGBuffer().endRenderPass(ctx.commandBuffer);
-                systems_->profiler().endGpuZone(ctx.commandBuffer, "WaterGBuffer");
-            }
-        },
-        .canUseSecondary = false,
-        .mainThreadOnly = true,
-        .priority = 40
-    });
-
-    // HDR pass - main scene rendering with parallel secondary command buffers
-    // Slot 0: Sky + Terrain + Catmull-Clark (geometry base)
-    // Slot 1: Scene Objects + Skinned Character (scene meshes)
-    // Slot 2: Grass + Water + Leaves + Weather (vegetation/effects)
-    auto hdr = frameGraph_.addPass({
-        .name = "HDR",
-        .execute = [this](FrameGraph::RenderContext& ctx) {
-            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-            if (!renderCtx) return;
-            if (hdrPassEnabled) {
-                systems_->profiler().beginCpuZone("RenderPassRecord");
-                if (ctx.secondaryBuffers && !ctx.secondaryBuffers->empty()) {
-                    // Execute with pre-recorded secondary buffers (Phase 4 parallel path)
-                    recordHDRPassWithSecondaries(ctx.commandBuffer, ctx.frameIndex,
-                                                 renderCtx->frame.time, *ctx.secondaryBuffers);
-                } else {
-                    // Fallback to sequential recording
-                    recordHDRPass(ctx.commandBuffer, ctx.frameIndex, renderCtx->frame.time);
-                }
-                systems_->profiler().endCpuZone("RenderPassRecord");
-            }
-        },
-        .canUseSecondary = true,
-        .mainThreadOnly = true,  // Main thread begins render pass, but secondaries record in parallel
-        .priority = 30,
-        .secondarySlots = 3,  // 3 parallel recording slots
-        .secondaryRecord = [this](FrameGraph::RenderContext& ctx, uint32_t slot) {
-            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-            if (!renderCtx) return;
-            recordHDRPassSecondarySlot(ctx.commandBuffer, ctx.frameIndex,
-                                       renderCtx->frame.time, slot);
-        }
-    });
-
-    // SSR pass - screen-space reflections
-    auto ssr = frameGraph_.addPass({
-        .name = "SSR",
-        .execute = [this](FrameGraph::RenderContext& ctx) {
-            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-            if (!renderCtx) return;
-            if (hdrPassEnabled && perfToggles.ssr && systems_->ssr().isEnabled()) {
-                systems_->profiler().beginGpuZone(ctx.commandBuffer, "SSR");
-                systems_->ssr().recordCompute(ctx.commandBuffer, ctx.frameIndex,
-                                        systems_->postProcess().getHDRColorView(),
-                                        systems_->postProcess().getHDRDepthView(),
-                                        renderCtx->frame.view, renderCtx->frame.projection,
-                                        renderCtx->frame.cameraPosition);
-                systems_->profiler().endGpuZone(ctx.commandBuffer, "SSR");
-            }
-        },
-        .canUseSecondary = false,
-        .mainThreadOnly = true,
-        .priority = 20
-    });
-
-    // Water tile culling pass
-    auto waterTileCull = frameGraph_.addPass({
-        .name = "WaterTileCull",
-        .execute = [this](FrameGraph::RenderContext& ctx) {
-            if (!ctx.userData) return;
-            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-            if (hdrPassEnabled && perfToggles.waterTileCull && systems_->waterTileCull().isEnabled()) {
-                systems_->profiler().beginGpuZone(ctx.commandBuffer, "WaterTileCull");
-                glm::mat4 viewProj = renderCtx->frame.projection * renderCtx->frame.view;
-                systems_->waterTileCull().recordTileCull(ctx.commandBuffer, ctx.frameIndex,
-                                              viewProj, renderCtx->frame.cameraPosition,
-                                              systems_->water().getWaterLevel(),
-                                              systems_->postProcess().getHDRDepthView());
-                systems_->profiler().endGpuZone(ctx.commandBuffer, "WaterTileCull");
-            }
-        },
-        .canUseSecondary = false,
-        .mainThreadOnly = true,
-        .priority = 20
-    });
-
-    // Hi-Z pass - hierarchical Z-buffer generation
-    auto hiZ = frameGraph_.addPass({
-        .name = "HiZ",
-        .execute = [this](FrameGraph::RenderContext& ctx) {
-            if (renderPipeline.postStage.hiZRecordFn) {
-                RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-                if (!renderCtx) return;
-                renderPipeline.postStage.hiZRecordFn(*renderCtx);
-            }
-        },
-        .canUseSecondary = false,
-        .mainThreadOnly = true,
-        .priority = 15
-    });
-
-    // Bloom pass - multi-pass bloom effect
-    auto bloom = frameGraph_.addPass({
-        .name = "Bloom",
-        .execute = [this](FrameGraph::RenderContext& ctx) {
-            if (systems_->postProcess().isBloomEnabled() && renderPipeline.postStage.bloomRecordFn) {
-                RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-                if (!renderCtx) return;
-                renderPipeline.postStage.bloomRecordFn(*renderCtx);
-            }
-        },
-        .canUseSecondary = false,
-        .mainThreadOnly = true,
-        .priority = 10
-    });
-
-    // Bilateral grid pass - local tone mapping
-    auto bilateralGrid = frameGraph_.addPass({
-        .name = "BilateralGrid",
-        .execute = [this](FrameGraph::RenderContext& ctx) {
-            if (systems_->postProcess().isLocalToneMapEnabled()) {
-                systems_->profiler().beginGpuZone(ctx.commandBuffer, "BilateralGrid");
-                systems_->bilateralGrid().recordBilateralGrid(ctx.commandBuffer, ctx.frameIndex,
-                                                               systems_->postProcess().getHDRColorView());
-                systems_->profiler().endGpuZone(ctx.commandBuffer, "BilateralGrid");
-            }
-        },
-        .canUseSecondary = false,
-        .mainThreadOnly = true,
-        .priority = 10
-    });
-
-    // Post-process pass - final composite with tone mapping and GUI
-    auto postProcess = frameGraph_.addPass({
-        .name = "PostProcess",
-        .execute = [this](FrameGraph::RenderContext& ctx) {
-            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-            if (!renderCtx) return;
-            systems_->profiler().beginGpuZone(ctx.commandBuffer, "PostProcess");
-            systems_->postProcess().recordPostProcess(ctx.commandBuffer, ctx.frameIndex,
-                *framebuffers_[ctx.imageIndex], renderCtx->frame.deltaTime, guiRenderCallback);
-            systems_->profiler().endGpuZone(ctx.commandBuffer, "PostProcess");
-        },
-        .canUseSecondary = false,
-        .mainThreadOnly = true,
-        .priority = 0  // Lowest priority - runs last
-    });
-
-    // ===== DEPENDENCY DEFINITIONS =====
-    // Shadow depends on Compute (needs terrain compute results)
-    frameGraph_.addDependency(compute, shadow);
-
-    // Froxel depends on Compute (needs cloud shadow compute)
-    frameGraph_.addDependency(compute, froxel);
-
-    // Water G-buffer depends on Compute
-    frameGraph_.addDependency(compute, waterGBuffer);
-
-    // HDR depends on Shadow (needs shadow maps)
-    frameGraph_.addDependency(shadow, hdr);
-
-    // HDR depends on Froxel (needs volumetric fog data)
-    frameGraph_.addDependency(froxel, hdr);
-
-    // HDR depends on Water G-buffer (needs water depth)
-    frameGraph_.addDependency(waterGBuffer, hdr);
-
-    // SSR, WaterTileCull, HiZ, BilateralGrid all depend on HDR
-    frameGraph_.addDependency(hdr, ssr);
-    frameGraph_.addDependency(hdr, waterTileCull);
-    frameGraph_.addDependency(hdr, hiZ);
-    frameGraph_.addDependency(hdr, bilateralGrid);
-
-    // Bloom depends on HiZ (uses Hi-Z for optimization)
-    frameGraph_.addDependency(hiZ, bloom);
-
-    // PostProcess depends on all post-HDR passes
-    frameGraph_.addDependency(ssr, postProcess);
-    frameGraph_.addDependency(waterTileCull, postProcess);
-    frameGraph_.addDependency(bloom, postProcess);
-    frameGraph_.addDependency(bilateralGrid, postProcess);
-
-    // Compile the graph
-    if (!frameGraph_.compile()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to compile FrameGraph");
-        useFrameGraph = false;
-    } else {
-        SDL_Log("FrameGraph setup complete:\n%s", frameGraph_.debugString().c_str());
-    }
+    // Use FrameGraphBuilder to configure all passes and dependencies
+    useFrameGraph = FrameGraphBuilder::build(
+        frameGraph_,
+        *systems_,
+        renderPipeline,
+        callbacks,
+        state
+    );
 }
 
 // Note: initCoreVulkanResources(), initDescriptorInfrastructure(), initSubsystems(),
@@ -1085,200 +836,11 @@ bool Renderer::render(const Camera& camera) {
         systems_->debugLine().uploadLines();
     }
 
-    // Update subsystems (state mutations)
-    systems_->profiler().beginCpuZone("SystemUpdates");
-
-    // Wind system update
-    {
-        systems_->profiler().beginCpuZone("SystemUpdates:Wind");
-        systems_->wind().update(frame.deltaTime);
-        systems_->wind().updateUniforms(frame.frameIndex);
-        systems_->profiler().endCpuZone("SystemUpdates:Wind");
-    }
-
-    // Update tree renderer descriptor sets with current frame resources and textures
-    // Each update function internally tracks if it was already initialized and skips redundant updates
-    if (systems_->treeRenderer() && systems_->tree()) {
-        systems_->profiler().beginCpuZone("SystemUpdates:TreeDesc");
-        VkDescriptorBufferInfo windInfo = systems_->wind().getBufferInfo(frame.frameIndex);
-
-        // Update descriptor sets for each bark texture type
-        for (const auto& barkType : systems_->tree()->getBarkTextureTypes()) {
-            Texture* barkTex = systems_->tree()->getBarkTexture(barkType);
-            Texture* barkNormal = systems_->tree()->getBarkNormalMap(barkType);
-
-            systems_->treeRenderer()->updateBarkDescriptorSet(
-                frame.frameIndex,
-                barkType,
-                systems_->globalBuffers().uniformBuffers.buffers[frame.frameIndex],
-                windInfo.buffer,
-                systems_->shadow().getShadowImageView(),
-                systems_->shadow().getShadowSampler(),
-                barkTex->getImageView(),
-                barkNormal->getImageView(),
-                barkTex->getImageView(),  // roughness placeholder
-                barkTex->getImageView(),  // AO placeholder
-                barkTex->getSampler());
-        }
-
-        // Update descriptor sets for each leaf texture type
-        for (const auto& leafType : systems_->tree()->getLeafTextureTypes()) {
-            Texture* leafTex = systems_->tree()->getLeafTexture(leafType);
-
-            systems_->treeRenderer()->updateLeafDescriptorSet(
-                frame.frameIndex,
-                leafType,
-                systems_->globalBuffers().uniformBuffers.buffers[frame.frameIndex],
-                windInfo.buffer,
-                systems_->shadow().getShadowImageView(),
-                systems_->shadow().getShadowSampler(),
-                leafTex->getImageView(),
-                leafTex->getSampler(),
-                systems_->tree()->getLeafInstanceBuffer(),
-                systems_->tree()->getLeafInstanceBufferSize(),
-                systems_->globalBuffers().snowBuffers.buffers[frame.frameIndex]);
-        }
-
-        // Update culled leaf descriptor sets (for GPU culling path)
-        // Note: These may not initialize until leaf culling system is ready
-        for (const auto& leafType : systems_->tree()->getLeafTextureTypes()) {
-            Texture* leafTex = systems_->tree()->getLeafTexture(leafType);
-            if (leafTex) {
-                systems_->treeRenderer()->updateCulledLeafDescriptorSet(
-                    frame.frameIndex,
-                    leafType,
-                    systems_->globalBuffers().uniformBuffers.buffers[frame.frameIndex],
-                    windInfo.buffer,
-                    systems_->shadow().getShadowImageView(),
-                    systems_->shadow().getShadowSampler(),
-                    leafTex->getImageView(),
-                    leafTex->getSampler(),
-                    systems_->globalBuffers().snowBuffers.buffers[frame.frameIndex]);
-            }
-        }
-        systems_->profiler().endCpuZone("SystemUpdates:TreeDesc");
-    }
-
-    // Grass system update
-    {
-        systems_->profiler().beginCpuZone("SystemUpdates:Grass");
-        systems_->grass().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj,
-                                   frame.terrainSize, frame.heightScale, frame.time);
-        systems_->grass().updateDisplacementSources(frame.playerPosition, frame.playerCapsuleRadius, frame.deltaTime);
-        systems_->profiler().endCpuZone("SystemUpdates:Grass");
-    }
-
-    // Weather system update
-    {
-        systems_->profiler().beginCpuZone("SystemUpdates:Weather");
-        systems_->weather().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.deltaTime, frame.time, systems_->wind());
-        systems_->profiler().endCpuZone("SystemUpdates:Weather");
-    }
-
-    // Connect weather to terrain liquid effects (composable material system)
-    // Rain causes puddles and wet surfaces on terrain
-    {
-        float rainIntensity = systems_->weather().getIntensity();
-        uint32_t weatherType = systems_->weather().getWeatherType();
-        if (weatherType == 0 && rainIntensity > 0.0f) {
-            // Rain - enable terrain wetness
-            systems_->terrain().setLiquidWetness(rainIntensity);
-        } else if (weatherType == 0) {
-            // No rain - gradually dry out (handled by liquid system's natural state)
-            systems_->terrain().setLiquidWetness(0.0f);
-        }
-        // Note: Snow (type 1) doesn't cause wetness - it covers the ground instead
-    }
-
-    // Terrain system update
-    {
-        systems_->profiler().beginCpuZone("SystemUpdates:Terrain");
-        systems_->terrain().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.view, frame.projection,
-                                      systems_->volumetricSnow().getCascadeParams(), useVolumetricSnow, MAX_SNOW_HEIGHT);
-        systems_->profiler().endCpuZone("SystemUpdates:Terrain");
-    }
-
-    // Snow systems update (mask + volumetric)
-    {
-        systems_->profiler().beginCpuZone("SystemUpdates:Snow");
-        // Update snow mask system - accumulation/melting based on weather type
-        bool isSnowing = (systems_->weather().getWeatherType() == 1);  // 1 = snow
-        float weatherIntensity = systems_->weather().getIntensity();
-        auto& envSettings = systems_->environmentSettings();
-        // Auto-adjust snow amount based on weather state
-        if (isSnowing && weatherIntensity > 0.0f) {
-            envSettings.snowAmount = glm::min(envSettings.snowAmount + envSettings.snowAccumulationRate * frame.deltaTime, 1.0f);
-        } else if (envSettings.snowAmount > 0.0f) {
-            envSettings.snowAmount = glm::max(envSettings.snowAmount - envSettings.snowMeltRate * frame.deltaTime, 0.0f);
-        }
-        systems_->snowMask().setMaskCenter(frame.cameraPosition);
-        systems_->snowMask().updateUniforms(frame.frameIndex, frame.deltaTime, isSnowing, weatherIntensity, envSettings);
-
-        // Update volumetric snow system
-        systems_->volumetricSnow().setCameraPosition(frame.cameraPosition);
-        systems_->volumetricSnow().setWindDirection(glm::vec2(systems_->wind().getEnvironmentSettings().windDirection.x,
-                                                         systems_->wind().getEnvironmentSettings().windDirection.y));
-        systems_->volumetricSnow().setWindStrength(systems_->wind().getEnvironmentSettings().windStrength);
-        systems_->volumetricSnow().updateUniforms(frame.frameIndex, frame.deltaTime, isSnowing, weatherIntensity, envSettings);
-
-        // Add player footprint interaction with snow
-        if (envSettings.snowAmount > 0.1f) {
-            systems_->snowMask().addInteraction(frame.playerPosition, frame.playerCapsuleRadius * 1.5f, 0.3f);
-            systems_->volumetricSnow().addInteraction(frame.playerPosition, frame.playerCapsuleRadius * 1.5f, 0.3f);
-        }
-        systems_->profiler().endCpuZone("SystemUpdates:Snow");
-    }
-
-    // Leaf system update
-    {
-        systems_->profiler().beginCpuZone("SystemUpdates:Leaf");
-        systems_->leaf().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj, frame.cameraPosition, frame.playerVelocity, frame.deltaTime, frame.time,
-                                   frame.terrainSize, frame.heightScale);
-        systems_->profiler().endCpuZone("SystemUpdates:Leaf");
-    }
-
-    // Tree LOD system update
-    if (systems_->treeLOD() && systems_->tree()) {
-        systems_->profiler().beginCpuZone("SystemUpdates:TreeLOD");
-        // Enable GPU culling optimization when ImpostorCullSystem is available
-        // This skips expensive CPU impostor list building since GPU handles it
-        auto* impostorCull = systems_->impostorCull();
-        bool gpuCullingAvailable = impostorCull && impostorCull->getTreeCount() > 0;
-        systems_->treeLOD()->setGPUCullingEnabled(gpuCullingAvailable);
-
-        // Compute screen params for screen-space error LOD
-        TreeLODSystem::ScreenParams screenParams;
-        screenParams.screenHeight = static_cast<float>(extent.height);
-        // Extract tanHalfFOV from projection matrix: proj[1][1] = 1/tan(fov/2)
-        // Note: Vulkan Y-flip makes proj[1][1] negative, so use abs()
-        screenParams.tanHalfFOV = 1.0f / std::abs(frame.projection[1][1]);
-        systems_->treeLOD()->update(frame.deltaTime, frame.cameraPosition, *systems_->tree(), screenParams);
-        systems_->profiler().endCpuZone("SystemUpdates:TreeLOD");
-    }
-
-    // Water system update
-    {
-        systems_->profiler().beginCpuZone("SystemUpdates:Water");
-        systems_->water().updateUniforms(frame.frameIndex);
-
-        // Update underwater state for postprocess (Water Volume Renderer Phase 2)
-        auto underwaterParams = systems_->water().getUnderwaterParams(frame.cameraPosition);
-        systems_->postProcess().setUnderwaterState(
-            underwaterParams.isUnderwater,
-            underwaterParams.depth,
-            underwaterParams.absorptionCoeffs,
-            underwaterParams.turbidity,
-            underwaterParams.waterColor,
-            underwaterParams.waterLevel
-        );
-
-        // Update froxel system with underwater state for volumetric underwater fog
-        systems_->froxel().setWaterLevel(underwaterParams.waterLevel);
-        systems_->froxel().setUnderwaterEnabled(underwaterParams.isUnderwater);
-        systems_->profiler().endCpuZone("SystemUpdates:Water");
-    }
-
-    systems_->profiler().endCpuZone("SystemUpdates");
+    // Update all subsystems (wind, grass, weather, terrain, snow, trees, water, etc.)
+    FrameUpdater::SnowConfig snowConfig;
+    snowConfig.maxSnowHeight = MAX_SNOW_HEIGHT;
+    snowConfig.useVolumetricSnow = useVolumetricSnow;
+    FrameUpdater::updateAllSystems(*systems_, frame, extent, snowConfig);
 
     // Begin command buffer recording
     systems_->profiler().beginCpuZone("CmdBufferRecord");
