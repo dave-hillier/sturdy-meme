@@ -362,144 +362,53 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         }
     }
 
-    // Update rock descriptor sets now that rock textures are loaded
-    {
-        MaterialDescriptorFactory factory(device);
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            MaterialDescriptorFactory::CommonBindings common{};
-            common.uniformBuffer = systems_->globalBuffers().uniformBuffers.buffers[i];
-            common.uniformBufferSize = sizeof(UniformBufferObject);
-            common.shadowMapView = systems_->shadow().getShadowImageView();
-            common.shadowMapSampler = systems_->shadow().getShadowSampler();
-            common.lightBuffer = systems_->globalBuffers().lightBuffers.buffers[i];
-            common.lightBufferSize = sizeof(LightBuffer);
-            common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getImageView();
-            common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getSampler();
-            common.pointShadowView = systems_->shadow().getPointShadowArrayView(i);
-            common.pointShadowSampler = systems_->shadow().getPointShadowSampler();
-            common.spotShadowView = systems_->shadow().getSpotShadowArrayView(i);
-            common.spotShadowSampler = systems_->shadow().getSpotShadowSampler();
-            common.snowMaskView = systems_->snowMask().getSnowMaskView();
-            common.snowMaskSampler = systems_->snowMask().getSnowMaskSampler();
-            // Placeholder texture for unused PBR bindings (13-16)
-            common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture()->getImageView();
-            common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture()->getSampler();
+    // Helper lambda to get common bindings for a frame
+    auto getCommonBindings = [this](uint32_t frameIndex) -> MaterialDescriptorFactory::CommonBindings {
+        MaterialDescriptorFactory::CommonBindings common{};
+        common.uniformBuffer = systems_->globalBuffers().uniformBuffers.buffers[frameIndex];
+        common.uniformBufferSize = sizeof(UniformBufferObject);
+        common.shadowMapView = systems_->shadow().getShadowImageView();
+        common.shadowMapSampler = systems_->shadow().getShadowSampler();
+        common.lightBuffer = systems_->globalBuffers().lightBuffers.buffers[frameIndex];
+        common.lightBufferSize = sizeof(LightBuffer);
+        common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getImageView();
+        common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getSampler();
+        common.pointShadowView = systems_->shadow().getPointShadowArrayView(frameIndex);
+        common.pointShadowSampler = systems_->shadow().getPointShadowSampler();
+        common.spotShadowView = systems_->shadow().getSpotShadowArrayView(frameIndex);
+        common.spotShadowSampler = systems_->shadow().getSpotShadowSampler();
+        common.snowMaskView = systems_->snowMask().getSnowMaskView();
+        common.snowMaskSampler = systems_->snowMask().getSnowMaskSampler();
+        common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture()->getImageView();
+        common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture()->getSampler();
+        return common;
+    };
 
-            MaterialDescriptorFactory::MaterialTextures mat{};
-            mat.diffuseView = systems_->rock().getRockTexture().getImageView();
-            mat.diffuseSampler = systems_->rock().getRockTexture().getSampler();
-            mat.normalView = systems_->rock().getRockNormalMap().getImageView();
-            mat.normalSampler = systems_->rock().getRockNormalMap().getSampler();
-            factory.writeDescriptorSet(rockDescriptorSets[i], common, mat);
-        }
+    // Create rock descriptor sets (RockSystem owns them)
+    if (!systems_->rock().createDescriptorSets(
+            device,
+            *descriptorManagerPool,
+            **descriptorSetLayout_,
+            MAX_FRAMES_IN_FLIGHT,
+            getCommonBindings)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create RockSystem descriptor sets");
+        return false;
     }
 
-    // Update detritus descriptor sets now that detritus textures are loaded
+    // Create detritus descriptor sets (DetritusSystem owns them)
     if (systems_->detritus()) {
-        MaterialDescriptorFactory factory(device);
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            MaterialDescriptorFactory::CommonBindings common{};
-            common.uniformBuffer = systems_->globalBuffers().uniformBuffers.buffers[i];
-            common.uniformBufferSize = sizeof(UniformBufferObject);
-            common.shadowMapView = systems_->shadow().getShadowImageView();
-            common.shadowMapSampler = systems_->shadow().getShadowSampler();
-            common.lightBuffer = systems_->globalBuffers().lightBuffers.buffers[i];
-            common.lightBufferSize = sizeof(LightBuffer);
-            common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getImageView();
-            common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getSampler();
-            common.pointShadowView = systems_->shadow().getPointShadowArrayView(i);
-            common.pointShadowSampler = systems_->shadow().getPointShadowSampler();
-            common.spotShadowView = systems_->shadow().getSpotShadowArrayView(i);
-            common.spotShadowSampler = systems_->shadow().getSpotShadowSampler();
-            common.snowMaskView = systems_->snowMask().getSnowMaskView();
-            common.snowMaskSampler = systems_->snowMask().getSnowMaskSampler();
-            common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture()->getImageView();
-            common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture()->getSampler();
-
-            MaterialDescriptorFactory::MaterialTextures mat{};
-            mat.diffuseView = systems_->detritus()->getBarkTexture().getImageView();
-            mat.diffuseSampler = systems_->detritus()->getBarkTexture().getSampler();
-            mat.normalView = systems_->detritus()->getBarkNormalMap().getImageView();
-            mat.normalSampler = systems_->detritus()->getBarkNormalMap().getSampler();
-            factory.writeDescriptorSet(detritusDescriptorSets[i], common, mat);
+        if (!systems_->detritus()->createDescriptorSets(
+                device,
+                *descriptorManagerPool,
+                **descriptorSetLayout_,
+                MAX_FRAMES_IN_FLIGHT,
+                getCommonBindings)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create DetritusSystem descriptor sets");
+            return false;
         }
     }
 
-    // Allocate and update tree descriptor sets for all texture types (string-based maps)
-    if (systems_->tree()) {
-        MaterialDescriptorFactory factory(device);
-
-        // Allocate descriptor sets for each bark type
-        for (const auto& typeName : systems_->tree()->getBarkTextureTypes()) {
-            auto sets = descriptorManagerPool->allocate(**descriptorSetLayout_, MAX_FRAMES_IN_FLIGHT);
-            if (sets.empty()) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate bark descriptor sets for type: %s", typeName.c_str());
-                return false;
-            }
-            treeBarkDescriptorSets[typeName] = std::move(sets);
-        }
-
-        // Allocate descriptor sets for each leaf type
-        for (const auto& typeName : systems_->tree()->getLeafTextureTypes()) {
-            auto sets = descriptorManagerPool->allocate(**descriptorSetLayout_, MAX_FRAMES_IN_FLIGHT);
-            if (sets.empty()) {
-                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate leaf descriptor sets for type: %s", typeName.c_str());
-                return false;
-            }
-            treeLeafDescriptorSets[typeName] = std::move(sets);
-        }
-
-        // Write descriptor sets for each frame
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            MaterialDescriptorFactory::CommonBindings common{};
-            common.uniformBuffer = systems_->globalBuffers().uniformBuffers.buffers[i];
-            common.uniformBufferSize = sizeof(UniformBufferObject);
-            common.shadowMapView = systems_->shadow().getShadowImageView();
-            common.shadowMapSampler = systems_->shadow().getShadowSampler();
-            common.lightBuffer = systems_->globalBuffers().lightBuffers.buffers[i];
-            common.lightBufferSize = sizeof(LightBuffer);
-            common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getImageView();
-            common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getSampler();
-            common.pointShadowView = systems_->shadow().getPointShadowArrayView(i);
-            common.pointShadowSampler = systems_->shadow().getPointShadowSampler();
-            common.spotShadowView = systems_->shadow().getSpotShadowArrayView(i);
-            common.spotShadowSampler = systems_->shadow().getSpotShadowSampler();
-            common.snowMaskView = systems_->snowMask().getSnowMaskView();
-            common.snowMaskSampler = systems_->snowMask().getSnowMaskSampler();
-            common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture()->getImageView();
-            common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture()->getSampler();
-            // Wind buffer for vegetation animation
-            common.windBuffer = windBuffers[i];
-            common.windBufferSize = 32;  // sizeof(WindUBO): 2 x vec4
-
-            // Write descriptor sets for each bark type
-            for (const auto& typeName : systems_->tree()->getBarkTextureTypes()) {
-                Texture* barkTex = systems_->tree()->getBarkTexture(typeName);
-                Texture* barkNormal = systems_->tree()->getBarkNormalMap(typeName);
-
-                MaterialDescriptorFactory::MaterialTextures branchMat{};
-                branchMat.diffuseView = barkTex->getImageView();
-                branchMat.diffuseSampler = barkTex->getSampler();
-                branchMat.normalView = barkNormal->getImageView();
-                branchMat.normalSampler = barkNormal->getSampler();
-                factory.writeDescriptorSet(treeBarkDescriptorSets[typeName][i], common, branchMat);
-            }
-
-            // Write descriptor sets for each leaf type
-            for (const auto& typeName : systems_->tree()->getLeafTextureTypes()) {
-                Texture* leafTex = systems_->tree()->getLeafTexture(typeName);
-                // Use oak bark normal as placeholder for leaves
-                Texture* barkNormal = systems_->tree()->getBarkNormalMap("oak");
-
-                MaterialDescriptorFactory::MaterialTextures leafMat{};
-                leafMat.diffuseView = leafTex->getImageView();
-                leafMat.diffuseSampler = leafTex->getSampler();
-                leafMat.normalView = barkNormal->getImageView();
-                leafMat.normalSampler = barkNormal->getSampler();
-                factory.writeDescriptorSet(treeLeafDescriptorSets[typeName][i], common, leafMat);
-            }
-        }
-    }
+    // Note: Tree descriptor sets are managed internally by TreeRenderer
 
     // Connect leaf system to environment settings
     systems_->leaf().setEnvironmentSettings(envSettings);
@@ -579,8 +488,9 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
     // Update cloud shadow bindings across all descriptor sets
     RendererInit::updateCloudShadowBindings(device, systems_->scene().getSceneBuilder().getMaterialRegistry(),
-                                            rockDescriptorSets, detritusDescriptorSets, systems_->skinnedMesh(),
-                                            systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler());
+                                            systems_->rock(), systems_->detritus(), systems_->skinnedMesh(),
+                                            systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler(),
+                                            MAX_FRAMES_IN_FLIGHT);
 
     // Initialize Catmull-Clark subdivision system via factory
     float suzanneX = 5.0f, suzanneZ = -5.0f;

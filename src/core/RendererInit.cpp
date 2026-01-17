@@ -24,6 +24,8 @@
 #include "ShadowSystem.h"
 #include "MaterialRegistry.h"
 #include "SkinnedMeshRenderer.h"
+#include "RockSystem.h"
+#include "DetritusSystem.h"
 
 #include <SDL3/SDL.h>
 
@@ -202,22 +204,27 @@ bool RendererInit::createWaterDescriptorSets(
 void RendererInit::updateCloudShadowBindings(
     VkDevice device,
     MaterialRegistry& materialRegistry,
-    const std::vector<VkDescriptorSet>& rockDescriptorSets,
-    const std::vector<VkDescriptorSet>& detritusDescriptorSets,
+    RockSystem& rockSystem,
+    DetritusSystem* detritusSystem,
     SkinnedMeshRenderer& skinnedMeshRenderer,
     VkImageView cloudShadowView,
-    VkSampler cloudShadowSampler
+    VkSampler cloudShadowSampler,
+    uint32_t frameCount
 ) {
     // Update MaterialRegistry-managed descriptor sets
     materialRegistry.updateCloudShadowBinding(device, cloudShadowView, cloudShadowSampler);
 
-    // Update descriptor sets not managed by MaterialRegistry (rocks, detritus, skinned)
+    // Update descriptor sets owned by systems (rocks, detritus)
     MaterialDescriptorFactory factory(device);
-    for (auto set : rockDescriptorSets) {
-        factory.updateCloudShadowBinding(set, cloudShadowView, cloudShadowSampler);
+    if (rockSystem.hasDescriptorSets()) {
+        for (uint32_t i = 0; i < frameCount; i++) {
+            factory.updateCloudShadowBinding(rockSystem.getDescriptorSet(i), cloudShadowView, cloudShadowSampler);
+        }
     }
-    for (auto set : detritusDescriptorSets) {
-        factory.updateCloudShadowBinding(set, cloudShadowView, cloudShadowSampler);
+    if (detritusSystem && detritusSystem->hasDescriptorSets()) {
+        for (uint32_t i = 0; i < frameCount; i++) {
+            factory.updateCloudShadowBinding(detritusSystem->getDescriptorSet(i), cloudShadowView, cloudShadowSampler);
+        }
     }
 
     // Update skinned mesh renderer cloud shadow binding

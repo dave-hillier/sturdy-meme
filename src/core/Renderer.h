@@ -319,17 +319,6 @@ private:
     // Centralized asset management
     AssetRegistry assetRegistry_;
 
-    // Rock descriptor sets (RockSystem has its own textures, not in MaterialRegistry)
-    std::vector<VkDescriptorSet> rockDescriptorSets;
-
-    // Detritus descriptor sets (DetritusSystem has its own bark textures)
-    std::vector<VkDescriptorSet> detritusDescriptorSets;
-
-    // Tree descriptor sets per texture type (keyed by type name string)
-    // Each map has entries for each frame: map[typeName][frameIndex]
-    std::unordered_map<std::string, std::vector<VkDescriptorSet>> treeBarkDescriptorSets;
-    std::unordered_map<std::string, std::vector<VkDescriptorSet>> treeLeafDescriptorSets;
-
     // Convenience accessor for frame count (matches TripleBuffering::DEFAULT_FRAME_COUNT)
     static constexpr int MAX_FRAMES_IN_FLIGHT = TripleBuffering::DEFAULT_FRAME_COUNT;
 

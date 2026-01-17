@@ -28,6 +28,8 @@ class MaterialRegistry;
 class SkinnedMeshRenderer;
 class RendererSystems;
 class PostProcessSystem;
+class RockSystem;
+class DetritusSystem;
 struct TerrainConfig;
 
 /**
@@ -128,10 +130,11 @@ public:
     static void updateCloudShadowBindings(
         VkDevice device,
         MaterialRegistry& materialRegistry,
-        const std::vector<VkDescriptorSet>& rockDescriptorSets,
-        const std::vector<VkDescriptorSet>& detritusDescriptorSets,
+        RockSystem& rockSystem,
+        DetritusSystem* detritusSystem,
         SkinnedMeshRenderer& skinnedMeshRenderer,
         VkImageView cloudShadowView,
-        VkSampler cloudShadowSampler
+        VkSampler cloudShadowSampler,
+        uint32_t frameCount
     );
 };

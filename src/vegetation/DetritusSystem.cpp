@@ -238,3 +238,35 @@ void DetritusSystem::createSceneObjects() {
     // pitch to lay branches flat on the ground
     material_.rebuildSceneObjects();
 }
+
+bool DetritusSystem::createDescriptorSets(
+    VkDevice device,
+    DescriptorManager::Pool& pool,
+    VkDescriptorSetLayout layout,
+    uint32_t frameCount,
+    std::function<MaterialDescriptorFactory::CommonBindings(uint32_t)> getCommonBindings)
+{
+    // Allocate descriptor sets
+    descriptorSets_ = pool.allocate(layout, frameCount);
+    if (descriptorSets_.empty()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DetritusSystem: Failed to allocate descriptor sets");
+        return false;
+    }
+
+    // Write descriptor sets
+    MaterialDescriptorFactory factory(device);
+    for (uint32_t i = 0; i < frameCount; i++) {
+        MaterialDescriptorFactory::CommonBindings common = getCommonBindings(i);
+
+        MaterialDescriptorFactory::MaterialTextures mat{};
+        mat.diffuseView = getBarkTexture().getImageView();
+        mat.diffuseSampler = getBarkTexture().getSampler();
+        mat.normalView = getBarkNormalMap().getImageView();
+        mat.normalSampler = getBarkNormalMap().getSampler();
+
+        factory.writeDescriptorSet(descriptorSets_[i], common, mat);
+    }
+
+    SDL_Log("DetritusSystem: Created %u descriptor sets", frameCount);
+    return true;
+}

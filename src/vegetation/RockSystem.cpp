@@ -218,3 +218,35 @@ void RockSystem::createSceneObjects() {
         return tiltedTransform;
     });
 }
+
+bool RockSystem::createDescriptorSets(
+    VkDevice device,
+    DescriptorManager::Pool& pool,
+    VkDescriptorSetLayout layout,
+    uint32_t frameCount,
+    std::function<MaterialDescriptorFactory::CommonBindings(uint32_t)> getCommonBindings)
+{
+    // Allocate descriptor sets
+    descriptorSets_ = pool.allocate(layout, frameCount);
+    if (descriptorSets_.empty()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "RockSystem: Failed to allocate descriptor sets");
+        return false;
+    }
+
+    // Write descriptor sets
+    MaterialDescriptorFactory factory(device);
+    for (uint32_t i = 0; i < frameCount; i++) {
+        MaterialDescriptorFactory::CommonBindings common = getCommonBindings(i);
+
+        MaterialDescriptorFactory::MaterialTextures mat{};
+        mat.diffuseView = getRockTexture().getImageView();
+        mat.diffuseSampler = getRockTexture().getSampler();
+        mat.normalView = getRockNormalMap().getImageView();
+        mat.normalSampler = getRockNormalMap().getSampler();
+
+        factory.writeDescriptorSet(descriptorSets_[i], common, mat);
+    }
+
+    SDL_Log("RockSystem: Created %u descriptor sets", frameCount);
+    return true;
+}

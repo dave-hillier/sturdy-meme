@@ -14,6 +14,8 @@
 #include "scene/SceneMaterial.h"
 #include "scene/SceneObjectInstance.h"
 #include "scene/DeterministicRandom.h"
+#include "core/material/MaterialDescriptorFactory.h"
+#include "DescriptorManager.h"
 #include <optional>
 
 // Configuration for rock generation and placement
@@ -86,6 +88,20 @@ public:
     // Get rock meshes for physics collision shapes
     const std::vector<Mesh>& getRockMeshes() const { return material_.getMeshes(); }
 
+    // Descriptor set management - RockSystem owns its descriptor sets
+    bool createDescriptorSets(
+        VkDevice device,
+        DescriptorManager::Pool& pool,
+        VkDescriptorSetLayout layout,
+        uint32_t frameCount,
+        std::function<MaterialDescriptorFactory::CommonBindings(uint32_t)> getCommonBindings);
+
+    VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const {
+        return (frameIndex < descriptorSets_.size()) ? descriptorSets_[frameIndex] : VK_NULL_HANDLE;
+    }
+
+    bool hasDescriptorSets() const { return !descriptorSets_.empty(); }
+
 private:
     bool initInternal(const InitInfo& info, const RockConfig& config);
     void cleanup();
@@ -98,4 +114,7 @@ private:
 
     // Scene material (composition pattern)
     SceneMaterial material_;
+
+    // Descriptor sets for rock rendering (one per frame in flight)
+    std::vector<VkDescriptorSet> descriptorSets_;
 };

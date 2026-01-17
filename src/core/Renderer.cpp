@@ -633,23 +633,8 @@ bool Renderer::createDescriptorSets() {
         return false;
     }
 
-    // Rock descriptor sets (RockSystem has its own textures, not in MaterialRegistry)
-    // Note: rockSystem is not initialized at this point - allocation only, writing done in initPhase2
-    rockDescriptorSets = descriptorManagerPool->allocate(**descriptorSetLayout_, MAX_FRAMES_IN_FLIGHT);
-    if (rockDescriptorSets.empty()) {
-        SDL_Log("Failed to allocate rock descriptor sets");
-        return false;
-    }
-
-    // Detritus descriptor sets (fallen branches - allocation only, writing done in initPhase2)
-    detritusDescriptorSets = descriptorManagerPool->allocate(**descriptorSetLayout_, MAX_FRAMES_IN_FLIGHT);
-    if (detritusDescriptorSets.empty()) {
-        SDL_Log("Failed to allocate detritus descriptor sets");
-        return false;
-    }
-
-    // Tree descriptor sets - allocation deferred to initPhase2 when TreeSystem is available
-    // Will allocate per texture type using string-based maps
+    // Rock and Detritus descriptor sets are now owned by their respective systems
+    // They are created in initPhase2 when the systems are initialized
 
     return true;
 }
@@ -1509,16 +1494,17 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
         renderObject(obj, currentDescSet);
     }
 
-    // Render procedural rocks (RockSystem uses its own descriptor sets)
-    VkDescriptorSet rockDescSet = rockDescriptorSets[frameIndex];
-    for (const auto& rock : systems_->rock().getSceneObjects()) {
-        renderObject(rock, rockDescSet);
+    // Render procedural rocks (RockSystem owns its own descriptor sets)
+    if (systems_->rock().hasDescriptorSets()) {
+        VkDescriptorSet rockDescSet = systems_->rock().getDescriptorSet(frameIndex);
+        for (const auto& rock : systems_->rock().getSceneObjects()) {
+            renderObject(rock, rockDescSet);
+        }
     }
 
-    // Render woodland detritus (fallen branches - uses its own descriptor sets)
-    // Bounds check: frameIndex must be within range, not just non-empty
-    if (systems_->detritus() && frameIndex < detritusDescriptorSets.size()) {
-        VkDescriptorSet detritusDescSet = detritusDescriptorSets[frameIndex];
+    // Render woodland detritus (DetritusSystem owns its own descriptor sets)
+    if (systems_->detritus() && systems_->detritus()->hasDescriptorSets()) {
+        VkDescriptorSet detritusDescSet = systems_->detritus()->getDescriptorSet(frameIndex);
         for (const auto& detritus : systems_->detritus()->getSceneObjects()) {
             renderObject(detritus, detritusDescSet);
         }
