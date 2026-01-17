@@ -105,4 +105,4 @@ private:
 - [x] Step 6: Move debug visualization (updateRoadRiverVisualization moved to DebugControlSubsystem)
 - [ ] Step 7: Move Hi-Z object data (deferred - would require adding scene/rock dependencies to HiZSystem)
 - [ ] Step 8: Cleanup legacy pipeline
-- [x] Step 9: Remove interface accessors (26 delegate methods removed)
+- [x] Step 9: Remove interface accessors (26 interface + 8 cloud/sky delegate methods removed)
