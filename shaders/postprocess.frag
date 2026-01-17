@@ -59,6 +59,7 @@ layout(binding = BINDING_PP_DEPTH) uniform sampler2D depthInput;
 layout(binding = BINDING_PP_FROXEL) uniform sampler3D froxelVolume;
 layout(binding = BINDING_PP_BLOOM) uniform sampler2D bloomTexture;
 layout(binding = BINDING_PP_BILATERAL_GRID) uniform sampler3D bilateralGrid;
+layout(binding = BINDING_PP_GODRAYS) uniform sampler2D godRaysTexture; // Quarter-res god rays
 
 layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
@@ -669,11 +670,12 @@ void main() {
         bloom = texture(bloomTexture, fragTexCoord).rgb;
     }
 
-    // Compute god rays (Phase 4.4)
-    // Only compute if enabled and intensity > 0
+    // Sample god rays from quarter-resolution compute texture (Phase 4.4 optimization)
+    // The god rays are pre-computed at 1/4 resolution and bilinearly upsampled here
     vec3 godRays = vec3(0.0);
     if (ubo.godRaysEnabled > 0.5 && ubo.godRayIntensity > 0.0) {
-        godRays = computeGodRays(fragTexCoord, ubo.sunScreenPos);
+        // Sample from quarter-res texture (hardware bilinear upscale)
+        godRays = texture(godRaysTexture, fragTexCoord).rgb;
     }
 
     // Combine HDR with bloom and god rays

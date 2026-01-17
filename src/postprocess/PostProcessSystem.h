@@ -168,6 +168,8 @@ public:
 
     // Local tone mapping (bilateral grid) - Ghost of Tsushima technique
     void setBilateralGrid(VkImageView gridView, VkSampler gridSampler);
+    // Quarter-resolution god rays texture (compute-based optimization)
+    void setGodRaysTexture(VkImageView godRaysView, VkSampler godRaysSampler);
     void setLocalToneMapEnabled(bool enabled) override { localToneMapEnabled = enabled; }
     bool isLocalToneMapEnabled() const override { return localToneMapEnabled; }
     void setLocalToneMapContrast(float c) override { localToneMapContrast = glm::clamp(c, 0.0f, 1.0f); }
@@ -328,6 +330,10 @@ private:
     VkImageView bilateralGridView = VK_NULL_HANDLE;
     VkSampler bilateralGridSampler = VK_NULL_HANDLE;
     bool localToneMapEnabled = false;  // Disabled by default
+
+    // Quarter-resolution god rays (compute optimization)
+    VkImageView godRaysView_ = VK_NULL_HANDLE;
+    VkSampler godRaysSampler_ = VK_NULL_HANDLE;
     float localToneMapContrast = 0.5f; // 0=none, 0.5=typical, 1.0=flat
     float localToneMapDetail = 1.0f;   // 1.0=neutral, 1.5=punchy
     float bilateralBlend = 0.4f;       // GOT used 40% bilateral, 60% gaussian

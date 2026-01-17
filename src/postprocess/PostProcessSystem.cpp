@@ -313,6 +313,7 @@ bool PostProcessSystem::createDescriptorSetLayout() {
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: froxel
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 4: bloom
         .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: bilateral grid
+        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 6: god rays (quarter-res)
         .build();
 
     if (compositeDescriptorSetLayout == VK_NULL_HANDLE) {
@@ -361,11 +362,28 @@ bool PostProcessSystem::createDescriptorSets() {
             .writeBuffer(1, uniformBuffers.buffers[i], 0, sizeof(PostProcessUniforms))
             .writeImage(2, hdrDepthView, **hdrSampler_, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 
+        // Write placeholder for optional textures (use HDR color as fallback)
+        // These will be replaced when the actual systems are connected
         if (froxelVolumeView != VK_NULL_HANDLE && froxelSampler != VK_NULL_HANDLE) {
             writer.writeImage(3, froxelVolumeView, froxelSampler);
+        } else {
+            writer.writeImage(3, hdrColorView, **hdrSampler_);  // Placeholder for froxel
         }
         if (bloomView != VK_NULL_HANDLE && bloomSampler != VK_NULL_HANDLE) {
             writer.writeImage(4, bloomView, bloomSampler);
+        } else {
+            writer.writeImage(4, hdrColorView, **hdrSampler_);  // Placeholder for bloom
+        }
+        // Note: bilateral grid (binding 5) is sampler3D - must be set by setBilateralGrid()
+        // with a valid 3D texture before use. Skip placeholder as 2D/3D mismatch causes errors.
+        if (bilateralGridView != VK_NULL_HANDLE && bilateralGridSampler != VK_NULL_HANDLE) {
+            writer.writeImage(5, bilateralGridView, bilateralGridSampler);
+        }
+        // God rays (binding 6) is sampler2D - use HDR color as safe placeholder
+        if (godRaysView_ != VK_NULL_HANDLE && godRaysSampler_ != VK_NULL_HANDLE) {
+            writer.writeImage(6, godRaysView_, godRaysSampler_);
+        } else {
+            writer.writeImage(6, hdrColorView, **hdrSampler_);  // Placeholder for god rays (black = no rays)
         }
 
         writer.update();
@@ -957,6 +975,18 @@ void PostProcessSystem::setBilateralGrid(VkImageView gridView, VkSampler gridSam
     for (size_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, compositeDescriptorSets[i])
             .writeImage(5, gridView, gridSampler)
+            .update();
+    }
+}
+
+void PostProcessSystem::setGodRaysTexture(VkImageView godRaysView, VkSampler godRaysSampler) {
+    this->godRaysView_ = godRaysView;
+    this->godRaysSampler_ = godRaysSampler;
+
+    // Update descriptor sets with the quarter-res god rays texture
+    for (size_t i = 0; i < framesInFlight; i++) {
+        DescriptorManager::SetWriter(device, compositeDescriptorSets[i])
+            .writeImage(6, godRaysView, godRaysSampler)
             .update();
     }
 }

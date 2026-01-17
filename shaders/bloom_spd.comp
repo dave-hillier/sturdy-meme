@@ -1,0 +1,231 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_quad : require
+#extension GL_KHR_shader_subgroup_shuffle : require
+
+#include "bindings.glsl"
+
+// Single Pass Downsampler (SPD) for Bloom
+// Generates all 6 mip levels in a single dispatch using shared memory and subgroup ops
+// Based on AMD FidelityFX SPD technique
+//
+// Performance: Eliminates 11 render passes, generates entire mip chain in one dispatch
+// Each 256-thread workgroup processes a 64x64 tile through all mip levels
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Input HDR image
+layout(binding = 0) uniform sampler2D srcTexture;
+
+// Output mip levels as storage images
+layout(binding = 1, rgba16f) uniform writeonly image2D dstMip0;  // Half-res
+layout(binding = 2, rgba16f) uniform writeonly image2D dstMip1;
+layout(binding = 3, rgba16f) uniform writeonly image2D dstMip2;
+layout(binding = 4, rgba16f) uniform writeonly image2D dstMip3;
+layout(binding = 5, rgba16f) uniform writeonly image2D dstMip4;
+layout(binding = 6, rgba16f) uniform image2D dstMip5;  // Read-write for global reduce
+
+// Global atomic counter for synchronization between workgroups
+layout(binding = 7, std430) buffer GlobalCounter {
+    uint workgroupCount;
+};
+
+layout(push_constant) uniform PushConstants {
+    uvec2 mip0Size;        // Size of mip 0 (half of input)
+    float threshold;       // Bloom threshold
+    uint numWorkgroups;    // Total workgroups for global sync
+    uint mipCount;         // Number of mips to generate (max 6)
+    float padding1;
+    float padding2;
+    float padding3;
+} pc;
+
+// Shared memory for intermediate results
+// We need 32x32 for mip0->mip1, then progressively smaller
+shared vec3 sharedMem[32][32];
+
+// Soft threshold for bloom extraction
+vec3 softThreshold(vec3 color, float threshold) {
+    float brightness = max(color.r, max(color.g, color.b));
+    float soft = brightness - threshold + 0.5;
+    soft = clamp(soft, 0.0, 1.0);
+    soft = soft * soft * (3.0 - 2.0 * soft);
+    float contribution = max(soft, brightness - threshold);
+    contribution /= max(brightness, 0.00001);
+    return color * contribution;
+}
+
+// Karis average to prevent fireflies
+vec3 karisAverage(vec3 c0, vec3 c1, vec3 c2, vec3 c3) {
+    float w0 = 1.0 / (1.0 + max(c0.r, max(c0.g, c0.b)));
+    float w1 = 1.0 / (1.0 + max(c1.r, max(c1.g, c1.b)));
+    float w2 = 1.0 / (1.0 + max(c2.r, max(c2.g, c2.b)));
+    float w3 = 1.0 / (1.0 + max(c3.r, max(c3.g, c3.b)));
+    return (c0 * w0 + c1 * w1 + c2 * w2 + c3 * w3) / (w0 + w1 + w2 + w3);
+}
+
+// Downsample 2x2 using Karis average
+vec3 downsample4(vec3 c0, vec3 c1, vec3 c2, vec3 c3) {
+    return karisAverage(c0, c1, c2, c3);
+}
+
+// Load 2x2 from source and downsample with threshold
+vec3 loadSrc4(ivec2 coord) {
+    vec2 texelSize = 1.0 / vec2(textureSize(srcTexture, 0));
+    vec2 uv = (vec2(coord) * 2.0 + 1.0) * texelSize;
+
+    vec3 c0 = texture(srcTexture, uv + vec2(-0.5, -0.5) * texelSize).rgb;
+    vec3 c1 = texture(srcTexture, uv + vec2( 0.5, -0.5) * texelSize).rgb;
+    vec3 c2 = texture(srcTexture, uv + vec2(-0.5,  0.5) * texelSize).rgb;
+    vec3 c3 = texture(srcTexture, uv + vec2( 0.5,  0.5) * texelSize).rgb;
+
+    // Apply threshold
+    c0 = softThreshold(c0, pc.threshold);
+    c1 = softThreshold(c1, pc.threshold);
+    c2 = softThreshold(c2, pc.threshold);
+    c3 = softThreshold(c3, pc.threshold);
+
+    return karisAverage(c0, c1, c2, c3);
+}
+
+// Quad shuffle operations for subgroup-level reduction
+vec3 quadReduce(vec3 v) {
+    vec3 v0 = v;
+    vec3 v1 = subgroupQuadSwapHorizontal(v);
+    vec3 v2 = subgroupQuadSwapVertical(v);
+    vec3 v3 = subgroupQuadSwapDiagonal(v);
+    return downsample4(v0, v1, v2, v3);
+}
+
+void main() {
+    uint threadIdx = gl_LocalInvocationIndex;
+    uvec2 workgroupId = gl_WorkGroupID.xy;
+
+    // Map 256 threads to 16x16 arrangement (each thread handles 2x2 region for mip0)
+    // Thread (x,y) where x = threadIdx % 16, y = threadIdx / 16
+    uvec2 localId16 = uvec2(threadIdx % 16, threadIdx / 16);
+
+    // Global coordinate for mip0 (each workgroup covers 32x32 of mip0)
+    uvec2 globalMip0 = workgroupId * 32u + localId16 * 2u;
+
+    // ========== MIP 0: Load from source (64x64 input -> 32x32 mip0) ==========
+    // Each thread loads and downsamples a 2x2 region, storing 2x2 in mip0
+    vec3 m0_00 = vec3(0.0), m0_10 = vec3(0.0), m0_01 = vec3(0.0), m0_11 = vec3(0.0);
+
+    if (globalMip0.x < pc.mip0Size.x && globalMip0.y < pc.mip0Size.y) {
+        m0_00 = loadSrc4(ivec2(globalMip0));
+        imageStore(dstMip0, ivec2(globalMip0), vec4(m0_00, 1.0));
+    }
+    if (globalMip0.x + 1u < pc.mip0Size.x && globalMip0.y < pc.mip0Size.y) {
+        m0_10 = loadSrc4(ivec2(globalMip0) + ivec2(1, 0));
+        imageStore(dstMip0, ivec2(globalMip0) + ivec2(1, 0), vec4(m0_10, 1.0));
+    }
+    if (globalMip0.x < pc.mip0Size.x && globalMip0.y + 1u < pc.mip0Size.y) {
+        m0_01 = loadSrc4(ivec2(globalMip0) + ivec2(0, 1));
+        imageStore(dstMip0, ivec2(globalMip0) + ivec2(0, 1), vec4(m0_01, 1.0));
+    }
+    if (globalMip0.x + 1u < pc.mip0Size.x && globalMip0.y + 1u < pc.mip0Size.y) {
+        m0_11 = loadSrc4(ivec2(globalMip0) + ivec2(1, 1));
+        imageStore(dstMip0, ivec2(globalMip0) + ivec2(1, 1), vec4(m0_11, 1.0));
+    }
+
+    // Downsample to mip1 level (store in shared memory)
+    vec3 mip1Val = downsample4(m0_00, m0_10, m0_01, m0_11);
+    sharedMem[localId16.y][localId16.x] = mip1Val;
+
+    // Store to mip1
+    uvec2 globalMip1 = workgroupId * 16u + localId16;
+    uvec2 mip1Size = (pc.mip0Size + 1u) / 2u;
+    if (pc.mipCount > 1 && globalMip1.x < mip1Size.x && globalMip1.y < mip1Size.y) {
+        imageStore(dstMip1, ivec2(globalMip1), vec4(mip1Val, 1.0));
+    }
+    barrier();
+
+    // ========== MIP 2: 16x16 -> 8x8 (threads 0-63) ==========
+    if (threadIdx < 64) {
+        uvec2 lid = uvec2(threadIdx % 8, threadIdx / 8);
+        uvec2 srcCoord = lid * 2u;
+
+        vec3 c0 = sharedMem[srcCoord.y][srcCoord.x];
+        vec3 c1 = sharedMem[srcCoord.y][srcCoord.x + 1u];
+        vec3 c2 = sharedMem[srcCoord.y + 1u][srcCoord.x];
+        vec3 c3 = sharedMem[srcCoord.y + 1u][srcCoord.x + 1u];
+
+        vec3 mip2Val = downsample4(c0, c1, c2, c3);
+        sharedMem[lid.y][lid.x] = mip2Val;
+
+        uvec2 globalMip2 = workgroupId * 8u + lid;
+        uvec2 mip2Size = (mip1Size + 1u) / 2u;
+        if (pc.mipCount > 2 && globalMip2.x < mip2Size.x && globalMip2.y < mip2Size.y) {
+            imageStore(dstMip2, ivec2(globalMip2), vec4(mip2Val, 1.0));
+        }
+    }
+    barrier();
+
+    // ========== MIP 3: 8x8 -> 4x4 (threads 0-15) ==========
+    if (threadIdx < 16) {
+        uvec2 lid = uvec2(threadIdx % 4, threadIdx / 4);
+        uvec2 srcCoord = lid * 2u;
+
+        vec3 c0 = sharedMem[srcCoord.y][srcCoord.x];
+        vec3 c1 = sharedMem[srcCoord.y][srcCoord.x + 1u];
+        vec3 c2 = sharedMem[srcCoord.y + 1u][srcCoord.x];
+        vec3 c3 = sharedMem[srcCoord.y + 1u][srcCoord.x + 1u];
+
+        vec3 mip3Val = downsample4(c0, c1, c2, c3);
+        sharedMem[lid.y][lid.x] = mip3Val;
+
+        uvec2 mip1Size = (pc.mip0Size + 1u) / 2u;
+        uvec2 mip2Size = (mip1Size + 1u) / 2u;
+        uvec2 mip3Size = (mip2Size + 1u) / 2u;
+        uvec2 globalMip3 = workgroupId * 4u + lid;
+        if (pc.mipCount > 3 && globalMip3.x < mip3Size.x && globalMip3.y < mip3Size.y) {
+            imageStore(dstMip3, ivec2(globalMip3), vec4(mip3Val, 1.0));
+        }
+    }
+    barrier();
+
+    // ========== MIP 4: 4x4 -> 2x2 (threads 0-3) ==========
+    if (threadIdx < 4) {
+        uvec2 lid = uvec2(threadIdx % 2, threadIdx / 2);
+        uvec2 srcCoord = lid * 2u;
+
+        vec3 c0 = sharedMem[srcCoord.y][srcCoord.x];
+        vec3 c1 = sharedMem[srcCoord.y][srcCoord.x + 1u];
+        vec3 c2 = sharedMem[srcCoord.y + 1u][srcCoord.x];
+        vec3 c3 = sharedMem[srcCoord.y + 1u][srcCoord.x + 1u];
+
+        vec3 mip4Val = downsample4(c0, c1, c2, c3);
+        sharedMem[lid.y][lid.x] = mip4Val;
+
+        uvec2 mip1Size = (pc.mip0Size + 1u) / 2u;
+        uvec2 mip2Size = (mip1Size + 1u) / 2u;
+        uvec2 mip3Size = (mip2Size + 1u) / 2u;
+        uvec2 mip4Size = (mip3Size + 1u) / 2u;
+        uvec2 globalMip4 = workgroupId * 2u + lid;
+        if (pc.mipCount > 4 && globalMip4.x < mip4Size.x && globalMip4.y < mip4Size.y) {
+            imageStore(dstMip4, ivec2(globalMip4), vec4(mip4Val, 1.0));
+        }
+    }
+    barrier();
+
+    // ========== MIP 5: 2x2 -> 1x1 (thread 0 only) ==========
+    if (threadIdx == 0) {
+        vec3 c0 = sharedMem[0][0];
+        vec3 c1 = sharedMem[0][1];
+        vec3 c2 = sharedMem[1][0];
+        vec3 c3 = sharedMem[1][1];
+
+        vec3 mip5Val = downsample4(c0, c1, c2, c3);
+
+        // Store to mip5 - this is per-workgroup, so coordinate is workgroup ID
+        uvec2 mip1Size = (pc.mip0Size + 1u) / 2u;
+        uvec2 mip2Size = (mip1Size + 1u) / 2u;
+        uvec2 mip3Size = (mip2Size + 1u) / 2u;
+        uvec2 mip4Size = (mip3Size + 1u) / 2u;
+        uvec2 mip5Size = (mip4Size + 1u) / 2u;
+        if (pc.mipCount > 5 && workgroupId.x < mip5Size.x && workgroupId.y < mip5Size.y) {
+            imageStore(dstMip5, ivec2(workgroupId), vec4(mip5Val, 1.0));
+        }
+    }
+}
