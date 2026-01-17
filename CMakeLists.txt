@@ -64,8 +64,10 @@ set(SOURCES
     src/core/pipeline/FrameGraphBuilder.cpp
     src/core/passes/ComputePasses.cpp
     src/core/passes/ShadowPasses.cpp
+    src/core/passes/ShadowPassRecorder.cpp
     src/core/passes/WaterPasses.cpp
     src/core/passes/HDRPass.cpp
+    src/core/passes/HDRPassRecorder.cpp
     src/core/passes/PostPasses.cpp
     src/core/FrameUpdater.cpp
     src/core/updaters/VegetationUpdater.cpp

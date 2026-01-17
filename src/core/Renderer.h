@@ -28,6 +28,8 @@
 #include "pipeline/FrameGraph.h"
 #include "loading/LoadJobFactory.h"
 #include "asset/AssetRegistry.h"
+#include "passes/ShadowPassRecorder.h"
+#include "passes/HDRPassRecorder.h"
 
 // Forward declarations
 class PhysicsWorld;
@@ -252,7 +254,6 @@ private:
     void recordHDRPassWithSecondaries(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime,
                                       const std::vector<vk::CommandBuffer>& secondaries);
     void recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, uint32_t slot);
-    void recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex);
 
     // Setup frame graph passes with dependencies
     void setupFrameGraph();
@@ -302,6 +303,10 @@ private:
 
     // Core frame execution (owns the frame loop mechanics)
     RendererCore rendererCore_;
+
+    // Pass recorders (encapsulate pass recording logic extracted from Renderer)
+    std::unique_ptr<ShadowPassRecorder> shadowPassRecorder_;
+    std::unique_ptr<HDRPassRecorder> hdrPassRecorder_;
 
     // Multi-threading infrastructure
     AsyncTransferManager asyncTransferManager_;
