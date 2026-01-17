@@ -1,12 +1,19 @@
 #pragma once
 
 #include "SystemGroupMacros.h"
+#include "InitContext.h"
+
+#include <memory>
+#include <optional>
+#include <vector>
+#include <vulkan/vulkan.h>
 
 // Forward declarations
 class SkySystem;
 class FroxelSystem;
 class AtmosphereLUTSystem;
 class CloudShadowSystem;
+class PostProcessSystem;
 
 /**
  * AtmosphereSystemGroup - Groups atmosphere-related rendering systems
@@ -24,6 +31,13 @@ class CloudShadowSystem;
  *   auto& atmos = systems.atmosphere();
  *   atmos.sky().recordDraw(cmd, frameIndex);
  *   atmos.froxel().recordUpdate(cmd, ...);
+ *
+ * Self-initialization:
+ *   auto bundle = AtmosphereSystemGroup::createAll(deps);
+ *   if (bundle) {
+ *       systems.setFroxel(std::move(bundle->froxel));
+ *       // ... etc
+ *   }
  */
 struct AtmosphereSystemGroup {
     // Non-owning references to systems (owned by RendererSystems)
@@ -42,4 +56,56 @@ struct AtmosphereSystemGroup {
     bool isValid() const {
         return sky_ && froxel_ && atmosphereLUT_ && cloudShadow_;
     }
+
+    // ========================================================================
+    // Factory methods for self-initialization
+    // ========================================================================
+
+    /**
+     * Bundle of all atmosphere-related systems (owned pointers).
+     * Used during initialization - systems are moved to RendererSystems after creation.
+     */
+    struct Bundle {
+        std::unique_ptr<SkySystem> sky;
+        std::unique_ptr<FroxelSystem> froxel;
+        std::unique_ptr<AtmosphereLUTSystem> atmosphereLUT;
+        std::unique_ptr<CloudShadowSystem> cloudShadow;
+    };
+
+    /**
+     * Dependencies required to create atmosphere systems.
+     * Avoids passing many parameters through factory methods.
+     */
+    struct CreateDeps {
+        const InitContext& ctx;
+        VkRenderPass hdrRenderPass;        // For SkySystem
+        VkImageView shadowMapView;         // For FroxelSystem (cascade shadows)
+        VkSampler shadowSampler;           // For FroxelSystem
+        const std::vector<VkBuffer>& lightBuffers;  // For FroxelSystem
+    };
+
+    /**
+     * Factory: Create all atmosphere systems with proper initialization order.
+     * Returns nullopt on failure.
+     *
+     * Creation order (respects dependencies):
+     * 1. AtmosphereLUTSystem - no dependencies, computes LUTs
+     * 2. FroxelSystem - needs shadow resources
+     * 3. CloudShadowSystem - needs AtmosphereLUT cloud map
+     * 4. SkySystem - needs HDR render pass
+     *
+     * Note: LUT computation happens inside this factory.
+     */
+    static std::optional<Bundle> createAll(const CreateDeps& deps);
+
+    /**
+     * Wire atmosphere systems to dependent systems.
+     * Call after createAll() and after systems are stored in RendererSystems.
+     *
+     * Wiring performed:
+     * - PostProcessSystem gets froxel volume for compositing
+     */
+    static void wireToPostProcess(
+        FroxelSystem& froxel,
+        PostProcessSystem& postProcess);
 };

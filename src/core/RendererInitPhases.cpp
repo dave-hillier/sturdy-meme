@@ -21,6 +21,7 @@
 #include "FroxelSystem.h"
 #include "AtmosphereLUTSystem.h"
 #include "CloudShadowSystem.h"
+#include "AtmosphereSystemGroup.h"
 #include "HiZSystem.h"
 #include "CatmullClarkSystem.h"
 #include "RockSystem.h"
@@ -127,14 +128,6 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     {
         INIT_PROFILE_PHASE("SkinnedMeshRenderer");
         if (!initSkinnedMeshRenderer()) return false;
-    }
-
-    // Initialize sky system via factory (needs HDR render pass from postProcessSystem)
-    {
-        INIT_PROFILE_PHASE("SkySystem");
-        auto skySystem = SkySystem::create(initCtx, systems_->postProcess().getHDRRenderPass());
-        if (!skySystem) return false;
-        systems_->setSky(std::move(skySystem));
     }
 
     if (!createCommandBuffers()) return false;
@@ -946,9 +939,28 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                                      systems_->terrain().getTileArrayView(), systems_->terrain().getTileSampler(),
                                      leafTileInfoBuffers, &systems_->globalBuffers().dynamicRendererUBO);
 
-    // Initialize atmosphere subsystems (Froxel, AtmosphereLUT, CloudShadow)
-    if (!RendererInit::initAtmosphereSubsystems(*systems_, initCtx, core.shadow,
-                                                 systems_->globalBuffers().lightBuffers.buffers)) return false;
+    // Initialize atmosphere subsystems (Sky, Froxel, AtmosphereLUT, CloudShadow)
+    // Uses self-initializing AtmosphereSystemGroup to invert dependencies
+    {
+        INIT_PROFILE_PHASE("AtmosphereSubsystems");
+        AtmosphereSystemGroup::CreateDeps atmosDeps{
+            initCtx,
+            core.hdr.renderPass,
+            core.shadow.cascadeView,
+            core.shadow.sampler,
+            systems_->globalBuffers().lightBuffers.buffers
+        };
+        auto atmosBundle = AtmosphereSystemGroup::createAll(atmosDeps);
+        if (!atmosBundle) return false;
+
+        systems_->setSky(std::move(atmosBundle->sky));
+        systems_->setFroxel(std::move(atmosBundle->froxel));
+        systems_->setAtmosphereLUT(std::move(atmosBundle->atmosphereLUT));
+        systems_->setCloudShadow(std::move(atmosBundle->cloudShadow));
+
+        // Wire froxel to post-process for compositing
+        AtmosphereSystemGroup::wireToPostProcess(systems_->froxel(), systems_->postProcess());
+    }
 
     // Update grass descriptor sets (now that CloudShadowSystem exists)
     // Pass triple-buffered tile info buffers to avoid CPU-GPU sync issues

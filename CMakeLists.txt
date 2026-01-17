@@ -93,6 +93,7 @@ set(SOURCES
     src/atmosphere/CloudShadowSystem.cpp
     src/atmosphere/SnowMaskSystem.cpp
     src/atmosphere/VolumetricSnowSystem.cpp
+    src/atmosphere/AtmosphereSystemGroup.cpp
     # Vegetation
     src/vegetation/GrassSystem.cpp
     src/vegetation/GrassTile.cpp
