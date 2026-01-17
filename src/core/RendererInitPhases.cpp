@@ -66,42 +66,28 @@ bool Renderer::initCoreVulkanResources() {
     // Create command pool and buffers
     if (!vulkanContext_->createCommandPoolAndBuffers(MAX_FRAMES_IN_FLIGHT)) return false;
 
-    // Initialize multi-threading infrastructure (from video architecture)
+    // Initialize multi-threading infrastructure via RenderingInfrastructure
     {
         INIT_PROFILE_PHASE("ThreadingInfra");
 
-        // Initialize async transfer manager for non-blocking GPU uploads
-        if (!asyncTransferManager_.initialize(*vulkanContext_)) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                "AsyncTransferManager initialization failed - using synchronous transfers");
-        }
-
-        // Initialize threaded command pool for parallel command recording
-        // Use TaskScheduler thread count + 1 for main thread
+        // Use TaskScheduler thread count for parallel command recording
         uint32_t threadCount = TaskScheduler::instance().getThreadCount();
-        if (threadCount > 0) {
-            if (!threadedCommandPool_.initialize(*vulkanContext_, threadCount + 1)) {
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "ThreadedCommandPool initialization failed - using single-threaded recording");
-            }
-        }
-
-        // Initialize async texture uploader for non-blocking texture uploads
-        if (!asyncTextureUploader_.initialize(
-                vulkanContext_->getVkDevice(),
-                vulkanContext_->getAllocator(),
-                &asyncTransferManager_)) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                "AsyncTextureUploader initialization failed - using synchronous uploads");
-        }
+        renderingInfra_.init(*vulkanContext_, threadCount);
     }
 
     return true;
 }
 
 bool Renderer::initDescriptorInfrastructure() {
-    if (!createDescriptorSetLayout()) return false;
-    if (!createDescriptorPool()) return false;
+    // Initialize descriptor infrastructure (layout and pool)
+    DescriptorInfrastructure::Config descConfig;
+    descConfig.setsPerPool = config_.setsPerPool;
+    descConfig.poolSizes = config_.descriptorPoolSizes;
+
+    if (!descriptorInfra_.initDescriptors(*vulkanContext_, descConfig)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize descriptor infrastructure");
+        return false;
+    }
     return true;
 }
 
@@ -126,7 +112,11 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
     {
         INIT_PROFILE_PHASE("GraphicsPipeline");
-        if (!createGraphicsPipeline()) return false;
+        if (!descriptorInfra_.createGraphicsPipeline(*vulkanContext_,
+                systems_->postProcess().getHDRRenderPass(), resourcePath)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create graphics pipeline");
+            return false;
+        }
     }
 
     // Initialize skinned mesh rendering (GPU skinning for animated characters)
@@ -158,7 +148,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Initialize shadow system (needs descriptor set layouts for pipeline compatibility)
     {
         INIT_PROFILE_PHASE("ShadowSystem");
-        auto shadowSystem = ShadowSystem::create(initCtx, **descriptorSetLayout_, systems_->skinnedMesh().getDescriptorSetLayout());
+        auto shadowSystem = ShadowSystem::create(initCtx, descriptorInfra_.getVkDescriptorSetLayout(), systems_->skinnedMesh().getDescriptorSetLayout());
         if (!shadowSystem) return false;
         systems_->setShadow(std::move(shadowSystem));
     }
@@ -215,7 +205,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     sceneInfo.graphicsQueue = graphicsQueue;
     sceneInfo.physicalDevice = physicalDevice;
     sceneInfo.resourcePath = resourcePath;
-    sceneInfo.assetRegistry = &assetRegistry_;  // Pass asset registry for centralized texture management
+    sceneInfo.assetRegistry = &renderingInfra_.assetRegistry();  // Pass asset registry for centralized texture management
     sceneInfo.getTerrainHeight = [this](float x, float z) {
         return systems_->terrain().getHeightAt(x, z);
     };
@@ -388,8 +378,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Create rock descriptor sets (RockSystem owns them)
     if (!systems_->rock().createDescriptorSets(
             device,
-            *descriptorManagerPool,
-            **descriptorSetLayout_,
+            *descriptorInfra_.getDescriptorPool(),
+            descriptorInfra_.getVkDescriptorSetLayout(),
             MAX_FRAMES_IN_FLIGHT,
             getCommonBindings)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create RockSystem descriptor sets");
@@ -400,8 +390,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     if (systems_->detritus()) {
         if (!systems_->detritus()->createDescriptorSets(
                 device,
-                *descriptorManagerPool,
-                **descriptorSetLayout_,
+                *descriptorInfra_.getDescriptorPool(),
+                descriptorInfra_.getVkDescriptorSetLayout(),
                 MAX_FRAMES_IN_FLIGHT,
                 getCommonBindings)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create DetritusSystem descriptor sets");

@@ -2,20 +2,17 @@
 #include "Renderer.h"
 #include "RendererInit.h"
 #include "RendererSystems.h"
-#include "ShaderLoader.h"
-#include "GraphicsPipelineFactory.h"
 #include "MaterialDescriptorFactory.h"
-#include "VulkanHelpers.h"
-#include "VmaResources.h"
-#include "Bindings.h"
 #include "InitProfiler.h"
 #include "QueueSubmitDiagnostics.h"
-#include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/pipeline/FrameGraphBuilder.h"
 #include "core/FrameUpdater.h"
 #include "core/FrameDataBuilder.h"
 #include "core/updaters/UBOUpdater.h"
 #include "interfaces/IPlayerControl.h"
+#include "UBOs.h"
+#include "FrameData.h"
+#include "RenderContext.h"
 
 // Subsystem includes for render loop
 // Core systems
@@ -136,10 +133,10 @@ bool Renderer::initInternal(const InitInfo& info) {
         if (!initCoreVulkanResources()) return false;
     }
 
-    // Initialize asset registry (after command pool is ready)
+    // Initialize asset registry via RenderingInfrastructure (after command pool is ready)
     {
         INIT_PROFILE_PHASE("AssetRegistry");
-        assetRegistry_.init(
+        renderingInfra_.initAssetRegistry(
             vulkanContext_->getVkDevice(),
             vulkanContext_->getVkPhysicalDevice(),
             vulkanContext_->getAllocator(),
@@ -156,7 +153,7 @@ bool Renderer::initInternal(const InitInfo& info) {
     // Build shared InitContext for subsystem initialization
     // Pass pool sizes hint so subsystems can create consistent pools if needed
     InitContext initCtx = InitContext::build(
-        *vulkanContext_, vulkanContext_->getCommandPool(), &*descriptorManagerPool,
+        *vulkanContext_, vulkanContext_->getCommandPool(), descriptorInfra_.getDescriptorPool(),
         resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes);
 
     // Phase 3: All subsystems (terrain, grass, weather, snow, water, etc.)
@@ -189,8 +186,10 @@ bool Renderer::initInternal(const InitInfo& info) {
         hdrPassRecorder_ = std::make_unique<HDRPassRecorder>(*systems_);
         HDRPassRecorder::Config hdrConfig;
         hdrConfig.terrainEnabled = terrainEnabled;
-        hdrConfig.sceneObjectsPipeline = graphicsPipeline_ ? &(**graphicsPipeline_) : nullptr;
-        hdrConfig.pipelineLayout = pipelineLayout_ ? &(**pipelineLayout_) : nullptr;
+        hdrConfig.sceneObjectsPipeline = descriptorInfra_.hasPipeline() ?
+            reinterpret_cast<const vk::Pipeline*>(&descriptorInfra_.getGraphicsPipeline()) : nullptr;
+        hdrConfig.pipelineLayout = descriptorInfra_.hasPipeline() ?
+            reinterpret_cast<const vk::PipelineLayout*>(&descriptorInfra_.getPipelineLayout()) : nullptr;
         hdrConfig.lastViewProj = &lastViewProj;
         hdrPassRecorder_->setConfig(hdrConfig);
     }
@@ -252,7 +251,7 @@ void Renderer::updatePhysicsDebug(PhysicsWorld& physics, const glm::vec3& camera
     // Create debug renderer on first use (after Jolt is initialized)
     if (!systems_->physicsDebugRenderer()) {
         InitContext initCtx = InitContext::build(
-            *vulkanContext_, vulkanContext_->getCommandPool(), &*descriptorManagerPool,
+            *vulkanContext_, vulkanContext_->getCommandPool(), descriptorInfra_.getDescriptorPool(),
             resourcePath, MAX_FRAMES_IN_FLIGHT);
         systems_->createPhysicsDebugRenderer(initCtx, systems_->postProcess().getHDRRenderPass());
     }
@@ -283,10 +282,8 @@ void Renderer::cleanup() {
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
 
-        // Shutdown multi-threading infrastructure
-        asyncTextureUploader_.shutdown();  // Must shutdown before transfer manager
-        asyncTransferManager_.shutdown();
-        threadedCommandPool_.shutdown();
+        // Shutdown multi-threading infrastructure via RenderingInfrastructure
+        renderingInfra_.shutdown();
 
         // Destroy RendererCore before its dependencies
         rendererCore_.destroy();
@@ -300,20 +297,8 @@ void Renderer::cleanup() {
             systems_.reset();
         }
 
-        // Clean up the auto-growing descriptor pool
-        if (descriptorManagerPool.has_value()) {
-            descriptorManagerPool->destroy();
-            descriptorManagerPool.reset();
-        }
-
-        // RAII handles: graphicsPipeline, pipelineLayout, descriptorSetLayout
-        SDL_Log("destroying graphicsPipeline");
-        graphicsPipeline_.reset();
-        SDL_Log("destroying pipelineLayout");
-        pipelineLayout_.reset();
-        SDL_Log("destroying descriptorSetLayout");
-        descriptorSetLayout_.reset();
-        SDL_Log("descriptor layouts destroyed");
+        // Clean up descriptor infrastructure (pool, layouts, pipeline)
+        descriptorInfra_.cleanup();
 
         // Note: command pool, render pass, depth resources, and framebuffers
         // are now owned by VulkanContext and cleaned up in its shutdown()
@@ -326,101 +311,6 @@ void Renderer::cleanup() {
 
 bool Renderer::createSyncObjects() {
     return frameSync_.init(vulkanContext_->getRaiiDevice(), MAX_FRAMES_IN_FLIGHT);
-}
-
-// Adds the common descriptor bindings shared between main and skinned layouts.
-// This ensures both layouts stay in sync for bindings used by shader.frag.
-void Renderer::addCommonDescriptorBindings(DescriptorManager::LayoutBuilder& builder) {
-    builder
-        .addUniformBuffer(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)  // 0: UBO
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 1: diffuse
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 2: shadow
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 3: normal
-        .addStorageBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 4: lights
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 5: emissive
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 6: point shadow
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 7: spot shadow
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 8: snow mask
-        .addCombinedImageSampler(VK_SHADER_STAGE_FRAGMENT_BIT)  // 9: cloud shadow map
-        .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 10: Snow UBO
-        .addUniformBuffer(VK_SHADER_STAGE_FRAGMENT_BIT)         // 11: Cloud shadow UBO
-        // Note: binding 12 (bone matrices) is added separately for skinned layout
-        .addBinding(Bindings::ROUGHNESS_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)  // 13: roughness
-        .addBinding(Bindings::METALLIC_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)   // 14: metallic
-        .addBinding(Bindings::AO_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)         // 15: AO
-        .addBinding(Bindings::HEIGHT_MAP, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)     // 16: height
-        .addBinding(Bindings::WIND_UBO, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT);                // 17: wind UBO
-}
-
-bool Renderer::createDescriptorSetLayout() {
-    VkDevice device = vulkanContext_->getVkDevice();
-
-    // Main scene descriptor set layout - uses common bindings (0-11, 13-16)
-    DescriptorManager::LayoutBuilder builder(device);
-    addCommonDescriptorBindings(builder);
-    VkDescriptorSetLayout rawLayout = builder.build();
-
-    if (rawLayout == VK_NULL_HANDLE) {
-        SDL_Log("Failed to create descriptor set layout");
-        return false;
-    }
-
-    descriptorSetLayout_.emplace(vulkanContext_->getRaiiDevice(), rawLayout);
-    return true;
-}
-
-bool Renderer::createGraphicsPipeline() {
-    vk::Device device(vulkanContext_->getVkDevice());
-    VkExtent2D swapchainExtent = vulkanContext_->getVkSwapchainExtent();
-
-    // Create pipeline layout using PipelineLayoutBuilder
-    auto layoutOpt = PipelineLayoutBuilder(vulkanContext_->getRaiiDevice())
-        .addDescriptorSetLayout(**descriptorSetLayout_)
-        .addPushConstantRange<PushConstants>(
-            vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
-        .build();
-    if (!layoutOpt) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create pipeline layout");
-        return false;
-    }
-    pipelineLayout_ = std::move(layoutOpt);
-
-    // Use factory for pipeline creation
-    auto bindingDescription = Vertex::getBindingDescription();
-    auto attributeDescriptions = Vertex::getAttributeDescriptions();
-
-    VkPipeline rawPipeline = VK_NULL_HANDLE;
-    GraphicsPipelineFactory factory(device);
-    bool success = factory
-        .applyPreset(GraphicsPipelineFactory::Preset::Default)
-        .setShaders(resourcePath + "/shaders/shader.vert.spv",
-                    resourcePath + "/shaders/shader.frag.spv")
-        .setVertexInput({bindingDescription},
-                        {attributeDescriptions.begin(), attributeDescriptions.end()})
-        .setRenderPass(systems_->postProcess().getHDRRenderPass())
-        .setPipelineLayout(**pipelineLayout_)
-        .setExtent(swapchainExtent)
-        .setBlendMode(GraphicsPipelineFactory::BlendMode::Alpha)
-        .build(rawPipeline);
-
-    if (!success) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create graphics pipeline");
-        return false;
-    }
-
-    graphicsPipeline_.emplace(vulkanContext_->getRaiiDevice(), rawPipeline);
-    return true;
-}
-
-bool Renderer::createDescriptorPool() {
-    VkDevice device = vulkanContext_->getVkDevice();
-
-    // Create the auto-growing descriptor pool with configurable sizes
-    // Will automatically grow if exhausted
-    // All subsystems now use this managed pool for consistent descriptor allocation
-    descriptorManagerPool.emplace(device, config_.setsPerPool, config_.descriptorPoolSizes);
-
-    return true;
 }
 
 bool Renderer::createDescriptorSets() {
@@ -461,8 +351,8 @@ bool Renderer::createDescriptorSets() {
 
     materialRegistry.createDescriptorSets(
         device,
-        *descriptorManagerPool,
-        **descriptorSetLayout_,
+        *descriptorInfra_.getDescriptorPool(),
+        descriptorInfra_.getVkDescriptorSetLayout(),
         MAX_FRAMES_IN_FLIGHT,
         getCommonBindings);
 
@@ -554,7 +444,7 @@ bool Renderer::render(const Camera& camera) {
 
     // Process completed async transfers (textures, buffers uploaded via AsyncTransferManager)
     // Must be called after fence wait to safely reuse staging buffers
-    asyncTransferManager_.processPendingTransfers();
+    renderingInfra_.processPendingTransfers();
 
     // Update time system (frame timing and day/night cycle)
     TimingData timing = systems_->time().update();
@@ -653,7 +543,8 @@ bool Renderer::render(const Camera& camera) {
     RenderResources resources = FrameDataBuilder::buildRenderResources(
         *systems_, imageIndex, vulkanContext_->getFramebuffers(),
         vulkanContext_->getRenderPass(), {vulkanContext_->getWidth(), vulkanContext_->getHeight()},
-        **graphicsPipeline_, **pipelineLayout_, **descriptorSetLayout_);
+        descriptorInfra_.getGraphicsPipeline(), descriptorInfra_.getPipelineLayout(),
+        descriptorInfra_.getDescriptorSetLayout());
     RenderContext ctx(cmd, frame.frameIndex, frame, resources, &cmdDiag);
 
     // Execute frame graph - dependency-driven scheduling with parallel execution
@@ -664,7 +555,7 @@ bool Renderer::render(const Camera& camera) {
         .deltaTime = frame.deltaTime,
         .userData = &ctx,  // Pass full RenderContext to passes
         // Secondary command buffer support
-        .threadedCommandPool = &threadedCommandPool_,
+        .threadedCommandPool = &renderingInfra_.threadedCommandPool(),
         .renderPass = vk::RenderPass(systems_->postProcess().getHDRRenderPass()),
         .framebuffer = vk::Framebuffer(systems_->postProcess().getHDRFramebuffer()),
         // Command diagnostics - passes increment these counters
@@ -673,7 +564,7 @@ bool Renderer::render(const Camera& camera) {
 
     // Execute all passes in dependency order
     // TaskScheduler enables parallel execution of independent passes
-    frameGraph_.execute(fgCtx, &TaskScheduler::instance());
+    renderingInfra_.frameGraph().execute(fgCtx, &TaskScheduler::instance());
 
     // End GPU profiling frame
     systems_->profiler().endGpuFrame(cmd, frame.frameIndex);
@@ -845,8 +736,10 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     // Update config in case state changed at runtime
     HDRPassRecorder::Config config;
     config.terrainEnabled = terrainEnabled;
-    config.sceneObjectsPipeline = graphicsPipeline_ ? &(**graphicsPipeline_) : nullptr;
-    config.pipelineLayout = pipelineLayout_ ? &(**pipelineLayout_) : nullptr;
+    config.sceneObjectsPipeline = descriptorInfra_.hasPipeline() ?
+        reinterpret_cast<const vk::Pipeline*>(&descriptorInfra_.getGraphicsPipeline()) : nullptr;
+    config.pipelineLayout = descriptorInfra_.hasPipeline() ?
+        reinterpret_cast<const vk::PipelineLayout*>(&descriptorInfra_.getPipelineLayout()) : nullptr;
     config.lastViewProj = &lastViewProj;
     hdrPassRecorder_->setConfig(config);
 
@@ -859,8 +752,10 @@ void Renderer::recordHDRPassWithSecondaries(VkCommandBuffer cmd, uint32_t frameI
     // Update config in case state changed at runtime
     HDRPassRecorder::Config config;
     config.terrainEnabled = terrainEnabled;
-    config.sceneObjectsPipeline = graphicsPipeline_ ? &(**graphicsPipeline_) : nullptr;
-    config.pipelineLayout = pipelineLayout_ ? &(**pipelineLayout_) : nullptr;
+    config.sceneObjectsPipeline = descriptorInfra_.hasPipeline() ?
+        reinterpret_cast<const vk::Pipeline*>(&descriptorInfra_.getGraphicsPipeline()) : nullptr;
+    config.pipelineLayout = descriptorInfra_.hasPipeline() ?
+        reinterpret_cast<const vk::PipelineLayout*>(&descriptorInfra_.getPipelineLayout()) : nullptr;
     config.lastViewProj = &lastViewProj;
     hdrPassRecorder_->setConfig(config);
 
@@ -872,8 +767,10 @@ void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
     // Update config in case state changed at runtime
     HDRPassRecorder::Config config;
     config.terrainEnabled = terrainEnabled;
-    config.sceneObjectsPipeline = graphicsPipeline_ ? &(**graphicsPipeline_) : nullptr;
-    config.pipelineLayout = pipelineLayout_ ? &(**pipelineLayout_) : nullptr;
+    config.sceneObjectsPipeline = descriptorInfra_.hasPipeline() ?
+        reinterpret_cast<const vk::Pipeline*>(&descriptorInfra_.getGraphicsPipeline()) : nullptr;
+    config.pipelineLayout = descriptorInfra_.hasPipeline() ?
+        reinterpret_cast<const vk::PipelineLayout*>(&descriptorInfra_.getPipelineLayout()) : nullptr;
     config.lastViewProj = &lastViewProj;
     hdrPassRecorder_->setConfig(config);
 
@@ -888,13 +785,13 @@ bool Renderer::initSkinnedMeshRenderer() {
     info.device = vulkanContext_->getVkDevice();
     info.raiiDevice = &vulkanContext_->getRaiiDevice();
     info.allocator = vulkanContext_->getAllocator();
-    info.descriptorPool = &*descriptorManagerPool;
+    info.descriptorPool = descriptorInfra_.getDescriptorPool();
     info.renderPass = systems_->postProcess().getHDRRenderPass();
     info.extent = vulkanContext_->getVkSwapchainExtent();
     info.shaderPath = resourcePath + "/shaders";
     info.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    info.addCommonBindings = [this](DescriptorManager::LayoutBuilder& builder) {
-        addCommonDescriptorBindings(builder);
+    info.addCommonBindings = [](DescriptorManager::LayoutBuilder& builder) {
+        DescriptorInfrastructure::addCommonDescriptorBindings(builder);
     };
 
     auto skinnedMeshRenderer = SkinnedMeshRenderer::create(info);
@@ -968,4 +865,4 @@ bool Renderer::createSkinnedMeshRendererDescriptorSets() {
 }
 
 // Resource access
-DescriptorManager::Pool* Renderer::getDescriptorPool() { return &*descriptorManagerPool; }
+DescriptorManager::Pool* Renderer::getDescriptorPool() { return descriptorInfra_.getDescriptorPool(); }
