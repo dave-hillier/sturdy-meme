@@ -1,4 +1,5 @@
 #include "SceneBuilder.h"
+#include "Transform.h"
 #include "PhysicsSystem.h"
 #include "asset/AssetRegistry.h"
 #include <SDL3/SDL_log.h>
@@ -322,11 +323,10 @@ void SceneBuilder::createRenderables() {
 
     // Rotated wooden crate
     auto [rotatedCrateX, rotatedCrateZ] = worldPos(-1.5f, 1.0f);
-    glm::mat4 rotatedCube = glm::translate(glm::mat4(1.0f),
-        glm::vec3(rotatedCrateX, getGroundY(rotatedCrateX, rotatedCrateZ, 0.5f), rotatedCrateZ));
-    rotatedCube = glm::rotate(rotatedCube, glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     addPhysicsObject(RenderableBuilder()
-        .withTransform(rotatedCube)
+        .withTransform(Transform(
+            glm::vec3(rotatedCrateX, getGroundY(rotatedCrateX, rotatedCrateZ, 0.5f), rotatedCrateZ),
+            Transform::yRotation(glm::radians(30.0f))))
         .withMesh(cubeMesh.get())
         .withTexture(crateTex)
         .withMaterialId(crateMaterialId)
@@ -369,11 +369,10 @@ void SceneBuilder::createRenderables() {
 
     // Brushed metal cube - rough, metallic (half-extent 0.5)
     auto [brushedCubeX, brushedCubeZ] = worldPos(-3.0f, -3.0f);
-    glm::mat4 brushedCube = glm::translate(glm::mat4(1.0f),
-        glm::vec3(brushedCubeX, getGroundY(brushedCubeX, brushedCubeZ, 0.5f), brushedCubeZ));
-    brushedCube = glm::rotate(brushedCube, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     addPhysicsObject(RenderableBuilder()
-        .withTransform(brushedCube)
+        .withTransform(Transform(
+            glm::vec3(brushedCubeX, getGroundY(brushedCubeX, brushedCubeZ, 0.5f), brushedCubeZ),
+            Transform::yRotation(glm::radians(45.0f))))
         .withMesh(cubeMesh.get())
         .withTexture(metalTex)
         .withMaterialId(metalMaterialId)
@@ -385,11 +384,11 @@ void SceneBuilder::createRenderables() {
     // Sits 0.8m above crate (crate top at terrain+1.0, sphere center at terrain+1.0+0.3)
     // This object has physics AND is tracked as the emissive orb for light sync
     float glowSphereScale = 0.3f;
-    glm::mat4 glowingSphereTransform = glm::translate(glm::mat4(1.0f),
-        glm::vec3(crateX, getGroundY(crateX, crateZ, 1.0f + glowSphereScale), crateZ));
-    glowingSphereTransform = glm::scale(glowingSphereTransform, glm::vec3(glowSphereScale));
     emissiveOrbIndex = addPhysicsObject(RenderableBuilder()
-        .withTransform(glowingSphereTransform)
+        .withTransform(Transform(
+            glm::vec3(crateX, getGroundY(crateX, crateZ, 1.0f + glowSphereScale), crateZ),
+            glm::quat(1, 0, 0, 0),  // Identity rotation
+            glowSphereScale))
         .withMesh(sphereMesh.get())
         .withTexture(metalTex)
         .withMaterialId(metalMaterialId)
@@ -402,11 +401,10 @@ void SceneBuilder::createRenderables() {
 
     // Blue light indicator sphere - saturated blue, floating above terrain
     auto [blueLightX, blueLightZ] = worldPos(-3.0f, 2.0f);
-    glm::mat4 blueLightTransform = glm::translate(glm::mat4(1.0f),
-        glm::vec3(blueLightX, getGroundY(blueLightX, blueLightZ, 1.5f), blueLightZ));
-    blueLightTransform = glm::scale(blueLightTransform, glm::vec3(0.2f));
     sceneObjects.push_back(RenderableBuilder()
-        .withTransform(blueLightTransform)
+        .withTransform(Transform(
+            glm::vec3(blueLightX, getGroundY(blueLightX, blueLightZ, 1.5f), blueLightZ),
+            glm::quat(1, 0, 0, 0), 0.2f))
         .withMesh(sphereMesh.get())
         .withTexture(metalTex)
         .withMaterialId(metalMaterialId)
@@ -419,11 +417,10 @@ void SceneBuilder::createRenderables() {
 
     // Green light indicator sphere - saturated green, floating above terrain
     auto [greenLightX, greenLightZ] = worldPos(4.0f, -2.0f);
-    glm::mat4 greenLightTransform = glm::translate(glm::mat4(1.0f),
-        glm::vec3(greenLightX, getGroundY(greenLightX, greenLightZ, 1.5f), greenLightZ));
-    greenLightTransform = glm::scale(greenLightTransform, glm::vec3(0.2f));
     sceneObjects.push_back(RenderableBuilder()
-        .withTransform(greenLightTransform)
+        .withTransform(Transform(
+            glm::vec3(greenLightX, getGroundY(greenLightX, greenLightZ, 1.5f), greenLightZ),
+            glm::quat(1, 0, 0, 0), 0.2f))
         .withMesh(sphereMesh.get())
         .withTexture(metalTex)
         .withMaterialId(metalMaterialId)

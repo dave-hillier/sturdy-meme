@@ -21,6 +21,11 @@ RenderableBuilder& RenderableBuilder::withTransform(const glm::mat4& transform) 
     return *this;
 }
 
+RenderableBuilder& RenderableBuilder::withTransform(const Transform& transform) {
+    transform_ = transform.toMatrix();
+    return *this;
+}
+
 RenderableBuilder& RenderableBuilder::withRoughness(float roughness) {
     roughness_ = roughness;
     return *this;

@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstdint>
 #include <string>
+#include "scene/Transform.h"
 
 class Mesh;
 class Texture;
@@ -56,6 +57,7 @@ public:
 
     // Required: Set the world transform
     RenderableBuilder& withTransform(const glm::mat4& transform);
+    RenderableBuilder& withTransform(const Transform& transform);
 
     // Optional: Set PBR roughness (default: 0.5)
     RenderableBuilder& withRoughness(float roughness);
