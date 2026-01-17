@@ -567,168 +567,201 @@ bool TreeLODSystem::createInstanceBuffer(size_t maxInstances) {
 
 // computeScreenError is now in CullCommon.h
 
+void TreeLODSystem::updateTreeLODState(TreeLODState& state, float distance, float treeScale,
+                                        const TreeLODSettings& settings, const ScreenParams& screenParams) {
+    state.lastDistance = distance;
+    TreeLODState::Level newTarget = state.targetLevel;
+
+    if (settings.useScreenSpaceError) {
+        // Screen-space error based LOD
+        const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
+        float worldErrorFull = 0.1f * treeScale;  // ~10cm branch thickness, scaled
+
+        float screenErrorFull = computeScreenError(worldErrorFull, distance,
+                                                    screenParams.screenHeight, screenParams.tanHalfFOV);
+
+        // Determine LOD level based on screen error
+        newTarget = (screenErrorFull > settings.errorThresholdFull)
+            ? TreeLODState::Level::FullDetail
+            : TreeLODState::Level::Impostor;
+
+        // Compute blend factor based on screen error
+        if (screenErrorFull > settings.errorThresholdFull) {
+            state.blendFactor = 0.0f;
+        } else if (screenErrorFull < settings.errorThresholdImpostor) {
+            state.blendFactor = 1.0f;
+        } else {
+            float t = (settings.errorThresholdFull - screenErrorFull) /
+                      (settings.errorThresholdFull - settings.errorThresholdImpostor);
+            state.blendFactor = t * t * (3.0f - 2.0f * t);  // smoothstep
+        }
+    } else {
+        // Legacy distance-based LOD with hysteresis
+        if (state.targetLevel == TreeLODState::Level::FullDetail) {
+            if (distance > settings.fullDetailDistance + settings.hysteresis) {
+                newTarget = TreeLODState::Level::Impostor;
+            }
+        } else {
+            if (distance < settings.fullDetailDistance - settings.hysteresis) {
+                newTarget = TreeLODState::Level::FullDetail;
+            }
+        }
+
+        // Update blend factor
+        if (settings.blendRange > 0.0f) {
+            float blendStart = settings.fullDetailDistance;
+            float blendEnd = settings.fullDetailDistance + settings.blendRange;
+
+            if (distance < blendStart) {
+                state.blendFactor = 0.0f;
+            } else if (distance > blendEnd) {
+                state.blendFactor = 1.0f;
+            } else {
+                float t = (distance - blendStart) / settings.blendRange;
+                state.blendFactor = std::pow(t, settings.blendExponent);
+            }
+        } else {
+            state.blendFactor = (state.targetLevel == TreeLODState::Level::Impostor) ? 1.0f : 0.0f;
+        }
+    }
+
+    state.targetLevel = newTarget;
+
+    // Determine current level based on blend factor
+    if (state.blendFactor < 0.01f) {
+        state.currentLevel = TreeLODState::Level::FullDetail;
+    } else if (state.blendFactor > 0.99f) {
+        state.currentLevel = TreeLODState::Level::Impostor;
+    } else {
+        state.currentLevel = TreeLODState::Level::Blending;
+    }
+}
+
+void TreeLODSystem::buildImpostorInstance(ImpostorInstanceGPU& instance, const TreeInstanceData& tree,
+                                           const TreeLODState& state, const TreeSystem& treeSystem) {
+    instance.position = tree.position();
+    instance.scale = tree.scale();
+    instance.rotation = tree.getYRotation();
+    instance.archetypeIndex = state.archetypeIndex;
+    instance.blendFactor = state.blendFactor;
+
+    // Use full tree bounds (branches + leaves) for accurate imposter sizing
+    if (tree.meshIndex < treeSystem.getMeshCount()) {
+        const auto& fullBounds = treeSystem.getFullTreeBounds(tree.meshIndex);
+        glm::vec3 extent = fullBounds.max - fullBounds.min;
+
+        float horizontalRadius = std::max(extent.x, extent.z) * 0.5f;
+        float halfHeight = extent.y * 0.5f;
+
+        instance.hSize = horizontalRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN * tree.scale();
+        instance.vSize = halfHeight * TreeLODConstants::IMPOSTOR_SIZE_MARGIN * tree.scale();
+        instance.baseOffset = (fullBounds.min.y + fullBounds.max.y) * 0.5f * tree.scale();
+    } else {
+        // Fallback to archetype bounds
+        const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
+        instance.hSize = (archetype ? archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale();
+        instance.vSize = (archetype ? archetype->treeHeight * 0.5f * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale();
+        instance.baseOffset = (archetype ? archetype->centerHeight : 0.0f) * tree.scale();
+    }
+}
+
+ImpostorPushConstants TreeLODSystem::buildImpostorPushConstants() const {
+    const auto& settings = getLODSettings();
+    ImpostorPushConstants pc;
+    pc.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
+    pc.lodParams = glm::vec4(1.0f, settings.impostorBrightness, settings.normalStrength, 0.0f);
+    pc.atlasParams = glm::vec4(settings.enableFrameBlending ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    return pc;
+}
+
+ImpostorShadowPushConstants TreeLODSystem::buildShadowPushConstants(int cascadeIndex) const {
+    ImpostorShadowPushConstants pc;
+    pc.cameraPos = glm::vec4(lastCameraPos_, 0.0f);
+    pc.lodParams = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+    pc.cascadeIndex = cascadeIndex;
+    return pc;
+}
+
+void TreeLODSystem::bindImpostorPipeline(vk::CommandBuffer& cmd, uint32_t frameIndex) {
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **impostorPipeline_);
+
+    auto viewport = vk::Viewport{}
+        .setX(0.0f).setY(0.0f)
+        .setWidth(static_cast<float>(extent_.width))
+        .setHeight(static_cast<float>(extent_.height))
+        .setMinDepth(0.0f).setMaxDepth(1.0f);
+    cmd.setViewport(0, viewport);
+
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent(vk::Extent2D{}.setWidth(extent_.width).setHeight(extent_.height));
+    cmd.setScissor(0, scissor);
+
+    cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **impostorPipelineLayout_,
+                           0, vk::DescriptorSet(impostorDescriptorSets_[frameIndex]), {});
+}
+
+void TreeLODSystem::bindShadowPipeline(vk::CommandBuffer& cmd, uint32_t frameIndex) {
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **shadowPipeline_);
+    cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **shadowPipelineLayout_,
+                           0, vk::DescriptorSet(shadowDescriptorSets_[frameIndex]), {});
+}
+
+void TreeLODSystem::bindBillboardBuffers(vk::CommandBuffer& cmd, VkBuffer instanceBuf) {
+    vk::DeviceSize offset = 0;
+    if (instanceBuf != VK_NULL_HANDLE) {
+        // GPU-culled path: only bind vertex buffer (instances come from SSBO)
+        cmd.bindVertexBuffers(0, vk::Buffer(billboardVertexBuffer_), offset);
+    } else {
+        // CPU path: bind both vertex and instance buffers
+        vk::Buffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer_};
+        vk::DeviceSize offsets[] = {0, 0};
+        cmd.bindVertexBuffers(0, vertexBuffers, offsets);
+    }
+    cmd.bindIndexBuffer(billboardIndexBuffer_, 0, vk::IndexType::eUint32);
+}
+
 void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const TreeSystem& treeSystem,
                            const ScreenParams& screenParams) {
+    (void)deltaTime;
     const auto& settings = getLODSettings();
     const auto& instances = treeSystem.getTreeInstances();
 
-    // Resize LOD states if needed
     if (lodStates_.size() != instances.size()) {
         lodStates_.resize(instances.size());
     }
 
-    // Number of archetypes (display trees define the archetypes)
     const uint32_t numArchetypes = static_cast<uint32_t>(impostorAtlas_->getArchetypeCount());
-    const uint32_t numDisplayTrees = 4;  // oak, pine, ash, aspen
-
     visibleImpostors_.clear();
 
     for (size_t i = 0; i < instances.size(); i++) {
         const auto& tree = instances[i];
         auto& state = lodStates_[i];
 
-        // Use the tree's stored archetype index (set based on leaf type in TreeSystem)
+        // Set archetype index from tree
         if (numArchetypes > 0) {
-            state.archetypeIndex = tree.archetypeIndex;
-            if (state.archetypeIndex >= numArchetypes) {
-                state.archetypeIndex = state.archetypeIndex % numArchetypes;
-            }
+            state.archetypeIndex = tree.archetypeIndex % numArchetypes;
         }
 
         float distance = glm::distance(cameraPos, tree.position());
-        state.lastDistance = distance;
-
-        // Determine target LOD level and blend factor
-        TreeLODState::Level newTarget = state.targetLevel;
-
-        if (settings.useScreenSpaceError) {
-            // Screen-space error based LOD
-            // Get archetype world error values
-            const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
-            float worldErrorFull = 0.1f * tree.scale();  // ~10cm branch thickness, scaled
-            float worldErrorImpostor = (archetype ? archetype->boundingSphereRadius * 0.1f : 1.0f) * tree.scale();
-
-            float screenErrorFull = computeScreenError(worldErrorFull, distance,
-                                                        screenParams.screenHeight, screenParams.tanHalfFOV);
-
-            // Determine LOD level based on screen error
-            // High screen error = close = needs full geometry
-            // Low screen error = far = can use impostor
-            if (screenErrorFull > settings.errorThresholdFull) {
-                newTarget = TreeLODState::Level::FullDetail;
-            } else {
-                newTarget = TreeLODState::Level::Impostor;
-            }
-
-            // Compute blend factor based on screen error
-            // blendFactor: 0.0 = full geometry only (close), 1.0 = impostor only (far)
-            if (screenErrorFull > settings.errorThresholdFull) {
-                state.blendFactor = 0.0f;  // Close: full geometry
-            } else if (screenErrorFull < settings.errorThresholdImpostor) {
-                state.blendFactor = 1.0f;  // Far: full impostor
-            } else {
-                // Blend zone: errorThresholdImpostor < screenError < errorThresholdFull
-                // As screenError decreases (farther), blend increases toward 1.0
-                float t = (settings.errorThresholdFull - screenErrorFull) /
-                          (settings.errorThresholdFull - settings.errorThresholdImpostor);
-                state.blendFactor = t * t * (3.0f - 2.0f * t);  // smoothstep
-            }
-        } else {
-            // Legacy distance-based LOD
-            if (state.targetLevel == TreeLODState::Level::FullDetail) {
-                // Currently at full detail, check if should switch to impostor
-                if (distance > settings.fullDetailDistance + settings.hysteresis) {
-                    newTarget = TreeLODState::Level::Impostor;
-                }
-            } else {
-                // Currently at impostor, check if should switch to full detail
-                if (distance < settings.fullDetailDistance - settings.hysteresis) {
-                    newTarget = TreeLODState::Level::FullDetail;
-                }
-            }
-
-            // Update blend factor
-            if (settings.blendRange > 0.0f) {
-                float blendStart = settings.fullDetailDistance;
-                float blendEnd = settings.fullDetailDistance + settings.blendRange;
-
-                if (distance < blendStart) {
-                    state.blendFactor = 0.0f;
-                } else if (distance > blendEnd) {
-                    state.blendFactor = 1.0f;
-                } else {
-                    float t = (distance - blendStart) / settings.blendRange;
-                    state.blendFactor = std::pow(t, settings.blendExponent);
-                }
-            } else {
-                state.blendFactor = (state.targetLevel == TreeLODState::Level::Impostor) ? 1.0f : 0.0f;
-            }
-        }
-
-        state.targetLevel = newTarget;
-
-        // Determine current level based on blend factor
-        if (state.blendFactor < 0.01f) {
-            state.currentLevel = TreeLODState::Level::FullDetail;
-        } else if (state.blendFactor > 0.99f) {
-            state.currentLevel = TreeLODState::Level::Impostor;
-        } else {
-            state.currentLevel = TreeLODState::Level::Blending;
-        }
+        updateTreeLODState(state, distance, tree.scale(), settings, screenParams);
 
         // Skip CPU impostor list building when GPU culling handles it
-        // GPU culling (ImpostorCullSystem) already computes visibility, LOD, and sizing
-        if (gpuCullingEnabled_) {
-            continue;
-        }
+        if (gpuCullingEnabled_) continue;
 
         // Collect visible impostors (CPU fallback path only)
-        if (settings.enableImpostors && state.blendFactor > 0.0f && state.archetypeIndex < impostorAtlas_->getArchetypeCount()) {
+        if (settings.enableImpostors && state.blendFactor > 0.0f &&
+            state.archetypeIndex < impostorAtlas_->getArchetypeCount()) {
             ImpostorInstanceGPU instance;
-            instance.position = tree.position();
-            instance.scale = tree.scale();
-            instance.rotation = tree.getYRotation();  // GPU needs Y-axis rotation as float
-            instance.archetypeIndex = state.archetypeIndex;
-            instance.blendFactor = state.blendFactor;
-
-            // Use full tree bounds (branches + leaves) for accurate imposter sizing
-            if (tree.meshIndex < treeSystem.getMeshCount()) {
-                const auto& fullBounds = treeSystem.getFullTreeBounds(tree.meshIndex);
-                glm::vec3 minB = fullBounds.min;
-                glm::vec3 maxB = fullBounds.max;
-                glm::vec3 extent = maxB - minB;
-
-                // Billboard sizing: hSize uses horizontal extent for tighter fit,
-                // vSize uses half height to prevent ground penetration.
-                float horizontalRadius = std::max(extent.x, extent.z) * 0.5f;
-                float halfHeight = extent.y * 0.5f;
-
-                float hSize = horizontalRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN * tree.scale();
-                float vSize = halfHeight * TreeLODConstants::IMPOSTOR_SIZE_MARGIN * tree.scale();
-
-                instance.hSize = hSize;
-                instance.vSize = vSize;
-                // Center offset: tree center height relative to origin
-                float centerY = (minB.y + maxB.y) * 0.5f;
-                instance.baseOffset = centerY * tree.scale();
-            } else {
-                // Fallback to archetype bounds if mesh not available
-                const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
-                float hSize = (archetype ? archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale();
-                float vSize = (archetype ? archetype->treeHeight * 0.5f * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale();
-                instance.hSize = hSize;
-                instance.vSize = vSize;
-                instance.baseOffset = (archetype ? archetype->centerHeight : 0.0f) * tree.scale();
-            }
+            buildImpostorInstance(instance, tree, state, treeSystem);
             visibleImpostors_.push_back(instance);
         }
     }
 
     lastCameraPos_ = cameraPos;
 
-    // Skip debug info calculation when GPU culling is enabled (expensive O(n) loop)
+    // Skip debug info calculation when GPU culling is enabled
     if (!gpuCullingEnabled_) {
-        // Update debug info - find nearest tree and calculate elevation
         debugInfo_.cameraPos = cameraPos;
         debugInfo_.nearestTreeDistance = std::numeric_limits<float>::max();
         for (const auto& tree : instances) {
@@ -737,7 +770,6 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
                 debugInfo_.nearestTreeDistance = dist;
                 debugInfo_.nearestTreePos = tree.position();
 
-                // Calculate elevation angle (same as shader)
                 glm::vec3 toTree = tree.position() - cameraPos;
                 float toTreeDist = glm::length(toTree);
                 if (toTreeDist > 0.001f) {
@@ -746,7 +778,6 @@ void TreeLODSystem::update(float deltaTime, const glm::vec3& cameraPos, const Tr
             }
         }
 
-        // Update instance buffer (CPU fallback path only)
         if (!visibleImpostors_.empty()) {
             updateInstanceBuffer(visibleImpostors_);
         }
@@ -922,253 +953,79 @@ void TreeLODSystem::initializeGPUCulledDescriptors(VkBuffer gpuInstanceBuffer) {
 
 void TreeLODSystem::renderImpostors(VkCommandBuffer cmd, uint32_t frameIndex,
                                      VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler) {
-    (void)uniformBuffer; (void)shadowMap; (void)shadowSampler; // Descriptors bound at initialization
+    (void)uniformBuffer; (void)shadowMap; (void)shadowSampler;
     if (visibleImpostors_.empty() || impostorAtlas_->getArchetypeCount() == 0) return;
-
-    const auto& settings = getLODSettings();
-    if (!settings.enableImpostors) return;
+    if (!getLODSettings().enableImpostors) return;
 
     vk::CommandBuffer vkCmd(cmd);
+    bindImpostorPipeline(vkCmd, frameIndex);
 
-    // Bind pipeline
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **impostorPipeline_);
-
-    // Set viewport and scissor
-    auto viewport = vk::Viewport{}
-        .setX(0.0f)
-        .setY(0.0f)
-        .setWidth(static_cast<float>(extent_.width))
-        .setHeight(static_cast<float>(extent_.height))
-        .setMinDepth(0.0f)
-        .setMaxDepth(1.0f);
-    vkCmd.setViewport(0, viewport);
-
-    auto scissor = vk::Rect2D{}
-        .setOffset({0, 0})
-        .setExtent(vk::Extent2D{}.setWidth(extent_.width).setHeight(extent_.height));
-    vkCmd.setScissor(0, scissor);
-
-    // Bind descriptor sets
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **impostorPipelineLayout_,
-                             0, vk::DescriptorSet(impostorDescriptorSets_[frameIndex]), {});
-
-    // Push constants
-    // cameraPos: xyz=camera position, w=autumnHueShift
-    // lodParams: x=blend, y=brightness, z=normalStrength, w=debugElevation
-    // atlasParams: x=hSize, y=vSize, z=baseOffset, w=debugShowCellIndex
-    struct {
-        glm::vec4 cameraPos;
-        glm::vec4 lodParams;
-        glm::vec4 atlasParams;
-    } pushConstants;
-
-    pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
-    // lodParams: x=unused, y=brightness, z=normalStrength, w=unused
-    pushConstants.lodParams = glm::vec4(
-        1.0f,
-        settings.impostorBrightness,
-        settings.normalStrength,
-        0.0f
-    );
-
-    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=unused
-    pushConstants.atlasParams = glm::vec4(
-        settings.enableFrameBlending ? 1.0f : 0.0f,
-        0.0f,
-        0.0f,
-        0.0f
-    );
-
-    vkCmd.pushConstants<decltype(pushConstants)>(
+    auto pc = buildImpostorPushConstants();
+    vkCmd.pushConstants<ImpostorPushConstants>(
         **impostorPipelineLayout_,
         vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-        0, pushConstants);
+        0, pc);
 
-    // Bind buffers
-    vk::Buffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer_};
-    vk::DeviceSize offsets[] = {0, 0};
-    vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
-    vkCmd.bindIndexBuffer(billboardIndexBuffer_, 0, vk::IndexType::eUint32);
-
-    // Draw instanced
+    bindBillboardBuffers(vkCmd);
     vkCmd.drawIndexed(billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
 }
 
 void TreeLODSystem::renderImpostorShadows(VkCommandBuffer cmd, uint32_t frameIndex,
                                            int cascadeIndex, VkBuffer uniformBuffer) {
-    (void)uniformBuffer; // Descriptors bound at initialization
+    (void)uniformBuffer;
     if (visibleImpostors_.empty() || impostorAtlas_->getArchetypeCount() == 0) return;
-    if (!shadowPipeline_) return;
-
-    const auto& settings = getLODSettings();
-    if (!settings.enableImpostors) return;
+    if (!shadowPipeline_ || !getLODSettings().enableImpostors) return;
 
     vk::CommandBuffer vkCmd(cmd);
+    bindShadowPipeline(vkCmd, frameIndex);
 
-    // Bind shadow pipeline
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **shadowPipeline_);
-
-    // Bind descriptor sets - use the main UBO descriptor set passed in for cascade matrices
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **shadowPipelineLayout_,
-                             0, vk::DescriptorSet(shadowDescriptorSets_[frameIndex]), {});
-
-    // Push constants with cascade index
-    struct {
-        glm::vec4 cameraPos;
-        glm::vec4 lodParams;
-        glm::vec4 atlasParams;
-        int cascadeIndex;
-    } pushConstants;
-
-    pushConstants.cameraPos = glm::vec4(lastCameraPos_, 1.0f);
-    // lodParams: x=unused, y=brightness, z=normalStrength, w=unused
-    pushConstants.lodParams = glm::vec4(
-        1.0f,
-        settings.impostorBrightness,
-        settings.normalStrength,
-        0.0f
-    );
-
-    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=unused
-    pushConstants.atlasParams = glm::vec4(
-        settings.enableFrameBlending ? 1.0f : 0.0f,
-        0.0f,
-        0.0f,
-        0.0f
-    );
-    pushConstants.cascadeIndex = cascadeIndex;
-
-    vkCmd.pushConstants<decltype(pushConstants)>(
+    auto pc = buildShadowPushConstants(cascadeIndex);
+    vkCmd.pushConstants<ImpostorShadowPushConstants>(
         **shadowPipelineLayout_,
         vk::ShaderStageFlagBits::eVertex,
-        0, pushConstants);
+        0, pc);
 
-    // Bind buffers
-    vk::Buffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer_};
-    vk::DeviceSize offsets[] = {0, 0};
-    vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
-    vkCmd.bindIndexBuffer(billboardIndexBuffer_, 0, vk::IndexType::eUint32);
-
-    // Draw instanced
+    bindBillboardBuffers(vkCmd);
     vkCmd.drawIndexed(billboardIndexCount_, static_cast<uint32_t>(visibleImpostors_.size()), 0, 0, 0);
 }
 
 void TreeLODSystem::renderImpostorsGPUCulled(VkCommandBuffer cmd, uint32_t frameIndex,
                                               VkBuffer uniformBuffer, VkImageView shadowMap, VkSampler shadowSampler,
                                               VkBuffer gpuInstanceBuffer, VkBuffer indirectDrawBuffer) {
-    (void)uniformBuffer; (void)shadowMap; (void)shadowSampler; (void)gpuInstanceBuffer; // Descriptors bound at initialization
+    (void)uniformBuffer; (void)shadowMap; (void)shadowSampler; (void)gpuInstanceBuffer;
     if (impostorAtlas_->getArchetypeCount() == 0) return;
-
-    const auto& settings = getLODSettings();
-    if (!settings.enableImpostors) return;
-
-    if (impostorDescriptorSets_.empty()) return;
+    if (!getLODSettings().enableImpostors || impostorDescriptorSets_.empty()) return;
 
     vk::CommandBuffer vkCmd(cmd);
+    bindImpostorPipeline(vkCmd, frameIndex);
 
-    // Bind pipeline
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **impostorPipeline_);
-
-    // Set viewport and scissor
-    auto viewport = vk::Viewport{}
-        .setX(0.0f)
-        .setY(0.0f)
-        .setWidth(static_cast<float>(extent_.width))
-        .setHeight(static_cast<float>(extent_.height))
-        .setMinDepth(0.0f)
-        .setMaxDepth(1.0f);
-    vkCmd.setViewport(0, viewport);
-
-    auto scissor = vk::Rect2D{}
-        .setOffset({0, 0})
-        .setExtent(vk::Extent2D{}.setWidth(extent_.width).setHeight(extent_.height));
-    vkCmd.setScissor(0, scissor);
-
-    // Bind descriptor sets
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **impostorPipelineLayout_,
-                             0, vk::DescriptorSet(impostorDescriptorSets_[frameIndex]), {});
-
-    // Push constants
-    struct {
-        glm::vec4 cameraPos;
-        glm::vec4 lodParams;
-        glm::vec4 atlasParams;
-    } pushConstants;
-
-    pushConstants.cameraPos = glm::vec4(lastCameraPos_, settings.autumnHueShift);
-    // lodParams: x=unused, y=brightness, z=normalStrength, w=unused
-    pushConstants.lodParams = glm::vec4(
-        1.0f,
-        settings.impostorBrightness,
-        settings.normalStrength,
-        0.0f
-    );
-
-    // atlasParams: x=enableFrameBlending, y=unused, z=unused, w=unused
-    pushConstants.atlasParams = glm::vec4(
-        settings.enableFrameBlending ? 1.0f : 0.0f,
-        0.0f,
-        0.0f,
-        0.0f
-    );
-
-    vkCmd.pushConstants<decltype(pushConstants)>(
+    auto pc = buildImpostorPushConstants();
+    vkCmd.pushConstants<ImpostorPushConstants>(
         **impostorPipelineLayout_,
         vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-        0, pushConstants);
+        0, pc);
 
-    // Bind vertex and index buffers
-    vk::DeviceSize offset = 0;
-    vkCmd.bindVertexBuffers(0, vk::Buffer(billboardVertexBuffer_), offset);
-    vkCmd.bindIndexBuffer(billboardIndexBuffer_, 0, vk::IndexType::eUint32);
-
-    // Draw using indirect buffer from GPU culling
+    bindBillboardBuffers(vkCmd, gpuInstanceBuffer);
     vkCmd.drawIndexedIndirect(indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
 }
 
 void TreeLODSystem::renderImpostorShadowsGPUCulled(VkCommandBuffer cmd, uint32_t frameIndex,
                                                    int cascadeIndex, VkBuffer uniformBuffer,
                                                    VkBuffer gpuInstanceBuffer, VkBuffer indirectDrawBuffer) {
-    (void)uniformBuffer; (void)gpuInstanceBuffer; // Descriptors bound at initialization
+    (void)uniformBuffer; (void)gpuInstanceBuffer;
     if (impostorAtlas_->getArchetypeCount() == 0) return;
-    if (!shadowPipeline_) return;
-
-    const auto& settings = getLODSettings();
-    if (!settings.enableImpostors) return;
-
-    if (shadowDescriptorSets_.empty()) return;
+    if (!shadowPipeline_ || !getLODSettings().enableImpostors || shadowDescriptorSets_.empty()) return;
 
     vk::CommandBuffer vkCmd(cmd);
+    bindShadowPipeline(vkCmd, frameIndex);
 
-    // Bind shadow pipeline
-    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **shadowPipeline_);
-    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **shadowPipelineLayout_,
-                             0, vk::DescriptorSet(shadowDescriptorSets_[frameIndex]), {});
-
-    // Push constants for shadow pass - must match shader layout:
-    // vec4 cameraPos (offset 0), vec4 lodParams (offset 16), int cascadeIndex (offset 32)
-    struct {
-        glm::vec4 cameraPos;
-        glm::vec4 lodParams;
-        int cascadeIndex;
-        float _pad[3];
-    } pushConstants;
-    pushConstants.cameraPos = glm::vec4(lastCameraPos_, 0.0f);
-    // lodParams is unused in shadow shader but kept for struct compatibility
-    pushConstants.lodParams = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
-    pushConstants.cascadeIndex = cascadeIndex;
-
-    vkCmd.pushConstants<decltype(pushConstants)>(
+    auto pc = buildShadowPushConstants(cascadeIndex);
+    vkCmd.pushConstants<ImpostorShadowPushConstants>(
         **shadowPipelineLayout_,
         vk::ShaderStageFlagBits::eVertex,
-        0, pushConstants);
+        0, pc);
 
-    // Bind vertex and index buffers
-    vk::DeviceSize offset = 0;
-    vkCmd.bindVertexBuffers(0, vk::Buffer(billboardVertexBuffer_), offset);
-    vkCmd.bindIndexBuffer(billboardIndexBuffer_, 0, vk::IndexType::eUint32);
-
-    // Draw using indirect buffer from GPU culling
+    bindBillboardBuffers(vkCmd, gpuInstanceBuffer);
     vkCmd.drawIndexedIndirect(indirectDrawBuffer, 0, 1, sizeof(VkDrawIndexedIndirectCommand));
 }
 

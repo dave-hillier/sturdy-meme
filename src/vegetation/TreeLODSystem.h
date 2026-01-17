@@ -13,6 +13,7 @@
 #include "DescriptorManager.h"
 
 class TreeSystem;
+struct TreeInstanceData;
 
 // Per-tree LOD state
 struct TreeLODState {
@@ -40,6 +41,21 @@ struct ImpostorInstanceGPU {
     float vSize;        // Vertical half-size (from archetype, pre-scaled)
     float baseOffset;   // Base offset (from archetype, pre-scaled)
     float _padding;
+};
+
+// Push constants for impostor rendering
+struct ImpostorPushConstants {
+    glm::vec4 cameraPos;    // xyz=camera position, w=autumnHueShift
+    glm::vec4 lodParams;    // x=unused, y=brightness, z=normalStrength, w=unused
+    glm::vec4 atlasParams;  // x=enableFrameBlending, y=unused, z=unused, w=unused
+};
+
+// Push constants for shadow rendering (extends ImpostorPushConstants)
+struct ImpostorShadowPushConstants {
+    glm::vec4 cameraPos;
+    glm::vec4 lodParams;
+    int cascadeIndex;
+    float _pad[3];
 };
 
 class TreeLODSystem {
@@ -178,6 +194,21 @@ private:
     bool createInstanceBuffer(size_t maxInstances);
     bool createBillboardMesh();
     void updateInstanceBuffer(const std::vector<ImpostorInstanceGPU>& instances);
+
+    // LOD calculation helpers
+    void updateTreeLODState(TreeLODState& state, float distance, float treeScale,
+                            const TreeLODSettings& settings, const ScreenParams& screenParams);
+    void buildImpostorInstance(ImpostorInstanceGPU& instance, const TreeInstanceData& tree,
+                               const TreeLODState& state, const TreeSystem& treeSystem);
+
+    // Push constant helpers
+    ImpostorPushConstants buildImpostorPushConstants() const;
+    ImpostorShadowPushConstants buildShadowPushConstants(int cascadeIndex) const;
+
+    // Render setup helpers
+    void bindImpostorPipeline(vk::CommandBuffer& cmd, uint32_t frameIndex);
+    void bindShadowPipeline(vk::CommandBuffer& cmd, uint32_t frameIndex);
+    void bindBillboardBuffers(vk::CommandBuffer& cmd, VkBuffer instanceBuf = VK_NULL_HANDLE);
 
     const vk::raii::Device* raiiDevice_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
