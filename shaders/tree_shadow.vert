@@ -53,11 +53,11 @@ void main() {
     // Apply bending around pivot point
     vec3 offsetFromPivot = localPos - pivotPoint;
 
-    // Calculate inherited sway from trunk at the branch attachment point
-    // For trunk (pivotPoint.y = 0), this is zero. For branches, inherits trunk movement.
+    // Calculate inherited sway from ALL ancestor branches (hierarchical)
+    // Formula: cumulativeFlex = 0.04 * L + 0.03 * L * (L-1) where L = branchLevel
     float pivotHeight = pivotPoint.y;
-    float trunkFlexibility = windCalculateBranchFlexibility(0.0);
-    float inheritedAmount = pivotHeight * trunkFlexibility * windParams.strength;
+    float cumulativeFlexibility = 0.04 * branchLevel + 0.03 * branchLevel * (branchLevel - 1.0);
+    float inheritedAmount = pivotHeight * cumulativeFlexibility * windParams.strength;
     vec3 inheritedSway = osc.windDir3D * osc.mainBend * inheritedAmount +
                          osc.windPerp3D * osc.perpBend * inheritedAmount * 0.5;
 
