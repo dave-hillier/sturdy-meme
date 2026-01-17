@@ -437,11 +437,14 @@ void main() {
     vec3 R = reflect(-V, N);
 
     // Shadow calculation
-    float shadow = calculateCascadedShadow(
-        fragWorldPos, N, sunDir,
-        ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
-        ubo.shadowMapSize, shadowMapArray
-    );
+    float shadow = 1.0;
+    if (ubo.shadowsEnabled > 0.5) {
+        shadow = calculateCascadedShadow(
+            fragWorldPos, N, sunDir,
+            ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
+            ubo.shadowMapSize, shadowMapArray
+        );
+    }
 
     // =========================================================================
     // PHASE 12: Get blended material properties

@@ -195,11 +195,14 @@ void main() {
     vec3 L = normalize(ubo.toSunDirection.xyz);  // sunDirection points toward sun
 
     // Shadow sampling
-    float shadow = calculateCascadedShadow(
-        fragWorldPos, worldNormal, L,
-        ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
-        ubo.shadowMapSize, shadowMapArray
-    );
+    float shadow = 1.0;
+    if (ubo.shadowsEnabled > 0.5) {
+        shadow = calculateCascadedShadow(
+            fragWorldPos, worldNormal, L,
+            ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
+            ubo.shadowMapSize, shadowMapArray
+        );
+    }
 
     // Calculate lighting using common function
     vec3 color = calculateTreeImpostorLighting(

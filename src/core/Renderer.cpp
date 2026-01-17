@@ -679,6 +679,7 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     mainConfig.cloudCoverage = cloudCoverage;
     mainConfig.cloudDensity = cloudDensity;
     mainConfig.skyExposure = skyExposure;
+    mainConfig.shadowsEnabled = perfToggles.shadowPass;  // Skip shadow sampling when shadows disabled
     UniformBufferObject ubo = systems_->uboBuilder().buildUniformBufferData(camera, lighting, currentTimeOfDay, mainConfig);
 
     UBOBuilder::SnowConfig snowConfig{};

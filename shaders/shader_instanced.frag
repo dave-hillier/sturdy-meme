@@ -113,11 +113,14 @@ void main() {
 
     // Shadow calculation
     vec3 sunL = normalize(ubo.toSunDirection.xyz);
-    float terrainShadow = calculateCascadedShadow(
-        fragWorldPos, N, sunL,
-        ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
-        ubo.shadowMapSize, shadowMapArray
-    );
+    float terrainShadow = 1.0;
+    if (ubo.shadowsEnabled > 0.5) {
+        terrainShadow = calculateCascadedShadow(
+            fragWorldPos, N, sunL,
+            ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
+            ubo.shadowMapSize, shadowMapArray
+        );
+    }
 
     float cloudShadowFactor = 1.0;
     if (cloudShadow.cloudShadowEnabled > 0.5) {

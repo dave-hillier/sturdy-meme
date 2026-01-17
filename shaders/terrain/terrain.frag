@@ -166,6 +166,9 @@ layout(location = 0) out vec4 outColor;
 
 // Shadow sampling - use common shadow functions
 float getShadowFactor(vec3 worldPos) {
+    if (ubo.shadowsEnabled < 0.5) {
+        return 1.0;  // No shadow when disabled
+    }
     vec3 sunL = normalize(ubo.toSunDirection.xyz);
     return calculateCascadedShadow(
         worldPos,
