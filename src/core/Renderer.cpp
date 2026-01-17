@@ -30,6 +30,7 @@
 #include "TimeSystem.h"
 #include "CelestialCalculator.h"
 #include "EnvironmentSettings.h"
+#include "interfaces/IEnvironmentControl.h"
 #include "UBOBuilder.h"
 // Terrain and atmosphere
 #include "TerrainSystem.h"
