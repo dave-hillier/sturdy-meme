@@ -135,7 +135,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         if (!initSkinnedMeshRenderer()) return false;
     }
 
-    if (!createCommandBuffers()) return false;
+    // Note: Command buffers are now created by VulkanContext in initCoreVulkanResources()
 
     // Initialize global buffer manager for all per-frame shared buffers
     {
