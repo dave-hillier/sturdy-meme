@@ -1,0 +1,91 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
+// Compute-based bloom downsample
+// Uses 13-tap filter with Karis average to prevent fireflies
+// Much faster than fragment shader approach due to no render pass overhead
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// Source texture (previous mip or HDR input)
+layout(binding = 0) uniform sampler2D srcTexture;
+
+// Destination mip level
+layout(binding = 1, rgba16f) uniform writeonly image2D dstMip;
+
+// Push constants
+layout(push_constant) uniform PushConstants {
+    vec2 srcResolution;    // Source texture resolution
+    float threshold;       // Bloom threshold (only used for first pass)
+    int isFirstPass;       // 1 = apply threshold, 0 = normal downsample
+} pc;
+
+// Soft threshold function for bloom extraction
+vec3 softThreshold(vec3 color, float threshold) {
+    float brightness = max(color.r, max(color.g, color.b));
+    float soft = brightness - threshold + 0.5;
+    soft = clamp(soft, 0.0, 1.0);
+    soft = soft * soft * (3.0 - 2.0 * soft);
+    float contribution = max(soft, brightness - threshold);
+    contribution /= max(brightness, 0.00001);
+    return color * contribution;
+}
+
+void main() {
+    ivec2 dstCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dstSize = imageSize(dstMip);
+
+    // Early out if outside destination bounds
+    if (dstCoord.x >= dstSize.x || dstCoord.y >= dstSize.y) {
+        return;
+    }
+
+    // Calculate UV for center of destination pixel in source texture
+    vec2 texelSize = 1.0 / pc.srcResolution;
+    vec2 uv = (vec2(dstCoord) + 0.5) * 2.0 * texelSize;
+
+    // 13-tap downsample filter pattern
+    // Take samples in a tent filter pattern
+    vec3 a = texture(srcTexture, uv + vec2(-2.0, -2.0) * texelSize).rgb;
+    vec3 b = texture(srcTexture, uv + vec2( 0.0, -2.0) * texelSize).rgb;
+    vec3 c = texture(srcTexture, uv + vec2( 2.0, -2.0) * texelSize).rgb;
+
+    vec3 d = texture(srcTexture, uv + vec2(-1.0, -1.0) * texelSize).rgb;
+    vec3 e = texture(srcTexture, uv + vec2( 1.0, -1.0) * texelSize).rgb;
+
+    vec3 f = texture(srcTexture, uv + vec2(-2.0,  0.0) * texelSize).rgb;
+    vec3 g = texture(srcTexture, uv).rgb;
+    vec3 h = texture(srcTexture, uv + vec2( 2.0,  0.0) * texelSize).rgb;
+
+    vec3 i = texture(srcTexture, uv + vec2(-1.0,  1.0) * texelSize).rgb;
+    vec3 j = texture(srcTexture, uv + vec2( 1.0,  1.0) * texelSize).rgb;
+
+    vec3 k = texture(srcTexture, uv + vec2(-2.0,  2.0) * texelSize).rgb;
+    vec3 l = texture(srcTexture, uv + vec2( 0.0,  2.0) * texelSize).rgb;
+    vec3 m = texture(srcTexture, uv + vec2( 2.0,  2.0) * texelSize).rgb;
+
+    // Apply Karis average to reduce fireflies
+    vec3 groups[5];
+    groups[0] = (d + e + i + j) * 0.25;
+    groups[1] = (a + b + g + f) * 0.25;
+    groups[2] = (b + c + h + g) * 0.25;
+    groups[3] = (f + g + l + k) * 0.25;
+    groups[4] = (g + h + m + l) * 0.25;
+
+    groups[0] *= 0.5 / (1.0 + max(groups[0].r, max(groups[0].g, groups[0].b)));
+    groups[1] *= 0.125 / (1.0 + max(groups[1].r, max(groups[1].g, groups[1].b)));
+    groups[2] *= 0.125 / (1.0 + max(groups[2].r, max(groups[2].g, groups[2].b)));
+    groups[3] *= 0.125 / (1.0 + max(groups[3].r, max(groups[3].g, groups[3].b)));
+    groups[4] *= 0.125 / (1.0 + max(groups[4].r, max(groups[4].g, groups[4].b)));
+
+    vec3 result = groups[0] + groups[1] + groups[2] + groups[3] + groups[4];
+
+    // Apply threshold only on first pass
+    if (pc.isFirstPass != 0) {
+        result = softThreshold(result, pc.threshold);
+    }
+
+    imageStore(dstMip, dstCoord, vec4(result, 1.0));
+}

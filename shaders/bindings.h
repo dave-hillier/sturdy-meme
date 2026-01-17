@@ -282,6 +282,7 @@
 #define BINDING_PP_FROXEL                  3   // Froxel volume
 #define BINDING_PP_BLOOM                   4   // Bloom texture
 #define BINDING_PP_BILATERAL_GRID          5   // Bilateral grid 3D texture
+#define BINDING_PP_GODRAYS                 6   // Quarter-res god rays texture
 
 // Bilateral Grid Local Tone Mapping (Ghost of Tsushima)
 #define BINDING_BILATERAL_HDR_INPUT        0   // HDR input image
@@ -698,6 +699,7 @@ constexpr uint32_t PP_DEPTH               = BINDING_PP_DEPTH;
 constexpr uint32_t PP_FROXEL              = BINDING_PP_FROXEL;
 constexpr uint32_t PP_BLOOM               = BINDING_PP_BLOOM;
 constexpr uint32_t PP_BILATERAL_GRID      = BINDING_PP_BILATERAL_GRID;
+constexpr uint32_t PP_GODRAYS             = BINDING_PP_GODRAYS;
 
 // Bilateral Grid
 constexpr uint32_t BILATERAL_HDR_INPUT    = BINDING_BILATERAL_HDR_INPUT;

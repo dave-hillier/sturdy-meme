@@ -1,0 +1,112 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+
+// Quarter-resolution god rays compute shader
+// Renders light shafts at 1/4 resolution for massive performance improvement
+// The expensive radial blur loop runs on 1/16th the pixels
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// Input textures (at full resolution)
+layout(binding = 0) uniform sampler2D hdrInput;
+layout(binding = 1) uniform sampler2D depthInput;
+
+// Output at quarter resolution
+layout(binding = 2, rgba16f) uniform writeonly image2D godRaysOutput;
+
+// Push constants
+layout(push_constant) uniform PushConstants {
+    vec2 sunScreenPos;     // Sun position in screen space [0,1]
+    float intensity;       // God ray strength
+    float decay;           // Falloff per sample
+    float nearPlane;       // For depth linearization
+    float farPlane;
+    float bloomThreshold;  // Brightness threshold
+    int sampleCount;       // Number of samples (16, 32, or 64)
+} pc;
+
+// Compute luminance
+float getLuminance(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+// Linearize depth from NDC (Vulkan: 0-1 range)
+float linearizeDepth(float depth) {
+    return pc.nearPlane * pc.farPlane / (pc.farPlane - depth * (pc.farPlane - pc.nearPlane));
+}
+
+void main() {
+    ivec2 dstCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 dstSize = imageSize(godRaysOutput);
+
+    // Early out if outside destination bounds
+    if (dstCoord.x >= dstSize.x || dstCoord.y >= dstSize.y) {
+        return;
+    }
+
+    // Calculate UV (center of pixel)
+    vec2 uv = (vec2(dstCoord) + 0.5) / vec2(dstSize);
+
+    // Early out if sun is not roughly on screen
+    if (pc.sunScreenPos.x < -0.5 || pc.sunScreenPos.x > 1.5 ||
+        pc.sunScreenPos.y < -0.5 || pc.sunScreenPos.y > 1.5) {
+        imageStore(godRaysOutput, dstCoord, vec4(0.0));
+        return;
+    }
+
+    // Direction from pixel to sun
+    vec2 delta = (pc.sunScreenPos - uv) / float(pc.sampleCount);
+
+    // Initial sample weight
+    float illumination = 0.0;
+    float weight = 1.0;
+    vec2 sampleUV = uv;
+
+    // Sky depth threshold - pixels at or near far plane are sky
+    const float SKY_DEPTH_THRESHOLD = 0.9999;
+
+    // Accumulate samples along ray toward sun
+    for (int i = 0; i < pc.sampleCount; i++) {
+        sampleUV += delta;
+
+        // Check bounds
+        if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0) {
+            break;
+        }
+
+        // Only accumulate from sky pixels (not geometry)
+        float sampleDepth = texture(depthInput, sampleUV).r;
+        if (sampleDepth < SKY_DEPTH_THRESHOLD) {
+            // This is geometry, not sky - skip it
+            weight *= pc.decay;
+            continue;
+        }
+
+        // Sample brightness
+        vec3 sampleColor = texture(hdrInput, sampleUV).rgb;
+        float brightness = getLuminance(sampleColor);
+
+        // Only accumulate from bright sky pixels
+        if (brightness > pc.bloomThreshold * 0.5) {
+            illumination += brightness * weight;
+        }
+
+        // Exponential decay
+        weight *= pc.decay;
+    }
+
+    // Normalize and scale
+    illumination /= float(pc.sampleCount);
+
+    // Fade based on distance from sun
+    float distFromSun = length(uv - pc.sunScreenPos);
+    float radialFalloff = 1.0 - clamp(distFromSun * 1.5, 0.0, 1.0);
+    radialFalloff *= radialFalloff;
+
+    // Warm-tinted god rays
+    vec3 godRayColor = vec3(1.0, 0.95, 0.8) * illumination * radialFalloff * pc.intensity;
+
+    imageStore(godRaysOutput, dstCoord, vec4(godRayColor, 1.0));
+}
