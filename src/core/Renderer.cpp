@@ -1158,41 +1158,5 @@ void Renderer::updateHiZObjectData() {
     systems_->hiZ().updateObjectData(cullObjects);
 }
 
-// ============================================================================
-// Cloud and sky exposure control - delegates to EnvironmentControlSubsystem
-// ============================================================================
-
-void Renderer::setCloudCoverage(float coverage) {
-    systems_->environmentControl().setCloudCoverage(coverage);
-}
-
-float Renderer::getCloudCoverage() const {
-    return systems_->environmentControl().getCloudCoverage();
-}
-
-void Renderer::setCloudDensity(float density) {
-    systems_->environmentControl().setCloudDensity(density);
-}
-
-float Renderer::getCloudDensity() const {
-    return systems_->environmentControl().getCloudDensity();
-}
-
-void Renderer::setSkyExposure(float exposure) {
-    systems_->environmentControl().setSkyExposure(exposure);
-}
-
-float Renderer::getSkyExposure() const {
-    return systems_->environmentControl().getSkyExposure();
-}
-
-void Renderer::toggleCloudStyle() {
-    systems_->environmentControl().toggleCloudStyle();
-}
-
-bool Renderer::isUsingParaboloidClouds() const {
-    return systems_->environmentControl().isUsingParaboloidClouds();
-}
-
 // Resource access
 DescriptorManager::Pool* Renderer::getDescriptorPool() { return &*descriptorManagerPool; }

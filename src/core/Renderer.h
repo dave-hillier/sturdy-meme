@@ -139,21 +139,11 @@ public:
     void setTerrainEnabled(bool enabled) { terrainEnabled = enabled; }
     bool isTerrainEnabled() const { return terrainEnabled; }
 
-    // Cloud parameters - delegated to EnvironmentControlSubsystem (authoritative source)
-    void setCloudCoverage(float coverage);
-    float getCloudCoverage() const;
-    void setCloudDensity(float density);
-    float getCloudDensity() const;
-    void setSkyExposure(float exposure);
-    float getSkyExposure() const;
-
     // Debug visualization toggles (local state)
     void toggleCascadeDebug() { showCascadeDebug = !showCascadeDebug; }
     bool isShowingCascadeDebug() const { return showCascadeDebug; }
     void toggleSnowDepthDebug() { showSnowDepthDebug = !showSnowDepthDebug; }
     bool isShowingSnowDepthDebug() const { return showSnowDepthDebug; }
-    void toggleCloudStyle();
-    bool isUsingParaboloidClouds() const;
 
 
     // Physics debug (local state)
