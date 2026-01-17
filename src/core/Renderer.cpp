@@ -1556,6 +1556,9 @@ void Renderer::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex) {
 void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime) {
     vk::CommandBuffer vkCmd(cmd);
 
+    // Wrap entire HDR pass in a GPU zone to measure total time
+    systems_->profiler().beginGpuZone(cmd, "HDRPass");
+
     std::array<vk::ClearValue, 2> clearValues{};
     clearValues[0].color = vk::ClearColorValue{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
     clearValues[1].depthStencil = vk::ClearDepthStencilValue{1.0f, 0};
@@ -1657,11 +1660,16 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     }
 
     vkCmd.endRenderPass();
+
+    systems_->profiler().endGpuZone(cmd, "HDRPass");
 }
 
 void Renderer::recordHDRPassWithSecondaries(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime,
                                             const std::vector<vk::CommandBuffer>& secondaries) {
     vk::CommandBuffer vkCmd(cmd);
+
+    // Wrap entire HDR pass in a GPU zone to measure total time
+    systems_->profiler().beginGpuZone(cmd, "HDRPass");
 
     std::array<vk::ClearValue, 2> clearValues{};
     clearValues[0].color = vk::ClearColorValue{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
@@ -1686,6 +1694,8 @@ void Renderer::recordHDRPassWithSecondaries(VkCommandBuffer cmd, uint32_t frameI
     }
 
     vkCmd.endRenderPass();
+
+    systems_->profiler().endGpuZone(cmd, "HDRPass");
 }
 
 void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, uint32_t slot) {

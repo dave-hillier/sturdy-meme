@@ -379,13 +379,26 @@ void GpuProfiler::collectResults(uint32_t frameIndex) {
     std::sort(sortedZones.begin(), sortedZones.end(),
               [](const auto& a, const auto& b) { return a.second > b.second; });
 
-    // Calculate sum of measured zones (excluding Terrain:* sub-zones if TerrainCompute is present)
+    // Calculate sum of measured zones, excluding sub-zones from the Idle/Sync calculation
+    // Sub-zones (e.g., HDR:Sky, Shadow:Terrain) are nested inside parent zones and would be double-counted
     float measuredTotal = 0.0f;
     bool hasTerrainCompute = smoothedZoneTimes.count("TerrainCompute") > 0;
+    bool hasHDRPass = smoothedZoneTimes.count("HDRPass") > 0;
+    bool hasShadowPass = smoothedZoneTimes.count("ShadowPass") > 0;
+    bool hasAtmosphere = smoothedZoneTimes.count("Atmosphere") > 0;
 
     for (const auto& [name, time] : sortedZones) {
-        // Skip Terrain:* sub-zones if we have the aggregated TerrainCompute
+        // Skip sub-zones if we have the parent zone (they're already counted in the parent)
         if (hasTerrainCompute && name.rfind("Terrain:", 0) == 0) {
+            continue;
+        }
+        if (hasHDRPass && name.rfind("HDR:", 0) == 0) {
+            continue;
+        }
+        if (hasShadowPass && name.rfind("Shadow:", 0) == 0) {
+            continue;
+        }
+        if (hasAtmosphere && name.rfind("Atmosphere:", 0) == 0) {
             continue;
         }
 
