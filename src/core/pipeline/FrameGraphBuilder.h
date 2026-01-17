@@ -1,7 +1,6 @@
 #pragma once
 
 #include "FrameGraph.h"
-#include "RenderPipeline.h"
 #include "PerformanceToggles.h"
 #include <vulkan/vulkan_raii.hpp>
 #include <functional>
@@ -38,6 +37,7 @@ public:
     struct State {
         float* lastSunIntensity = nullptr;
         bool* hdrPassEnabled = nullptr;
+        bool* terrainEnabled = nullptr;
         PerformanceToggles* perfToggles = nullptr;
         std::vector<vk::raii::Framebuffer>* framebuffers = nullptr;
     };
@@ -45,7 +45,6 @@ public:
     static bool build(
         FrameGraph& frameGraph,
         RendererSystems& systems,
-        RenderPipeline& renderPipeline,
         const Callbacks& callbacks,
         const State& state
     );

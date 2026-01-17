@@ -3,7 +3,6 @@
 #include "FrameGraph.h"
 
 class RendererSystems;
-class RenderPipeline;
 struct PerformanceToggles;
 
 /**
@@ -15,6 +14,7 @@ namespace ComputePasses {
 
 struct Config {
     PerformanceToggles* perfToggles = nullptr;
+    bool* terrainEnabled = nullptr;
 };
 
 struct PassIds {
@@ -22,6 +22,6 @@ struct PassIds {
     FrameGraph::PassId froxel = FrameGraph::INVALID_PASS;
 };
 
-PassIds addPasses(FrameGraph& graph, RendererSystems& systems, RenderPipeline& pipeline, const Config& config);
+PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& config);
 
 } // namespace ComputePasses

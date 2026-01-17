@@ -2,7 +2,6 @@
 #include "Renderer.h"
 #include "RendererInit.h"
 #include "RendererSystems.h"
-#include "RenderPipelineFactory.h"
 #include "ShaderLoader.h"
 #include "GraphicsPipelineFactory.h"
 #include "MaterialDescriptorFactory.h"
@@ -174,14 +173,7 @@ bool Renderer::initInternal(const InitInfo& info) {
         initResizeCoordinator();
     }
 
-    // Setup render pipeline stages with lambdas
-    {
-        INIT_PROFILE_PHASE("RenderPipeline");
-        setupRenderPipeline();
-    }
-    SDL_Log("Render pipeline configured");
-
-    // Setup frame graph with dependencies (Phase 3: threading migration)
+    // Setup frame graph with dependencies
     {
         INIT_PROFILE_PHASE("FrameGraph");
         setupFrameGraph();
@@ -189,34 +181,6 @@ bool Renderer::initInternal(const InitInfo& info) {
     SDL_Log("Frame graph configured");
 
     return true;
-}
-
-void Renderer::setupRenderPipeline() {
-    // Use factory to configure the render pipeline
-    // This moves all the lambda captures and subsystem includes to RenderPipelineFactory.cpp
-    RenderPipelineFactory::PipelineState state{};
-    state.terrainEnabled = &terrainEnabled;
-    state.physicsDebugEnabled = &physicsDebugEnabled;
-    state.currentFrame = frameSync_.currentIndexPtr();
-    state.lastViewProj = &lastViewProj;
-    state.graphicsPipeline = **graphicsPipeline_;
-
-    RenderPipelineFactory::setupPipeline(
-        renderPipeline,
-        *systems_,
-        state,
-        [this](VkCommandBuffer cmd, uint32_t frameIndex) {
-            recordSceneObjects(cmd, frameIndex);
-        }
-    );
-
-    // Apply initial toggle state
-    syncPerformanceToggles();
-}
-
-void Renderer::syncPerformanceToggles() {
-    // Use factory to sync toggles (reduces code duplication)
-    RenderPipelineFactory::syncToggles(renderPipeline, perfToggles);
 }
 
 void Renderer::setupFrameGraph() {
@@ -240,17 +204,14 @@ void Renderer::setupFrameGraph() {
     FrameGraphBuilder::State state;
     state.lastSunIntensity = &lastSunIntensity;
     state.hdrPassEnabled = &hdrPassEnabled;
+    state.terrainEnabled = &terrainEnabled;
     state.perfToggles = &perfToggles;
     state.framebuffers = &framebuffers_;
 
     // Use FrameGraphBuilder to configure all passes and dependencies
-    useFrameGraph = FrameGraphBuilder::build(
-        frameGraph_,
-        *systems_,
-        renderPipeline,
-        callbacks,
-        state
-    );
+    if (!FrameGraphBuilder::build(frameGraph_, *systems_, callbacks, state)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to build frame graph");
+    }
 }
 
 
@@ -720,9 +681,6 @@ bool Renderer::render(const Camera& camera) {
         return false;
     }
 
-    // Sync performance toggles to pipeline stages (allows runtime toggle changes)
-    syncPerformanceToggles();
-
     VkDevice device = vulkanContext_->getVkDevice();
     VkSwapchainKHR swapchain = vulkanContext_->getVkSwapchain();
     VkQueue graphicsQueue = vulkanContext_->getVkGraphicsQueue();
@@ -880,150 +838,28 @@ bool Renderer::render(const Camera& camera) {
     // Begin GPU profiling frame
     systems_->profiler().beginGpuFrame(cmd, frame.frameIndex);
 
-    // Build render resources and context for pipeline stages
+    // Build render resources and context for frame graph passes
     RenderResources resources = buildRenderResources(imageIndex);
     RenderContext ctx(cmd, frame.frameIndex, frame, resources, &cmdDiag);
 
-    if (useFrameGraph) {
-        // ===== FRAME GRAPH EXECUTION PATH =====
-        // Uses dependency-driven scheduling with parallel execution opportunities
-        FrameGraph::RenderContext fgCtx{
-            .commandBuffer = vkCmd,
-            .frameIndex = frame.frameIndex,
-            .imageIndex = imageIndex,
-            .deltaTime = frame.deltaTime,
-            .userData = &ctx,  // Pass full RenderContext to passes
-            // Phase 4: Secondary command buffer support
-            .threadedCommandPool = &threadedCommandPool_,
-            .renderPass = vk::RenderPass(systems_->postProcess().getHDRRenderPass()),
-            .framebuffer = vk::Framebuffer(systems_->postProcess().getHDRFramebuffer()),
-            // Command diagnostics - passes increment these counters
-            .diagnostics = &cmdDiag
-        };
+    // Execute frame graph - dependency-driven scheduling with parallel execution
+    FrameGraph::RenderContext fgCtx{
+        .commandBuffer = vkCmd,
+        .frameIndex = frame.frameIndex,
+        .imageIndex = imageIndex,
+        .deltaTime = frame.deltaTime,
+        .userData = &ctx,  // Pass full RenderContext to passes
+        // Secondary command buffer support
+        .threadedCommandPool = &threadedCommandPool_,
+        .renderPass = vk::RenderPass(systems_->postProcess().getHDRRenderPass()),
+        .framebuffer = vk::Framebuffer(systems_->postProcess().getHDRFramebuffer()),
+        // Command diagnostics - passes increment these counters
+        .diagnostics = &cmdDiag
+    };
 
-        // Execute all passes in dependency order
-        // TaskScheduler enables parallel execution of independent passes
-        frameGraph_.execute(fgCtx, &TaskScheduler::instance());
-    } else {
-        // ===== LEGACY EXECUTION PATH =====
-        // Sequential execution for fallback/debugging
-
-        // Execute all compute passes via pipeline
-        systems_->profiler().beginCpuZone("ComputeDispatch");
-        renderPipeline.computeStage.execute(ctx);
-        systems_->profiler().endCpuZone("ComputeDispatch");
-
-        // Shadow pass (skip when sun is below horizon or shadows disabled)
-        if (lastSunIntensity > 0.001f && perfToggles.shadowPass) {
-            systems_->profiler().beginCpuZone("ShadowRecord");
-            systems_->profiler().beginGpuZone(cmd, "ShadowPass");
-            cmdDiag.renderPassCount++;  // Shadow cascade render pass
-            cmdCapture.recordBeginRenderPass("ShadowSystem", "ShadowCascades");
-            recordShadowPass(cmd, frame.frameIndex, frame.time, frame.cameraPosition);
-            cmdCapture.recordEndRenderPass("ShadowSystem");
-            systems_->profiler().endGpuZone(cmd, "ShadowPass");
-            systems_->profiler().endCpuZone("ShadowRecord");
-        }
-
-        // Froxel volumetric fog and atmosphere updates via pipeline
-        systems_->postProcess().setCameraPlanes(camera.getNearPlane(), camera.getFarPlane());
-        if (renderPipeline.froxelStageFn && (perfToggles.froxelFog || perfToggles.atmosphereLUT)) {
-            renderPipeline.froxelStageFn(ctx);
-        }
-
-        // Water G-buffer pass (Phase 3) - renders water mesh to mini G-buffer
-        // Skip if water was not visible last frame (temporal culling) or disabled
-        if (perfToggles.waterGBuffer &&
-            systems_->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
-            systems_->hasWaterTileCull() &&
-            systems_->waterTileCull().wasWaterVisibleLastFrame(frame.frameIndex)) {
-            systems_->profiler().beginGpuZone(cmd, "WaterGBuffer");
-            cmdDiag.renderPassCount++;  // Water G-buffer pass
-            systems_->waterGBuffer().beginRenderPass(cmd);
-
-            // Bind G-buffer pipeline and descriptor set
-            vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, systems_->waterGBuffer().getPipeline());
-            cmdDiag.pipelineBindCount++;
-            vk::DescriptorSet gbufferDescSet = systems_->waterGBuffer().getDescriptorSet(frame.frameIndex);
-            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                                     systems_->waterGBuffer().getPipelineLayout(), 0, gbufferDescSet, {});
-            cmdDiag.descriptorSetBindCount++;
-
-            // Draw water mesh
-            systems_->water().recordMeshDraw(cmd);
-            cmdDiag.drawCallCount++;
-
-            systems_->waterGBuffer().endRenderPass(cmd);
-            systems_->profiler().endGpuZone(cmd, "WaterGBuffer");
-        }
-
-        // HDR scene render pass (can be disabled for performance debugging)
-        // Note: HDRPass is not wrapped in a profiler zone because recordHDRPass()
-        // contains granular HDR:* sub-zones. Nesting would confuse the profiler.
-        if (hdrPassEnabled) {
-            systems_->profiler().beginCpuZone("RenderPassRecord");
-            cmdDiag.renderPassCount++;  // HDR main render pass
-            cmdCapture.recordBeginRenderPass("HDRPass", "MainScene");
-            recordHDRPass(cmd, frame.frameIndex, frame.time);
-            cmdCapture.recordEndRenderPass("HDRPass");
-            systems_->profiler().endCpuZone("RenderPassRecord");
-
-            // Screen-Space Reflections compute pass (Phase 10)
-            // Computes SSR for next frame's water - uses current scene for temporal stability
-            if (perfToggles.ssr && systems_->ssr().isEnabled()) {
-                systems_->profiler().beginGpuZone(cmd, "SSR");
-                cmdDiag.dispatchCount++;  // SSR compute
-                systems_->ssr().recordCompute(cmd, frame.frameIndex,
-                                        systems_->postProcess().getHDRColorView(),
-                                        systems_->postProcess().getHDRDepthView(),
-                                        frame.view, frame.projection,
-                                        frame.cameraPosition);
-                systems_->profiler().endGpuZone(cmd, "SSR");
-            }
-
-            // Water tile culling compute pass (Phase 7)
-            // Determines which screen tiles contain water for optimized rendering
-            if (perfToggles.waterTileCull && systems_->hasWaterTileCull() &&
-                systems_->waterTileCull().isEnabled()) {
-                systems_->profiler().beginGpuZone(cmd, "WaterTileCull");
-                cmdDiag.dispatchCount++;  // Water tile cull compute
-                glm::mat4 viewProj = frame.projection * frame.view;
-                systems_->waterTileCull().recordTileCull(cmd, frame.frameIndex,
-                                              viewProj, frame.cameraPosition,
-                                              systems_->water().getWaterLevel(),
-                                              systems_->postProcess().getHDRDepthView());
-                systems_->profiler().endGpuZone(cmd, "WaterTileCull");
-            }
-        }
-
-        // Hi-Z pyramid and Bloom via pipeline post stage
-        if (renderPipeline.postStage.hiZRecordFn) {
-            cmdDiag.dispatchCount++;  // Hi-Z compute
-            renderPipeline.postStage.hiZRecordFn(ctx);
-        }
-        // Only run bloom passes if bloom is enabled (skip for performance)
-        if (systems_->postProcess().isBloomEnabled() && renderPipeline.postStage.bloomRecordFn) {
-            cmdDiag.dispatchCount += 2;  // Bloom downsample + upsample
-            renderPipeline.postStage.bloomRecordFn(ctx);
-        }
-
-        // Bilateral grid for local tone mapping (if enabled)
-        if (systems_->postProcess().isLocalToneMapEnabled()) {
-            systems_->profiler().beginGpuZone(cmd, "BilateralGrid");
-            cmdDiag.dispatchCount++;  // Bilateral grid compute
-            systems_->bilateralGrid().recordBilateralGrid(cmd, frame.frameIndex,
-                                                           systems_->postProcess().getHDRColorView());
-            systems_->profiler().endGpuZone(cmd, "BilateralGrid");
-        }
-
-        // Post-process pass (with optional GUI overlay callback)
-        // Note: This is not in postStage because it needs framebuffer and guiRenderCallback
-        systems_->profiler().beginGpuZone(cmd, "PostProcess");
-        cmdDiag.renderPassCount++;  // Post-process render pass
-        cmdDiag.drawCallCount++;    // Full-screen quad
-        systems_->postProcess().recordPostProcess(cmd, frame.frameIndex, *framebuffers_[imageIndex], frame.deltaTime, guiRenderCallback);
-        systems_->profiler().endGpuZone(cmd, "PostProcess");
-    }
+    // Execute all passes in dependency order
+    // TaskScheduler enables parallel execution of independent passes
+    frameGraph_.execute(fgCtx, &TaskScheduler::instance());
 
     // End GPU profiling frame
     systems_->profiler().endGpuFrame(cmd, frame.frameIndex);

@@ -13,7 +13,6 @@
 bool FrameGraphBuilder::build(
     FrameGraph& frameGraph,
     RendererSystems& systems,
-    RenderPipeline& renderPipeline,
     const Callbacks& callbacks,
     const State& state)
 {
@@ -24,7 +23,8 @@ bool FrameGraphBuilder::build(
     // Compute passes (compute stage + froxel)
     ComputePasses::Config computeConfig;
     computeConfig.perfToggles = state.perfToggles;
-    auto computeIds = ComputePasses::addPasses(frameGraph, systems, renderPipeline, computeConfig);
+    computeConfig.terrainEnabled = state.terrainEnabled;
+    auto computeIds = ComputePasses::addPasses(frameGraph, systems, computeConfig);
 
     // Shadow pass
     ShadowPasses::Config shadowConfig;
@@ -51,7 +51,8 @@ bool FrameGraphBuilder::build(
     PostPasses::Config postConfig;
     postConfig.guiRenderCallback = callbacks.guiRenderCallback;
     postConfig.framebuffers = state.framebuffers;
-    auto postIds = PostPasses::addPasses(frameGraph, systems, renderPipeline, postConfig);
+    postConfig.perfToggles = state.perfToggles;
+    auto postIds = PostPasses::addPasses(frameGraph, systems, postConfig);
 
     // ===== WIRE DEPENDENCIES =====
     // Shadow and Froxel depend on Compute
