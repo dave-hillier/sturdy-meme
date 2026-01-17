@@ -1038,14 +1038,36 @@ bool Renderer::render(const Camera& camera) {
 
     systems_->profiler().endCpuZone("CmdBufferRecord");
 
-    // Queue submission
+    // Queue submission with timeline semaphore for non-blocking completion tracking
     systems_->profiler().beginCpuZone("QueueSubmit");
 
+    // Binary semaphores for swapchain synchronization
     vk::Semaphore waitSemaphores[] = {frameSync_.currentImageAvailableSemaphore()};
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
-    vk::Semaphore signalSemaphores[] = {frameSync_.currentRenderFinishedSemaphore()};
+
+    // Signal both render finished (binary, for present) and timeline (for frame sync)
+    vk::Semaphore signalSemaphores[] = {
+        frameSync_.currentRenderFinishedSemaphore(),
+        frameSync_.frameTimelineSemaphore()
+    };
+
+    // Get next timeline value to signal for this frame
+    uint64_t timelineSignalValue = frameSync_.nextFrameSignalValue();
+
+    // Timeline semaphore submit info (Vulkan 1.2)
+    // Wait semaphores: imageAvailable is binary (value ignored, use 0)
+    // Signal semaphores: renderFinished is binary (0), timeline gets the new value
+    uint64_t waitValues[] = {0};  // Binary semaphore, value ignored
+    uint64_t signalValues[] = {0, timelineSignalValue};  // Binary, then timeline
+
+    auto timelineInfo = vk::TimelineSemaphoreSubmitInfo{}
+        .setWaitSemaphoreValueCount(1)
+        .setPWaitSemaphoreValues(waitValues)
+        .setSignalSemaphoreValueCount(2)
+        .setPSignalSemaphoreValues(signalValues);
 
     auto submitInfo = vk::SubmitInfo{}
+        .setPNext(&timelineInfo)
         .setWaitSemaphores(waitSemaphores)
         .setWaitDstStageMask(waitStages)
         .setCommandBuffers(vkCmd)
@@ -1054,7 +1076,8 @@ bool Renderer::render(const Camera& camera) {
     try {
         // Track queue submit time for diagnostics
         auto submitStart = std::chrono::high_resolution_clock::now();
-        vk::Queue(graphicsQueue).submit(submitInfo, frameSync_.currentFence());
+        // No fence needed - timeline semaphore handles frame completion tracking
+        vk::Queue(graphicsQueue).submit(submitInfo, nullptr);
         auto submitEnd = std::chrono::high_resolution_clock::now();
         systems_->profiler().getQueueSubmitDiagnostics().queueSubmitTimeMs =
             std::chrono::duration<float, std::milli>(submitEnd - submitStart).count();

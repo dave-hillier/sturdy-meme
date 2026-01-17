@@ -23,16 +23,17 @@ struct TransferHandle {
 /**
  * AsyncTransferManager - Non-blocking GPU transfer system.
  *
- * Implements the async transfer pattern from the video:
+ * Implements the async transfer pattern:
  * 1. Copy data to staging buffer
- * 2. Submit transfer command with fence (non-blocking)
- * 3. Poll fence each frame via processPendingTransfers()
+ * 2. Submit transfer command with timeline semaphore signal (non-blocking)
+ * 3. Poll timeline counter each frame via processPendingTransfers() (non-blocking)
  * 4. When transfer completes, perform queue ownership transfer if needed
  * 5. Execute completion callback
  *
  * Key design points:
- * - Uses dedicated transfer queue when available (per video recommendation)
- * - Fence-based synchronization (not timeline semaphores for compatibility)
+ * - Uses dedicated transfer queue when available
+ * - Timeline semaphore synchronization (Vulkan 1.2) for efficient non-blocking checks
+ * - Single timeline semaphore with monotonic counter vs per-transfer fences
  * - Staging buffer pooling for reduced allocation overhead
  * - Supports both buffer and image transfers
  */
@@ -124,7 +125,7 @@ public:
 private:
     struct PendingTransfer {
         uint64_t id;
-        vk::raii::Fence fence{nullptr};
+        uint64_t timelineValue;  // Timeline semaphore value to wait for
         vk::CommandBuffer cmdBuffer;  // From transfer pool
         VmaBuffer stagingBuffer;
         CompletionCallback onComplete;
@@ -155,6 +156,10 @@ private:
 
     // Command pool for transfer operations (created per transfer queue family)
     std::optional<vk::raii::CommandPool> transferCommandPool_;
+
+    // Timeline semaphore for tracking transfer completion (Vulkan 1.2)
+    std::optional<vk::raii::Semaphore> transferTimeline_;
+    uint64_t nextTimelineValue_ = 1;  // Next value to signal
 
     // Pending transfers
     std::deque<PendingTransfer> pendingTransfers_;
