@@ -18,7 +18,6 @@
 #include "UBOs.h"
 #include "FrameData.h"
 #include "RenderContext.h"
-#include "RenderPipeline.h"
 #include "VmaResources.h"
 #include "RendererSystems.h"
 #include "PerformanceToggles.h"
@@ -214,7 +213,6 @@ public:
     // Performance control
     PerformanceToggles& getPerformanceToggles() { return perfToggles; }
     const PerformanceToggles& getPerformanceToggles() const { return perfToggles; }
-    void syncPerformanceToggles();
 
 #ifdef JPH_DEBUG_RENDERER
     // Update physics debug visualization (call before render)
@@ -258,10 +256,7 @@ private:
     void recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, uint32_t slot);
     void recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex);
 
-    // Setup render pipeline stages with lambdas (called once during init)
-    void setupRenderPipeline();
-
-    // Setup frame graph passes with dependencies (Phase 3: frame graph integration)
+    // Setup frame graph passes with dependencies
     void setupFrameGraph();
 
     // Pure calculation helpers (no state mutation)
@@ -292,9 +287,6 @@ private:
 
     // Performance toggles for debugging
     PerformanceToggles perfToggles;
-
-    // Render pipeline (stages abstraction - for future refactoring)
-    RenderPipeline renderPipeline;
 
     std::vector<vk::raii::Framebuffer> framebuffers_;
     std::optional<vk::raii::CommandPool> commandPool_;
@@ -339,7 +331,6 @@ private:
     float skyExposure = 5.0f;              // Sky brightness multiplier (1-20)
     bool framebufferResized = false;       // true = window resized, need to recreate swapchain
     bool windowSuspended = false;          // true = window minimized/hidden (macOS screen lock)
-    bool useFrameGraph = true;             // true = use FrameGraph for pass scheduling (Phase 3)
 
     // Player position for grass displacement
     glm::vec3 playerPosition = glm::vec3(0.0f);

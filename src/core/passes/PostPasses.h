@@ -4,7 +4,7 @@
 #include <vulkan/vulkan_raii.hpp>
 
 class RendererSystems;
-class RenderPipeline;
+struct PerformanceToggles;
 
 /**
  * PostPasses - Post-processing pass definitions
@@ -16,6 +16,7 @@ namespace PostPasses {
 struct Config {
     std::function<void(VkCommandBuffer)>* guiRenderCallback = nullptr;
     std::vector<vk::raii::Framebuffer>* framebuffers = nullptr;
+    PerformanceToggles* perfToggles = nullptr;
 };
 
 struct PassIds {
@@ -25,6 +26,6 @@ struct PassIds {
     FrameGraph::PassId postProcess = FrameGraph::INVALID_PASS;
 };
 
-PassIds addPasses(FrameGraph& graph, RendererSystems& systems, RenderPipeline& pipeline, const Config& config);
+PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& config);
 
 } // namespace PostPasses

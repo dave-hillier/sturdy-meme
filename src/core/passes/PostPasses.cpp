@@ -1,28 +1,31 @@
 #include "PostPasses.h"
 #include "RendererSystems.h"
 #include "RenderContext.h"
-#include "RenderPipeline.h"
+#include "PerformanceToggles.h"
 #include "Profiler.h"
 #include "PostProcessSystem.h"
 #include "BloomSystem.h"
 #include "BilateralGridSystem.h"
+#include "HiZSystem.h"
 
 namespace PostPasses {
 
-PassIds addPasses(FrameGraph& graph, RendererSystems& systems, RenderPipeline& pipeline, const Config& config) {
+PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& config) {
     PassIds ids;
     auto* guiCallback = config.guiRenderCallback;
     auto* framebuffers = config.framebuffers;
+    auto* perfToggles = config.perfToggles;
 
     // Hi-Z pass - hierarchical Z-buffer generation
     ids.hiZ = graph.addPass({
         .name = "HiZ",
-        .execute = [&pipeline](FrameGraph::RenderContext& ctx) {
-            if (pipeline.postStage.hiZRecordFn) {
-                RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-                if (!renderCtx) return;
-                pipeline.postStage.hiZRecordFn(*renderCtx);
-            }
+        .execute = [&systems, perfToggles](FrameGraph::RenderContext& ctx) {
+            if (!perfToggles->hiZPyramid) return;
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
+            systems.profiler().beginGpuZone(ctx.commandBuffer, "HiZPyramid");
+            systems.hiZ().recordPyramidGeneration(ctx.commandBuffer, ctx.frameIndex);
+            systems.profiler().endGpuZone(ctx.commandBuffer, "HiZPyramid");
         },
         .canUseSecondary = false,
         .mainThreadOnly = true,
@@ -32,12 +35,14 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems, RenderPipeline& p
     // Bloom pass - multi-pass bloom effect
     ids.bloom = graph.addPass({
         .name = "Bloom",
-        .execute = [&systems, &pipeline](FrameGraph::RenderContext& ctx) {
-            if (systems.postProcess().isBloomEnabled() && pipeline.postStage.bloomRecordFn) {
-                RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
-                if (!renderCtx) return;
-                pipeline.postStage.bloomRecordFn(*renderCtx);
-            }
+        .execute = [&systems, perfToggles](FrameGraph::RenderContext& ctx) {
+            if (!perfToggles->bloom || !systems.postProcess().isBloomEnabled()) return;
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
+            systems.profiler().beginGpuZone(ctx.commandBuffer, "Bloom");
+            systems.bloom().setThreshold(systems.postProcess().getBloomThreshold());
+            systems.bloom().recordBloomPass(ctx.commandBuffer, systems.postProcess().getHDRColorView());
+            systems.profiler().endGpuZone(ctx.commandBuffer, "Bloom");
         },
         .canUseSecondary = false,
         .mainThreadOnly = true,

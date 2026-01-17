@@ -737,7 +737,4 @@ void Renderer::initControlSubsystems() {
     // Initialize control subsystems in RendererSystems
     // These subsystems implement GUI-facing interfaces directly
     systems_->initControlSubsystems(*vulkanContext_, perfToggles);
-
-    // Set up the performance sync callback
-    systems_->setPerformanceSyncCallback([this]() { syncPerformanceToggles(); });
 }
