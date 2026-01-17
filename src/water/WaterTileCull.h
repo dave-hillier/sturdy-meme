@@ -128,10 +128,13 @@ private:
     bool createComputePipeline();
     bool createDescriptorSets();
 
-    // Synchronize cull output for drawing and counter transfer
-    void barrierCullResultsForDrawAndTransfer(VkCommandBuffer cmd, uint32_t frameIndex);
+    // Synchronize counter buffer for transfer (compute → transfer)
+    void barrierCounterForTransfer(VkCommandBuffer cmd, uint32_t frameIndex);
 
-    // Synchronize counter readback for CPU access
+    // Synchronize tile/indirect buffers for drawing (compute → vertex/draw)
+    void barrierCullResultsForDraw(VkCommandBuffer cmd, uint32_t frameIndex);
+
+    // Synchronize counter readback for CPU access (transfer → host)
     void barrierCounterForHostRead(VkCommandBuffer cmd, uint32_t frameIndex);
 
     VkDevice device = VK_NULL_HANDLE;

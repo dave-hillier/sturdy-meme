@@ -297,8 +297,40 @@ inline void computeToHost(
 // ============================================================================
 
 /**
+ * Memory-only barrier between mip level generation passes.
+ * Keeps image in General layout - more efficient for iterative mip generation.
+ * Use mipChainToShaderRead at the end for final layout transition.
+ */
+inline void mipMemoryBarrier(
+        vk::CommandBuffer cmd,
+        vk::Image image,
+        uint32_t mipLevel) {
+
+    auto barrier = vk::ImageMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+        .setOldLayout(vk::ImageLayout::eGeneral)
+        .setNewLayout(vk::ImageLayout::eGeneral)  // No layout change
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setImage(image)
+        .setSubresourceRange(vk::ImageSubresourceRange{}
+            .setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(mipLevel)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1));
+
+    cmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::PipelineStageFlagBits::eComputeShader,
+        {}, {}, {}, barrier);
+}
+
+/**
  * Barrier between mip level generation passes (for Hi-Z or bloom)
  * Transitions a single mip level from write to read
+ * @deprecated Use mipMemoryBarrier + mipChainToShaderRead for better performance
  */
 inline void mipWriteToRead(
         vk::CommandBuffer cmd,

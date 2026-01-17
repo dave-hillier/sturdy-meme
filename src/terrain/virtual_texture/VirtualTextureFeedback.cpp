@@ -3,6 +3,7 @@
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <algorithm>
+#include <array>
 #include <cstring>
 
 namespace VirtualTexture {
@@ -114,16 +115,30 @@ void VirtualTextureFeedback::recordCopyToReadback(VkCommandBuffer cmd, uint32_t 
         .setSize(sizeof(uint32_t));
     vkCmd.copyBuffer(fb.counterBuffer.get(), fb.counterReadbackBuffer.get(), counterCopy);
 
-    // Barrier to ensure transfer completes before host read
-    // Note: The actual host read happens after fence wait, so we use HOST_BIT
-    {
-        auto barrier = vk::MemoryBarrier{}
+    // Buffer barriers for host reads - more precise than global memory barrier
+    // The fence wait provides execution synchronization; these barriers ensure
+    // memory visibility to the host after fence completes
+    std::array<vk::BufferMemoryBarrier, 2> barriers = {
+        vk::BufferMemoryBarrier{}
             .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eHostRead);
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-                              vk::PipelineStageFlagBits::eHost,
-                              {}, barrier, {}, {});
-    }
+            .setDstAccessMask(vk::AccessFlagBits::eHostRead)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setBuffer(fb.readbackBuffer.get())
+            .setOffset(0)
+            .setSize(maxEntries * sizeof(uint32_t)),
+        vk::BufferMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+            .setDstAccessMask(vk::AccessFlagBits::eHostRead)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setBuffer(fb.counterReadbackBuffer.get())
+            .setOffset(0)
+            .setSize(sizeof(uint32_t))
+    };
+    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                          vk::PipelineStageFlagBits::eHost,
+                          {}, {}, barriers, {});
 }
 
 void VirtualTextureFeedback::readback(uint32_t frameIndex) {

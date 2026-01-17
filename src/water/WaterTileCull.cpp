@@ -310,7 +310,9 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
     uint32_t groupsY = (tileCount.y + 7) / 8;
     vkCmd.dispatch(groupsX, groupsY, 1);
 
-    barrierCullResultsForDrawAndTransfer(cmd, frameIndex);
+    // Barrier for counter readback copy (compute → transfer)
+    // Separate from draw barriers to avoid waiting on vertex/draw stages
+    barrierCounterForTransfer(cmd, frameIndex);
 
     // Copy the counter value for this frame to the host-visible readback buffer
     auto copyRegion = vk::BufferCopy{}
@@ -319,21 +321,39 @@ void WaterTileCull::recordTileCull(VkCommandBuffer cmd, uint32_t frameIndex,
         .setSize(sizeof(uint32_t));
     vkCmd.copyBuffer(counterBuffer_.get(), counterReadbackBuffer_.get(), copyRegion);
 
+    // Separate barriers for draw-related buffers (compute → draw stages)
+    barrierCullResultsForDraw(cmd, frameIndex);
+
+    // Barrier for host readback (transfer → host)
     barrierCounterForHostRead(cmd, frameIndex);
 }
 
-void WaterTileCull::barrierCullResultsForDrawAndTransfer(VkCommandBuffer cmd, uint32_t frameIndex) {
+void WaterTileCull::barrierCounterForTransfer(VkCommandBuffer cmd, uint32_t frameIndex) {
     vk::CommandBuffer vkCmd(cmd);
 
-    std::array<vk::BufferMemoryBarrier, 3> barriers = {
-        vk::BufferMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eTransferRead)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setBuffer(counterBuffer_.get())
-            .setOffset(frameIndex * sizeof(uint32_t))
-            .setSize(sizeof(uint32_t)),
+    // Only the counter buffer needs to be ready for transfer
+    // This allows the copy to start while other work continues
+    auto barrier = vk::BufferMemoryBarrier{}
+        .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+        .setDstAccessMask(vk::AccessFlagBits::eTransferRead)
+        .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+        .setBuffer(counterBuffer_.get())
+        .setOffset(frameIndex * sizeof(uint32_t))
+        .setSize(sizeof(uint32_t));
+
+    vkCmd.pipelineBarrier(
+        vk::PipelineStageFlagBits::eComputeShader,
+        vk::PipelineStageFlagBits::eTransfer,
+        {}, {}, barrier, {});
+}
+
+void WaterTileCull::barrierCullResultsForDraw(VkCommandBuffer cmd, [[maybe_unused]] uint32_t frameIndex) {
+    vk::CommandBuffer vkCmd(cmd);
+
+    // Tile buffer and indirect buffer are needed for drawing
+    // Separate from transfer barrier to avoid waiting on unrelated stages
+    std::array<vk::BufferMemoryBarrier, 2> barriers = {
         vk::BufferMemoryBarrier{}
             .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
             .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
@@ -354,7 +374,7 @@ void WaterTileCull::barrierCullResultsForDrawAndTransfer(VkCommandBuffer cmd, ui
 
     vkCmd.pipelineBarrier(
         vk::PipelineStageFlagBits::eComputeShader,
-        vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eVertexShader | vk::PipelineStageFlagBits::eDrawIndirect,
+        vk::PipelineStageFlagBits::eVertexShader | vk::PipelineStageFlagBits::eDrawIndirect,
         {}, {}, barriers, {});
 }
 

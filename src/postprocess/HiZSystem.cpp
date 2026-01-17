@@ -332,9 +332,11 @@ void HiZSystem::setDepthBuffer(VkImageView depthView, VkSampler depthSampler) {
     for (uint32_t mip = 0; mip < mipLevelCount; ++mip) {
         VkImageView srcMipView = mip > 0 ? **hiZPyramid.mipViews[mip - 1] : **hiZPyramid.mipViews[0];
 
+        // Use General layout for source mip view during pyramid generation
+        // (we keep the pyramid in General layout until the final transition)
         DescriptorManager::SetWriter(device, pyramidDescSets[mip])
             .writeImage(0, sourceDepthView, sourceDepthSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
-            .writeImage(1, srcMipView, **hiZSampler_)
+            .writeImage(1, srcMipView, **hiZSampler_, VK_IMAGE_LAYOUT_GENERAL)
             .writeStorageImage(2, **hiZPyramid.mipViews[mip])
             .update();
     }
@@ -429,16 +431,17 @@ void HiZSystem::recordPyramidGeneration(VkCommandBuffer cmd, uint32_t frameIndex
         uint32_t groupsY = (dstHeight + 7) / 8;
         vkCmd.dispatch(groupsX, groupsY, 1);
 
-        // Barrier between mip levels
+        // Memory-only barrier between mip levels (no layout transition)
+        // This is more efficient than per-mip layout transitions
         if (mip < mipLevelCount - 1) {
-            BarrierHelpers::mipWriteToRead(vkCmd, hiZPyramid.image.get(), mip);
+            BarrierHelpers::mipMemoryBarrier(vkCmd, hiZPyramid.image.get(), mip);
         }
 
         srcWidth = dstWidth;
         srcHeight = dstHeight;
     }
 
-    // Transition entire pyramid to shader read for culling
+    // Single layout transition for entire pyramid at the end
     BarrierHelpers::mipChainToShaderRead(vkCmd, hiZPyramid.image.get(), mipLevelCount);
 }
 
