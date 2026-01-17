@@ -115,6 +115,7 @@ set(SOURCES
     src/vegetation/ImpostorCullSystem.cpp
     src/vegetation/BranchGenerator.cpp
     src/vegetation/DetritusSystem.cpp
+    src/vegetation/VegetationSystemGroup.cpp
     # Postprocess
     src/postprocess/PostProcessSystem.cpp
     src/postprocess/BloomSystem.cpp

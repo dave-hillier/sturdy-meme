@@ -32,6 +32,7 @@
 #include "ImpostorCullSystem.h"
 #include "DetritusSystem.h"
 #include "VegetationContentGenerator.h"
+#include "VegetationSystemGroup.h"
 #include "WaterSystem.h"
 #include "WaterDisplacement.h"
 #include "FlowMapGenerator.h"
@@ -244,15 +245,45 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     if (!createDescriptorSets()) return false;
     if (!createSkinnedMeshRendererDescriptorSets()) return false;
 
-    // Initialize grass and wind subsystems
+    // Create all vegetation systems using VegetationSystemGroup factory
     {
-        auto bundle = GrassSystem::createWithDependencies(
-            initCtx, core.hdr.renderPass, core.shadow.renderPass, core.shadow.mapSize);
-        if (!bundle) {
-            return false;
-        }
-        systems_->setWind(std::move(bundle->wind));
-        systems_->setGrass(std::move(bundle->grass));
+        INIT_PROFILE_PHASE("VegetationSystems");
+
+        // Rock placement configuration
+        RockConfig rockConfig{};
+        rockConfig.rockVariations = 6;
+        rockConfig.rocksPerVariation = 10;
+        rockConfig.minRadius = 0.4f;
+        rockConfig.maxRadius = 2.0f;
+        rockConfig.placementRadius = 100.0f;
+        rockConfig.placementCenter = sceneInfo.sceneOrigin;
+        rockConfig.minDistanceBetween = 4.0f;
+        rockConfig.roughness = 0.35f;
+        rockConfig.asymmetry = 0.3f;
+        rockConfig.subdivisions = 3;
+        rockConfig.materialRoughness = 0.75f;
+        rockConfig.materialMetallic = 0.0f;
+
+        VegetationSystemGroup::CreateDeps vegDeps{
+            initCtx,
+            core.hdr.renderPass,
+            core.shadow.renderPass,
+            core.shadow.mapSize,
+            core.terrain.size,
+            core.terrain.getHeightAt,
+            rockConfig
+        };
+
+        auto vegBundle = VegetationSystemGroup::createAll(vegDeps);
+        if (!vegBundle) return false;
+
+        systems_->setWind(std::move(vegBundle->wind));
+        systems_->setGrass(std::move(vegBundle->grass));
+        systems_->setRock(std::move(vegBundle->rock));
+        systems_->setTree(std::move(vegBundle->tree));
+        systems_->setTreeRenderer(std::move(vegBundle->treeRenderer));
+        if (vegBundle->treeLOD) systems_->setTreeLOD(std::move(vegBundle->treeLOD));
+        if (vegBundle->impostorCull) systems_->setImpostorCull(std::move(vegBundle->impostorCull));
     }
 
     const EnvironmentSettings* envSettings = &systems_->wind().getEnvironmentSettings();
@@ -262,10 +293,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         windBuffers[i] = systems_->wind().getBufferInfo(i).buffer;
     }
-    // Note: grass.updateDescriptorSets is called later after CloudShadowSystem is created
 
     // Update terrain descriptor sets with shared resources
-    // Convert raw VkBuffer vectors to vk::Buffer vectors
     auto convertBuffers = [](const std::vector<VkBuffer>& raw) {
         std::vector<vk::Buffer> result;
         result.reserve(raw.size());
@@ -279,137 +308,6 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         vk::Sampler(systems_->shadow().getShadowSampler()),
         convertBuffers(systems_->globalBuffers().snowBuffers.buffers),
         convertBuffers(systems_->globalBuffers().cloudShadowBuffers.buffers));
-
-    // Initialize rock system via factory
-    RockSystem::InitInfo rockInfo{};
-    rockInfo.device = device;
-    rockInfo.allocator = allocator;
-    rockInfo.commandPool = **commandPool_;
-    rockInfo.graphicsQueue = graphicsQueue;
-    rockInfo.physicalDevice = physicalDevice;
-    rockInfo.resourcePath = resourcePath;
-    rockInfo.terrainSize = core.terrain.size;
-    rockInfo.getTerrainHeight = core.terrain.getHeightAt;
-
-    RockConfig rockConfig{};
-    rockConfig.rockVariations = 6;
-    rockConfig.rocksPerVariation = 10;
-    rockConfig.minRadius = 0.4f;
-    rockConfig.maxRadius = 2.0f;
-    rockConfig.placementRadius = 100.0f;
-    rockConfig.placementCenter = sceneInfo.sceneOrigin;  // Place rocks at settlement location
-    rockConfig.minDistanceBetween = 4.0f;
-    rockConfig.roughness = 0.35f;
-    rockConfig.asymmetry = 0.3f;
-    rockConfig.subdivisions = 3;
-    rockConfig.materialRoughness = 0.75f;
-    rockConfig.materialMetallic = 0.0f;
-
-    {
-        INIT_PROFILE_PHASE("RockSystem");
-        auto rockSystem = RockSystem::create(rockInfo, rockConfig);
-        if (!rockSystem) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create RockSystem");
-            return false;
-        }
-        systems_->setRock(std::move(rockSystem));
-    }
-
-    // Initialize tree system via factory
-    TreeSystem::InitInfo treeInfo{};
-    treeInfo.device = device;
-    treeInfo.allocator = allocator;
-    treeInfo.commandPool = **commandPool_;
-    treeInfo.graphicsQueue = graphicsQueue;
-    treeInfo.physicalDevice = physicalDevice;
-    treeInfo.resourcePath = resourcePath;
-    treeInfo.terrainSize = core.terrain.size;
-    treeInfo.getTerrainHeight = core.terrain.getHeightAt;
-
-    std::unique_ptr<TreeSystem> treeSystem;
-    {
-        INIT_PROFILE_PHASE("TreeSystem");
-        treeSystem = TreeSystem::create(treeInfo);
-        if (!treeSystem) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create TreeSystem");
-            return false;
-        }
-    }
-
-    systems_->setTree(std::move(treeSystem));
-
-    // Initialize TreeRenderer for dedicated tree shaders with wind animation
-    {
-        TreeRenderer::InitInfo treeRendererInfo{};
-        treeRendererInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-        treeRendererInfo.device = vk::Device(device);
-        treeRendererInfo.physicalDevice = vk::PhysicalDevice(physicalDevice);
-        treeRendererInfo.allocator = allocator;
-        treeRendererInfo.hdrRenderPass = vk::RenderPass(systems_->postProcess().getHDRRenderPass());
-        treeRendererInfo.shadowRenderPass = vk::RenderPass(systems_->shadow().getShadowRenderPass());
-        treeRendererInfo.descriptorPool = &*descriptorManagerPool;
-        treeRendererInfo.extent = vk::Extent2D{systems_->postProcess().getExtent().width, systems_->postProcess().getExtent().height};
-        treeRendererInfo.shadowMapSize = systems_->shadow().getShadowMapSize();
-        treeRendererInfo.resourcePath = resourcePath;
-        treeRendererInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;
-
-        auto treeRenderer = TreeRenderer::create(treeRendererInfo);
-        if (!treeRenderer) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create TreeRenderer");
-            return false;
-        }
-        systems_->setTreeRenderer(std::move(treeRenderer));
-        SDL_Log("TreeRenderer initialized for wind animation");
-    }
-
-    // Initialize TreeLODSystem for impostor rendering
-    {
-        TreeLODSystem::InitInfo treeLODInfo{};
-        treeLODInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-        treeLODInfo.device = device;
-        treeLODInfo.physicalDevice = physicalDevice;
-        treeLODInfo.allocator = allocator;
-        treeLODInfo.hdrRenderPass = systems_->postProcess().getHDRRenderPass();
-        treeLODInfo.shadowRenderPass = systems_->shadow().getShadowRenderPass();
-        treeLODInfo.commandPool = **commandPool_;
-        treeLODInfo.graphicsQueue = graphicsQueue;
-        treeLODInfo.descriptorPool = &*descriptorManagerPool;
-        treeLODInfo.extent = systems_->postProcess().getExtent();
-        treeLODInfo.resourcePath = resourcePath;
-        treeLODInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;
-        treeLODInfo.shadowMapSize = systems_->shadow().getShadowMapSize();
-
-        auto treeLOD = TreeLODSystem::create(treeLODInfo);
-        if (treeLOD) {
-            systems_->setTreeLOD(std::move(treeLOD));
-            SDL_Log("TreeLODSystem initialized for impostor rendering");
-        } else {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem creation failed (non-fatal)");
-        }
-    }
-
-    // Initialize ImpostorCullSystem for GPU-driven impostor culling with Hi-Z
-    {
-        ImpostorCullSystem::InitInfo impostorCullInfo{};
-        impostorCullInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-        impostorCullInfo.device = device;
-        impostorCullInfo.physicalDevice = physicalDevice;
-        impostorCullInfo.allocator = allocator;
-        impostorCullInfo.descriptorPool = &*descriptorManagerPool;
-        impostorCullInfo.extent = systems_->postProcess().getExtent();
-        impostorCullInfo.resourcePath = resourcePath;
-        impostorCullInfo.maxFramesInFlight = MAX_FRAMES_IN_FLIGHT;
-        impostorCullInfo.maxTrees = 100000;
-        impostorCullInfo.maxArchetypes = 16;
-
-        auto impostorCull = ImpostorCullSystem::create(impostorCullInfo);
-        if (impostorCull) {
-            systems_->setImpostorCull(std::move(impostorCull));
-            SDL_Log("ImpostorCullSystem initialized for GPU-driven Hi-Z occlusion culling");
-        } else {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "ImpostorCullSystem creation failed (non-fatal)");
-        }
-    }
 
     // Generate vegetation content using VegetationContentGenerator
     {
