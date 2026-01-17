@@ -33,8 +33,25 @@ bool AsyncTransferManager::initialize(VulkanContext& context) {
         return false;
     }
 
+    // Create timeline semaphore for tracking transfer completion (Vulkan 1.2)
+    try {
+        auto typeInfo = vk::SemaphoreTypeCreateInfo{}
+            .setSemaphoreType(vk::SemaphoreType::eTimeline)
+            .setInitialValue(0);
+
+        auto semaphoreInfo = vk::SemaphoreCreateInfo{}
+            .setPNext(&typeInfo);
+
+        transferTimeline_.emplace(context.getRaiiDevice(), semaphoreInfo);
+        nextTimelineValue_ = 1;
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "AsyncTransferManager: Failed to create timeline semaphore: %s", e.what());
+        return false;
+    }
+
     initialized_ = true;
-    SDL_Log("AsyncTransferManager: Initialized (dedicated transfer: %s)",
+    SDL_Log("AsyncTransferManager: Initialized with timeline semaphore (dedicated transfer: %s)",
             hasDedicatedTransfer_ ? "yes" : "no");
     return true;
 }
@@ -58,6 +75,7 @@ void AsyncTransferManager::shutdown() {
         pendingTransfers_.clear();
     }
 
+    transferTimeline_.reset();
     transferCommandPool_.reset();
     initialized_ = false;
 
@@ -150,14 +168,22 @@ TransferHandle AsyncTransferManager::submitBufferTransfer(
 
     cmd.end();
 
-    // Create fence for transfer completion
-    vk::raii::Fence fence(context_->get().getRaiiDevice(),
-        vk::FenceCreateInfo{});
+    // Get next timeline value to signal for this transfer
+    uint64_t timelineValue = nextTimelineValue_++;
 
-    // Submit to transfer queue
+    // Submit to transfer queue with timeline semaphore signal
+    uint64_t signalValue = timelineValue;
+    auto timelineInfo = vk::TimelineSemaphoreSubmitInfo{}
+        .setSignalSemaphoreValueCount(1)
+        .setPSignalSemaphoreValues(&signalValue);
+
+    vk::Semaphore signalSemaphores[] = {**transferTimeline_};
     auto submitInfo = vk::SubmitInfo{}
-        .setCommandBuffers(cmd);
-    transferQueue_.submit(submitInfo, *fence);
+        .setPNext(&timelineInfo)
+        .setCommandBuffers(cmd)
+        .setSignalSemaphores(signalSemaphores);
+
+    transferQueue_.submit(submitInfo, nullptr);  // No fence, using timeline semaphore
 
     // Track pending transfer
     uint64_t id = nextTransferId_++;
@@ -165,7 +191,7 @@ TransferHandle AsyncTransferManager::submitBufferTransfer(
         std::lock_guard<std::mutex> lock(transferMutex_);
         pendingTransfers_.push_back(PendingTransfer{
             .id = id,
-            .fence = std::move(fence),
+            .timelineValue = timelineValue,
             .cmdBuffer = cmd,
             .stagingBuffer = std::move(staging),
             .onComplete = std::move(onComplete),
@@ -299,14 +325,22 @@ TransferHandle AsyncTransferManager::submitImageTransfer(
 
     cmd.end();
 
-    // Create fence for transfer completion
-    vk::raii::Fence fence(context_->get().getRaiiDevice(),
-        vk::FenceCreateInfo{});
+    // Get next timeline value to signal for this transfer
+    uint64_t timelineValue = nextTimelineValue_++;
 
-    // Submit to transfer queue
+    // Submit to transfer queue with timeline semaphore signal
+    uint64_t signalValue = timelineValue;
+    auto timelineInfo = vk::TimelineSemaphoreSubmitInfo{}
+        .setSignalSemaphoreValueCount(1)
+        .setPSignalSemaphoreValues(&signalValue);
+
+    vk::Semaphore signalSemaphores[] = {**transferTimeline_};
     auto submitInfo = vk::SubmitInfo{}
-        .setCommandBuffers(cmd);
-    transferQueue_.submit(submitInfo, *fence);
+        .setPNext(&timelineInfo)
+        .setCommandBuffers(cmd)
+        .setSignalSemaphores(signalSemaphores);
+
+    transferQueue_.submit(submitInfo, nullptr);  // No fence, using timeline semaphore
 
     // Track pending transfer
     uint64_t id = nextTransferId_++;
@@ -314,7 +348,7 @@ TransferHandle AsyncTransferManager::submitImageTransfer(
         std::lock_guard<std::mutex> lock(transferMutex_);
         pendingTransfers_.push_back(PendingTransfer{
             .id = id,
-            .fence = std::move(fence),
+            .timelineValue = timelineValue,
             .cmdBuffer = cmd,
             .stagingBuffer = std::move(staging),
             .onComplete = std::move(onComplete),
@@ -328,34 +362,39 @@ TransferHandle AsyncTransferManager::submitImageTransfer(
 }
 
 bool AsyncTransferManager::isComplete(TransferHandle handle) const {
-    if (!handle.isValid()) return true;
+    if (!handle.isValid() || !transferTimeline_) return true;
 
     std::lock_guard<std::mutex> lock(transferMutex_);
     for (const auto& transfer : pendingTransfers_) {
         if (transfer.id == handle.id) {
-            return device_.getFenceStatus(*transfer.fence) == vk::Result::eSuccess;
+            // Non-blocking check using timeline semaphore counter
+            uint64_t currentValue = transferTimeline_->getCounterValue();
+            return currentValue >= transfer.timelineValue;
         }
     }
     return true; // Not found = already completed
 }
 
 void AsyncTransferManager::wait(TransferHandle handle) {
-    if (!handle.isValid()) return;
+    if (!handle.isValid() || !transferTimeline_) return;
 
-    vk::Fence fence = nullptr;
+    uint64_t waitValue = 0;
     {
         std::lock_guard<std::mutex> lock(transferMutex_);
         for (const auto& transfer : pendingTransfers_) {
             if (transfer.id == handle.id) {
-                fence = *transfer.fence;
+                waitValue = transfer.timelineValue;
                 break;
             }
         }
     }
 
-    if (fence) {
-        auto result = device_.waitForFences(fence, VK_TRUE, UINT64_MAX);
-        (void)result; // Ignore timeout (UINT64_MAX)
+    if (waitValue > 0) {
+        // Wait using timeline semaphore
+        auto waitInfo = vk::SemaphoreWaitInfo{}
+            .setSemaphores(**transferTimeline_)
+            .setValues(waitValue);
+        (void)device_.waitSemaphores(waitInfo, UINT64_MAX);
     }
 
     // Process to clean up this transfer
@@ -363,17 +402,20 @@ void AsyncTransferManager::wait(TransferHandle handle) {
 }
 
 void AsyncTransferManager::processPendingTransfers() {
-    if (!initialized_) return;
+    if (!initialized_ || !transferTimeline_) return;
 
     std::vector<PendingTransfer> completed;
 
-    // Check for completed transfers
+    // Check for completed transfers using timeline semaphore counter (non-blocking)
     {
         std::lock_guard<std::mutex> lock(transferMutex_);
 
+        // Get current timeline value once (non-blocking)
+        uint64_t currentValue = transferTimeline_->getCounterValue();
+
         auto it = pendingTransfers_.begin();
         while (it != pendingTransfers_.end()) {
-            if (device_.getFenceStatus(*it->fence) == vk::Result::eSuccess) {
+            if (currentValue >= it->timelineValue) {
                 completed.push_back(std::move(*it));
                 it = pendingTransfers_.erase(it);
             } else {
@@ -401,19 +443,23 @@ void AsyncTransferManager::processPendingTransfers() {
 }
 
 void AsyncTransferManager::waitAll() {
-    if (!initialized_) return;
+    if (!initialized_ || !transferTimeline_) return;
 
-    std::vector<vk::Fence> fences;
+    // Find the highest timeline value we need to wait for
+    uint64_t maxValue = 0;
     {
         std::lock_guard<std::mutex> lock(transferMutex_);
         for (const auto& transfer : pendingTransfers_) {
-            fences.push_back(*transfer.fence);
+            maxValue = std::max(maxValue, transfer.timelineValue);
         }
     }
 
-    if (!fences.empty()) {
-        auto result = device_.waitForFences(fences, VK_TRUE, UINT64_MAX);
-        (void)result;
+    // Wait for all pending transfers to complete
+    if (maxValue > 0) {
+        auto waitInfo = vk::SemaphoreWaitInfo{}
+            .setSemaphores(**transferTimeline_)
+            .setValues(maxValue);
+        (void)device_.waitSemaphores(waitInfo, UINT64_MAX);
     }
 
     processPendingTransfers();

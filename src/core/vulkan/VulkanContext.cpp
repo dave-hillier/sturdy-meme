@@ -142,19 +142,58 @@ bool VulkanContext::selectPhysicalDevice() {
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_FALSE;
 
+    // Vulkan 1.2 features - timeline semaphores are core in 1.2
+    VkPhysicalDeviceVulkan12Features vulkan12Features{};
+    vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    vulkan12Features.timelineSemaphore = VK_TRUE;  // Required for non-blocking GPU timeline queries
+
     vkb::PhysicalDeviceSelector selector{vkbInstance};
     auto physRet = selector.set_minimum_version(1, 2)
         .set_surface(surface)
         .set_required_features(features)
+        .set_required_features_12(vulkan12Features)
         .select();
 
     if (!physRet) {
-        SDL_Log("Failed to select physical device: %s", physRet.error().message().c_str());
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "Failed to select physical device with Vulkan 1.2 and timeline semaphore support: %s",
+            physRet.error().message().c_str());
         return false;
     }
 
     vkbPhysicalDevice = physRet.value();
     physicalDevice = vkbPhysicalDevice.physical_device;
+
+    // Verify Vulkan 1.2 API version
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(physicalDevice, &props);
+    uint32_t major = VK_API_VERSION_MAJOR(props.apiVersion);
+    uint32_t minor = VK_API_VERSION_MINOR(props.apiVersion);
+
+    if (major < 1 || (major == 1 && minor < 2)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+            "Physical device does not support Vulkan 1.2 (found %u.%u)", major, minor);
+        return false;
+    }
+
+    SDL_Log("Selected physical device: %s (Vulkan %u.%u.%u)",
+        props.deviceName, major, minor, VK_API_VERSION_PATCH(props.apiVersion));
+
+    // Verify timeline semaphore support (should always be true if we got here)
+    VkPhysicalDeviceVulkan12Features supportedFeatures12{};
+    supportedFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceFeatures2 features2{};
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = &supportedFeatures12;
+    vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+
+    hasTimelineSemaphores_ = supportedFeatures12.timelineSemaphore == VK_TRUE;
+    if (hasTimelineSemaphores_) {
+        SDL_Log("Timeline semaphores supported and enabled");
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+            "Timeline semaphores not supported - falling back to fences");
+    }
 
     // Create RAII wrapper for physical device (non-owning - physical devices aren't destroyed)
     raiiPhysicalDevice_ = std::make_unique<vk::raii::PhysicalDevice>(*raiiInstance_, physicalDevice);

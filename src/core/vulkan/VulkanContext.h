@@ -91,6 +91,9 @@ public:
     // Check if device phase is complete (device, surface, swapchain created)
     bool isDeviceReady() const { return device != VK_NULL_HANDLE; }
 
+    // Check if timeline semaphores are supported (always true for Vulkan 1.2+)
+    bool hasTimelineSemaphores() const { return hasTimelineSemaphores_; }
+
 private:
     bool createInstance();
     bool createSurface();
@@ -115,6 +118,7 @@ private:
     VkQueue transferQueue_ = VK_NULL_HANDLE;
     uint32_t transferQueueFamily_ = 0;
     bool hasDedicatedTransfer_ = false;
+    bool hasTimelineSemaphores_ = false;
 
     VmaAllocator allocator = VK_NULL_HANDLE;
 
