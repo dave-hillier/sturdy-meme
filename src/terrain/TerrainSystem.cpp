@@ -1,6 +1,7 @@
 #include "TerrainSystem.h"
 #include "TerrainBuffers.h"
 #include "TerrainCameraOptimizer.h"
+#include "TerrainEffects.h"
 #include "DescriptorManager.h"
 #include "GpuProfiler.h"
 #include "UBOs.h"
@@ -147,6 +148,11 @@ bool TerrainSystem::initInternal(const InitInfo& info, const TerrainConfig& cfg)
     bufferInfo.maxVisibleTriangles = MAX_VISIBLE_TRIANGLES;
     buffers = TerrainBuffers::create(bufferInfo);
     if (!buffers) return false;
+
+    // Initialize effects subsystem
+    TerrainEffects::InitInfo effectsInfo{};
+    effectsInfo.framesInFlight = framesInFlight;
+    effects.init(effectsInfo);
 
     // Create descriptor set layouts and sets
     if (!createComputeDescriptorSetLayout()) return false;
@@ -531,36 +537,8 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         writer.update();
     }
 
-    // Initialize liquid UBO with default state (no wetness)
-    for (uint32_t i = 0; i < framesInFlight; i++) {
-        void* liquidData = buffers->getLiquidMappedPtr(i);
-        if (liquidData) {
-            memcpy(liquidData, &liquidConfig, sizeof(material::TerrainLiquidUBO));
-        }
-    }
-
-    // Initialize material layer UBO with default state (no layers = fallback to hardcoded blend)
-    for (uint32_t i = 0; i < framesInFlight; i++) {
-        void* layerData = buffers->getMaterialLayerMappedPtr(i);
-        if (layerData) {
-            memcpy(layerData, &materialLayerUBO, sizeof(material::MaterialLayerUBO));
-        }
-    }
-
-    // Initialize caustics UBO with disabled state (causticsEnabled = 0)
-    for (uint32_t i = 0; i < framesInFlight; i++) {
-        float* causticsData = static_cast<float*>(buffers->getCausticsMappedPtr(i));
-        if (causticsData) {
-            causticsData[0] = 0.0f;   // causticsWaterLevel
-            causticsData[1] = 0.05f;  // causticsScale
-            causticsData[2] = 0.3f;   // causticsSpeed
-            causticsData[3] = 0.5f;   // causticsIntensity
-            causticsData[4] = 20.0f;  // causticsMaxDepth
-            causticsData[5] = 0.0f;   // causticsTime
-            causticsData[6] = 0.0f;   // causticsEnabled (disabled by default)
-            causticsData[7] = 0.0f;   // causticsPadding
-        }
-    }
+    // Initialize effect UBOs (caustics, liquid, material layers)
+    effects.initializeUBOs(buffers.get());
 }
 
 void TerrainSystem::setSnowMask(vk::Device device, vk::ImageView snowMaskView, vk::Sampler snowMaskSampler) {
@@ -600,9 +578,8 @@ void TerrainSystem::setCaustics(vk::Device device, vk::ImageView causticsView, v
             .update();
     }
 
-    // Store state for UBO updates
-    causticsWaterLevel = waterLevel;
-    causticsEnabled = enabled;
+    // Store state in effects for per-frame UBO updates
+    effects.setCausticsParams(waterLevel, enabled);
 
     // Update caustics UBO with new water level and enabled state
     for (uint32_t i = 0; i < framesInFlight; i++) {
@@ -615,9 +592,10 @@ void TerrainSystem::setCaustics(vk::Device device, vk::ImageView causticsView, v
 }
 
 void TerrainSystem::setLiquidWetness(float wetness) {
-    liquidConfig.globalWetness = wetness;
+    effects.setLiquidWetness(wetness);
 
-    // Update all frames
+    // Update all frames immediately
+    const auto& liquidConfig = effects.getLiquidConfig();
     for (uint32_t i = 0; i < framesInFlight; i++) {
         void* liquidData = buffers->getLiquidMappedPtr(i);
         if (liquidData) {
@@ -627,24 +605,22 @@ void TerrainSystem::setLiquidWetness(float wetness) {
 }
 
 void TerrainSystem::setLiquidConfig(const material::TerrainLiquidUBO& config) {
-    liquidConfig = config;
+    effects.setLiquidConfig(config);
 
-    // Update all frames
+    // Update all frames immediately
     for (uint32_t i = 0; i < framesInFlight; i++) {
         void* liquidData = buffers->getLiquidMappedPtr(i);
         if (liquidData) {
-            memcpy(liquidData, &liquidConfig, sizeof(material::TerrainLiquidUBO));
+            memcpy(liquidData, &config, sizeof(material::TerrainLiquidUBO));
         }
     }
 }
 
 void TerrainSystem::setMaterialLayerStack(const material::MaterialLayerStack& stack) {
-    materialLayerStack = stack;
+    effects.setMaterialLayerStack(stack);
 
-    // Pack into UBO format
-    materialLayerUBO.packFromStack(materialLayerStack);
-
-    // Update all frames
+    // Update all frames immediately
+    const auto& materialLayerUBO = effects.getMaterialLayerUBO();
     for (uint32_t i = 0; i < framesInFlight; i++) {
         void* layerData = buffers->getMaterialLayerMappedPtr(i);
         if (layerData) {
@@ -709,19 +685,9 @@ void TerrainSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraP
 
     memcpy(buffers->getUniformMappedPtr(frameIndex), &uniforms, sizeof(TerrainUniforms));
 
-    // Update caustics animation time (assumes ~60fps, ~16.67ms per frame)
-    causticsTime += 0.0167f;
-    float* causticsData = static_cast<float*>(buffers->getCausticsMappedPtr(frameIndex));
-    if (causticsData && causticsEnabled) {
-        causticsData[5] = causticsTime;  // causticsTime in UBO
-    }
-
-    // Update liquid animation time for rain ripples, etc.
-    liquidConfig.updateTime(0.0167f);
-    void* liquidData = buffers->getLiquidMappedPtr(frameIndex);
-    if (liquidData && liquidConfig.globalWetness > 0.0f) {
-        memcpy(liquidData, &liquidConfig, sizeof(material::TerrainLiquidUBO));
-    }
+    // Update visual effects (caustics animation, liquid animation)
+    constexpr float FRAME_DELTA_TIME = 0.0167f;  // ~60fps
+    effects.updatePerFrame(frameIndex, FRAME_DELTA_TIME, buffers.get());
 }
 
 void TerrainSystem::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex, GpuProfiler* profiler) {
@@ -786,56 +752,26 @@ void TerrainSystem::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex, Gp
 
     // 2. Subdivision - LOD update with inline frustum culling
     // Ping-pong between split and merge to avoid race conditions
-    // Even frames: split only, Odd frames: merge only
-    // Note: Frustum culling is now inline in subdivision shader (no separate pass)
-    uint32_t updateMode = subdivisionFrameCount & 1;  // 0 = split, 1 = merge
+    // Even frames: split only (0), Odd frames: merge only (1)
+    if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
 
-    if (updateMode == 0) {
-        // Split phase with inline frustum culling
-        // No separate frustum cull pass - culling happens inside subdivision shader
-        if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines->getSubdivisionPipeline());
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelines->getSubdivisionPipelineLayout(),
+                             0, vk::DescriptorSet(computeDescriptorSets[frameIndex]), {});
 
-        vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines->getSubdivisionPipeline());
-        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelines->getSubdivisionPipelineLayout(),
-                                 0, vk::DescriptorSet(computeDescriptorSets[frameIndex]), {});
+    TerrainSubdivisionPushConstants subdivPC{};
+    subdivPC.updateMode = subdivisionFrameCount & 1;  // 0 = split, 1 = merge
+    subdivPC.frameIndex = subdivisionFrameCount;
+    subdivPC.spreadFactor = config.spreadFactor;
+    subdivPC.reserved = 0;
+    vkCmd.pushConstants<TerrainSubdivisionPushConstants>(
+        pipelines->getSubdivisionPipelineLayout(),
+        vk::ShaderStageFlagBits::eCompute,
+        0, subdivPC);
 
-        TerrainSubdivisionPushConstants subdivPC{};
-        subdivPC.updateMode = 0;  // Split
-        subdivPC.frameIndex = subdivisionFrameCount;
-        subdivPC.spreadFactor = config.spreadFactor;
-        subdivPC.reserved = 0;
-        vkCmd.pushConstants<TerrainSubdivisionPushConstants>(
-            pipelines->getSubdivisionPipelineLayout(),
-            vk::ShaderStageFlagBits::eCompute,
-            0, subdivPC);
+    vkCmd.dispatchIndirect(buffers->getIndirectDispatchBuffer(), 0);
 
-        // Dispatch all triangles - inline frustum culling handles early-out
-        vkCmd.dispatchIndirect(buffers->getIndirectDispatchBuffer(), 0);
-
-        if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
-    } else {
-        // Merge phase: process all triangles directly (no culling)
-        if (profiler) profiler->beginZone(cmd, "Terrain:Subdivision");
-
-        vkCmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipelines->getSubdivisionPipeline());
-        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, pipelines->getSubdivisionPipelineLayout(),
-                                 0, vk::DescriptorSet(computeDescriptorSets[frameIndex]), {});
-
-        TerrainSubdivisionPushConstants subdivPC{};
-        subdivPC.updateMode = 1;  // Merge
-        subdivPC.frameIndex = subdivisionFrameCount;
-        subdivPC.spreadFactor = config.spreadFactor;
-        subdivPC.reserved = 0;
-        vkCmd.pushConstants<TerrainSubdivisionPushConstants>(
-            pipelines->getSubdivisionPipelineLayout(),
-            vk::ShaderStageFlagBits::eCompute,
-            0, subdivPC);
-
-        // Use the original indirect dispatch (all triangles)
-        vkCmd.dispatchIndirect(buffers->getIndirectDispatchBuffer(), 0);
-
-        if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
-    }
+    if (profiler) profiler->endZone(cmd, "Terrain:Subdivision");
 
     subdivisionFrameCount++;
 

@@ -17,6 +17,7 @@
 #include "TerrainBuffers.h"
 #include "TerrainCameraOptimizer.h"
 #include "TerrainPipelines.h"
+#include "TerrainEffects.h"
 #include "VirtualTextureSystem.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
@@ -210,12 +211,12 @@ public:
     // Call this to enable puddles, wet surfaces based on weather
     void setLiquidWetness(float wetness);
     void setLiquidConfig(const material::TerrainLiquidUBO& config);
-    const material::TerrainLiquidUBO& getLiquidConfig() const { return liquidConfig; }
+    const material::TerrainLiquidUBO& getLiquidConfig() const { return effects.getLiquidConfig(); }
 
     // Set material layer configuration (composable material system)
     // Use this to configure height/slope-based terrain material blending
     void setMaterialLayerStack(const material::MaterialLayerStack& stack);
-    const material::MaterialLayerStack& getMaterialLayerStack() const { return materialLayerStack; }
+    const material::MaterialLayerStack& getMaterialLayerStack() const { return effects.getMaterialLayerStack(); }
 
     // Update terrain uniforms for a frame
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos,
@@ -391,17 +392,8 @@ private:
     uint32_t subdivisionFrameCount = 0;  // Frame counter for split/merge ping-pong
     SubgroupCapabilities subgroupCaps;  // GPU subgroup feature support
 
-    // Caustics state
-    float causticsWaterLevel = 0.0f;
-    bool causticsEnabled = false;
-    float causticsTime = 0.0f;  // Animation time accumulator
-
-    // Liquid effects state (composable material system)
-    material::TerrainLiquidUBO liquidConfig;
-
-    // Material layer state (composable material system)
-    material::MaterialLayerStack materialLayerStack;
-    material::MaterialLayerUBO materialLayerUBO;
+    // Visual effects state (caustics, liquid, material layers)
+    TerrainEffects effects;
 
     // Constants
     static constexpr uint32_t SUBDIVISION_WORKGROUP_SIZE = 64;
