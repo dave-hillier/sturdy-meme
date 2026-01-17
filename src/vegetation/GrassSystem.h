@@ -16,6 +16,8 @@
 #include "UBOs.h"
 #include "VmaResources.h"
 #include "core/FrameBuffered.h"
+#include "interfaces/IRecordable.h"
+#include "interfaces/IShadowCaster.h"
 
 // Forward declarations
 class WindSystem;
@@ -58,7 +60,7 @@ struct GrassInstance {
     glm::vec4 terrainNormal;      // xyz = terrain normal (for tangent alignment), w = unused
 };
 
-class GrassSystem {
+class GrassSystem : public IRecordableAnimated, public IShadowCasterAnimated {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -141,6 +143,16 @@ public:
     void recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameIndex, float time);
     void recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time);
     void recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex);
+
+    // IRecordableAnimated interface implementation
+    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) override {
+        recordDraw(vk::CommandBuffer(cmd), frameIndex, time);
+    }
+
+    // IShadowCasterAnimated interface implementation
+    void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time, int cascade) override {
+        recordShadowDraw(vk::CommandBuffer(cmd), frameIndex, time, static_cast<uint32_t>(cascade));
+    }
 
     // Double-buffer management: call at frame start to swap compute/render buffer sets
     void advanceBufferSet();

@@ -9,6 +9,8 @@
 #include <array>
 #include <memory>
 #include "interfaces/ITerrainControl.h"
+#include "interfaces/IRecordable.h"
+#include "interfaces/IShadowCaster.h"
 #include "UBOs.h"
 #include "TerrainTextures.h"
 #include "TerrainCBT.h"
@@ -132,7 +134,7 @@ struct TerrainConfig {
     bool useVirtualTexture = false;     // Enable virtual texturing for terrain
 };
 
-class TerrainSystem : public ITerrainControl {
+class TerrainSystem : public ITerrainControl, public IRecordable, public IShadowCaster {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -232,9 +234,20 @@ public:
     // Record terrain rendering
     void recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex);
 
+    // IRecordable interface implementation
+    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) override {
+        recordDraw(vk::CommandBuffer(cmd), frameIndex);
+    }
+
     // Record shadow pass for terrain
     void recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex,
                           const glm::mat4& lightViewProj, int cascadeIndex);
+
+    // IShadowCaster interface implementation
+    void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
+                          const glm::mat4& lightMatrix, int cascade) override {
+        recordShadowDraw(vk::CommandBuffer(cmd), frameIndex, lightMatrix, cascade);
+    }
 
     // Record shadow culling compute (call before recordShadowDraw for each cascade)
     void recordShadowCull(vk::CommandBuffer cmd, uint32_t frameIndex,

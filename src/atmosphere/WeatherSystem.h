@@ -12,6 +12,7 @@
 #include "ParticleSystem.h"
 #include "UBOs.h"
 #include "interfaces/IWeatherState.h"
+#include "interfaces/IRecordable.h"
 
 // Forward declarations
 class WindSystem;
@@ -38,7 +39,7 @@ struct WeatherPushConstants {
     int padding;
 };
 
-class WeatherSystem : public IWeatherState {
+class WeatherSystem : public IWeatherState, public IRecordableAnimated {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -98,8 +99,8 @@ public:
     // Record compute dispatch for particle simulation
     void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time, float deltaTime);
 
-    // Record draw commands for weather particles (after opaque geometry)
-    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
+    // Record draw commands for weather particles (implements IRecordableAnimated)
+    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) override;
 
     // Double-buffer management
     void advanceBufferSet();

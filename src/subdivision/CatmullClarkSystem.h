@@ -13,6 +13,7 @@
 #include "CatmullClarkMesh.h"
 #include "DescriptorManager.h"
 #include "VmaResources.h"
+#include "interfaces/IRecordable.h"
 
 // Push constants for rendering
 // alignas(16) required for SIMD operations on glm::mat4
@@ -39,7 +40,7 @@ struct CatmullClarkConfig {
     std::string objPath;                                // Optional OBJ file path (empty = use cube)
 };
 
-class CatmullClarkSystem {
+class CatmullClarkSystem : public IRecordable {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -87,8 +88,8 @@ public:
     // Record compute commands (subdivision update)
     void recordCompute(VkCommandBuffer cmd, uint32_t frameIndex);
 
-    // Record rendering
-    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex);
+    // Record rendering (implements IRecordable)
+    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) override;
 
     // Config accessors
     const CatmullClarkConfig& getConfig() const { return config; }

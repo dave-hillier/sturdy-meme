@@ -9,10 +9,11 @@
 #include <optional>
 #include "DescriptorManager.h"
 #include "InitContext.h"
+#include "interfaces/IRecordable.h"
 
 class AtmosphereLUTSystem;
 
-class SkySystem {
+class SkySystem : public IRecordable {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -52,8 +53,8 @@ public:
                               VkDeviceSize uniformBufferSize,
                               AtmosphereLUTSystem& atmosphereLUTSystem);
 
-    // Record sky rendering commands
-    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex);
+    // Record sky rendering commands (implements IRecordable)
+    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) override;
 
 
 private:
