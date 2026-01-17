@@ -164,21 +164,21 @@ public:
     void setTerrainEnabled(bool enabled) { terrainEnabled = enabled; }
     bool isTerrainEnabled() const { return terrainEnabled; }
 
-    // Cloud parameters (synced to multiple subsystems in render loop)
+    // Cloud parameters - delegated to EnvironmentControlSubsystem (authoritative source)
     void setCloudCoverage(float coverage);
-    float getCloudCoverage() const { return cloudCoverage; }
+    float getCloudCoverage() const;
     void setCloudDensity(float density);
-    float getCloudDensity() const { return cloudDensity; }
+    float getCloudDensity() const;
     void setSkyExposure(float exposure);
-    float getSkyExposure() const { return skyExposure; }
+    float getSkyExposure() const;
 
     // Debug visualization toggles (local state)
     void toggleCascadeDebug() { showCascadeDebug = !showCascadeDebug; }
     bool isShowingCascadeDebug() const { return showCascadeDebug; }
     void toggleSnowDepthDebug() { showSnowDepthDebug = !showSnowDepthDebug; }
     bool isShowingSnowDepthDebug() const { return showSnowDepthDebug; }
-    void toggleCloudStyle() { useParaboloidClouds = !useParaboloidClouds; }
-    bool isUsingParaboloidClouds() const { return useParaboloidClouds; }
+    void toggleCloudStyle();
+    bool isUsingParaboloidClouds() const;
 
     // Player state for grass/snow interaction (used in render loop)
     void setPlayerPosition(const glm::vec3& position, float radius);
@@ -318,17 +318,13 @@ private:
 
     bool showCascadeDebug = false;         // true = show cascade colors overlay
     bool showSnowDepthDebug = false;       // true = show snow depth heat map overlay
-    bool useParaboloidClouds = true;       // true = paraboloid LUT hybrid, false = procedural
     bool hdrEnabled = true;                // true = HDR tonemapping/bloom, false = bypass
     bool hdrPassEnabled = true;            // true = render HDR pass, false = skip entire HDR scene rendering
     bool terrainEnabled = true;            // true = render terrain, false = skip terrain rendering
 
-    // Cloud parameters (synced to UBO, cloud shadows, and cloud map LUT)
-    float cloudCoverage = 0.5f;            // 0-1 cloud coverage amount
-    float cloudDensity = 0.3f;             // Base density multiplier
+    // Note: Cloud parameters (cloudCoverage, cloudDensity, skyExposure, useParaboloidClouds)
+    // are now managed by EnvironmentControlSubsystem as the authoritative source.
 
-    // Sky parameters (synced to UBO)
-    float skyExposure = 5.0f;              // Sky brightness multiplier (1-20)
     bool framebufferResized = false;       // true = window resized, need to recreate swapchain
     bool windowSuspended = false;          // true = window minimized/hidden (macOS screen lock)
 

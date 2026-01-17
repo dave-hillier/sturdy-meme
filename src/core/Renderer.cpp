@@ -619,12 +619,14 @@ void Renderer::updateUniformBuffer(uint32_t currentImage, const Camera& camera) 
     systems_->shadow().updateCascadeMatrices(lighting.sunDir, camera);
 
     // Build UBO data via UBOBuilder (pure calculation)
+    // Get cloud parameters from EnvironmentControlSubsystem (authoritative source)
+    auto& envControl = systems_->environmentControl();
     UBOBuilder::MainUBOConfig mainConfig{};
     mainConfig.showCascadeDebug = showCascadeDebug;
-    mainConfig.useParaboloidClouds = useParaboloidClouds;
-    mainConfig.cloudCoverage = cloudCoverage;
-    mainConfig.cloudDensity = cloudDensity;
-    mainConfig.skyExposure = skyExposure;
+    mainConfig.useParaboloidClouds = envControl.isUsingParaboloidClouds();
+    mainConfig.cloudCoverage = envControl.getCloudCoverage();
+    mainConfig.cloudDensity = envControl.getCloudDensity();
+    mainConfig.skyExposure = envControl.getSkyExposure();
     mainConfig.shadowsEnabled = perfToggles.shadowPass;  // Skip shadow sampling when shadows disabled
     UniformBufferObject ubo = systems_->uboBuilder().buildUniformBufferData(camera, lighting, currentTimeOfDay, mainConfig);
 
@@ -1785,23 +1787,39 @@ void Renderer::updateHiZObjectData() {
 }
 
 // ============================================================================
-// Cloud and sky exposure control (synced to multiple subsystems)
+// Cloud and sky exposure control - delegates to EnvironmentControlSubsystem
 // ============================================================================
 
 void Renderer::setCloudCoverage(float coverage) {
-    cloudCoverage = glm::clamp(coverage, 0.0f, 1.0f);
-    systems_->cloudShadow().setCloudCoverage(cloudCoverage);
-    systems_->atmosphereLUT().setCloudCoverage(cloudCoverage);
+    systems_->environmentControl().setCloudCoverage(coverage);
+}
+
+float Renderer::getCloudCoverage() const {
+    return systems_->environmentControl().getCloudCoverage();
 }
 
 void Renderer::setCloudDensity(float density) {
-    cloudDensity = glm::clamp(density, 0.0f, 1.0f);
-    systems_->cloudShadow().setCloudDensity(cloudDensity);
-    systems_->atmosphereLUT().setCloudDensity(cloudDensity);
+    systems_->environmentControl().setCloudDensity(density);
+}
+
+float Renderer::getCloudDensity() const {
+    return systems_->environmentControl().getCloudDensity();
 }
 
 void Renderer::setSkyExposure(float exposure) {
-    skyExposure = glm::clamp(exposure, 1.0f, 20.0f);
+    systems_->environmentControl().setSkyExposure(exposure);
+}
+
+float Renderer::getSkyExposure() const {
+    return systems_->environmentControl().getSkyExposure();
+}
+
+void Renderer::toggleCloudStyle() {
+    systems_->environmentControl().toggleCloudStyle();
+}
+
+bool Renderer::isUsingParaboloidClouds() const {
+    return systems_->environmentControl().isUsingParaboloidClouds();
 }
 
 // Resource access
