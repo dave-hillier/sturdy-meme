@@ -14,32 +14,12 @@
 #include <optional>
 #include "VmaResources.h"
 #include "core/FrameBuffered.h"
+#include "TileGridLogic.h"
 
-// Hole definition - geometric primitive for terrain holes (caves/wells)
-struct TerrainHole {
-    enum class Type { Circle };
-    Type type = Type::Circle;
-    float centerX = 0.0f;
-    float centerZ = 0.0f;
-    float radius = 0.0f;
-};
-
-// Tile coordinate in the grid
-struct TileCoord {
-    int32_t x = 0;
-    int32_t z = 0;
-
-    bool operator==(const TileCoord& other) const {
-        return x == other.x && z == other.z;
-    }
-};
-
-// Hash function for TileCoord to use in unordered_map
-struct TileCoordHash {
-    size_t operator()(const TileCoord& coord) const {
-        return std::hash<int64_t>()(static_cast<int64_t>(coord.x) << 32 | static_cast<uint32_t>(coord.z));
-    }
-};
+// Use types from TileGridLogic for consistency
+using TileCoord = TileGrid::TileCoord;
+using TileCoordHash = TileGrid::TileCoordHash;
+using TerrainHole = TileGrid::TerrainHole;
 
 // A single terrain tile with CPU and GPU data
 struct TerrainTile {
@@ -254,6 +234,13 @@ private:
 
     // Make a unique key for tile lookup
     uint64_t makeTileKey(TileCoord coord, uint32_t lod) const;
+
+    // Load tile data from disk and populate CPU data + world bounds
+    // Returns true on success, tile is populated with cpuData and world bounds
+    bool loadTileDataFromDisk(TileCoord coord, uint32_t lod, TerrainTile& tile);
+
+    // Calculate world bounds for a tile at given LOD
+    void calculateTileWorldBounds(TileCoord coord, uint32_t lod, TerrainTile& tile) const;
 
     // Vulkan resources
     const vk::raii::Device* raiiDevice_ = nullptr;

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+#include <algorithm>
+
 // ============================================================================
 // AUTHORITATIVE TERRAIN HEIGHT FUNCTIONS (C++)
 // ============================================================================
@@ -34,6 +37,43 @@ inline void worldToUV(float worldX, float worldZ, float terrainSize,
 // Check if UV coordinates are within terrain bounds
 inline bool isUVInBounds(float u, float v) {
     return u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f;
+}
+
+// Bilinear sample from a float heightmap array
+// u, v: normalized coordinates [0, 1]
+// data: row-major float array of size resolution * resolution
+// resolution: width/height of the heightmap
+// Returns: interpolated normalized height value [0, 1]
+inline float sampleBilinear(float u, float v, const float* data, uint32_t resolution) {
+    u = std::clamp(u, 0.0f, 1.0f);
+    v = std::clamp(v, 0.0f, 1.0f);
+
+    float fx = u * (resolution - 1);
+    float fy = v * (resolution - 1);
+
+    int x0 = static_cast<int>(fx);
+    int y0 = static_cast<int>(fy);
+    int x1 = std::min(x0 + 1, static_cast<int>(resolution - 1));
+    int y1 = std::min(y0 + 1, static_cast<int>(resolution - 1));
+
+    float tx = fx - x0;
+    float ty = fy - y0;
+
+    float h00 = data[y0 * resolution + x0];
+    float h10 = data[y0 * resolution + x1];
+    float h01 = data[y1 * resolution + x0];
+    float h11 = data[y1 * resolution + x1];
+
+    float h0 = h00 * (1.0f - tx) + h10 * tx;
+    float h1 = h01 * (1.0f - tx) + h11 * tx;
+
+    return h0 * (1.0f - ty) + h1 * ty;
+}
+
+// Convenience overload: sample and convert to world height in one call
+inline float sampleWorldHeight(float u, float v, const float* data,
+                                uint32_t resolution, float heightScale) {
+    return toWorld(sampleBilinear(u, v, data, resolution), heightScale);
 }
 
 } // namespace TerrainHeight

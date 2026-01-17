@@ -9,7 +9,6 @@
 #include "PhysicsSystem.h"
 
 class TerrainTileCache;
-struct TileCoord;
 
 struct PhysicsTileEntry {
     int32_t tileX;

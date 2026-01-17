@@ -274,6 +274,56 @@ uint64_t TerrainTileCache::makeTileKey(TileCoord coord, uint32_t lod) const {
            static_cast<uint64_t>(static_cast<uint32_t>(coord.z));
 }
 
+void TerrainTileCache::calculateTileWorldBounds(TileCoord coord, uint32_t lod, TerrainTile& tile) const {
+    uint32_t lodTilesX = tilesX >> lod;
+    uint32_t lodTilesZ = tilesZ >> lod;
+    if (lodTilesX < 1) lodTilesX = 1;
+    if (lodTilesZ < 1) lodTilesZ = 1;
+
+    float tileWorldSizeX = terrainSize / lodTilesX;
+    float tileWorldSizeZ = terrainSize / lodTilesZ;
+
+    tile.worldMinX = (static_cast<float>(coord.x) / lodTilesX - 0.5f) * terrainSize;
+    tile.worldMinZ = (static_cast<float>(coord.z) / lodTilesZ - 0.5f) * terrainSize;
+    tile.worldMaxX = tile.worldMinX + tileWorldSizeX;
+    tile.worldMaxZ = tile.worldMinZ + tileWorldSizeZ;
+}
+
+bool TerrainTileCache::loadTileDataFromDisk(TileCoord coord, uint32_t lod, TerrainTile& tile) {
+    std::string path = getTilePath(coord, lod);
+
+    int width, height, channels;
+    uint16_t* data = stbi_load_16(path.c_str(), &width, &height, &channels, 1);
+    if (!data) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to load tile: %s",
+                    path.c_str());
+        return false;
+    }
+
+    // Tiles must match expected resolution
+    if (width != static_cast<int>(tileResolution) || height != static_cast<int>(tileResolution)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "TerrainTileCache: Tile %s is %dx%d, expected %ux%u - refusing to resample",
+                     path.c_str(), width, height, tileResolution, tileResolution);
+        stbi_image_free(data);
+        return false;
+    }
+
+    // Initialize tile metadata
+    tile.coord = coord;
+    tile.lod = lod;
+    calculateTileWorldBounds(coord, lod, tile);
+
+    // Convert 16-bit to normalized float32
+    tile.cpuData.resize(tileResolution * tileResolution);
+    for (uint32_t i = 0; i < tileResolution * tileResolution; i++) {
+        tile.cpuData[i] = static_cast<float>(data[i]) / 65535.0f;
+    }
+
+    stbi_image_free(data);
+    return true;
+}
+
 uint32_t TerrainTileCache::getLODForDistance(float distance) const {
     if (distance < LOD0_MAX_DISTANCE) return 0;
     if (distance < LOD1_MAX_DISTANCE && numLODLevels > 1) return 1;
@@ -457,54 +507,12 @@ bool TerrainTileCache::loadTile(TileCoord coord, uint32_t lod) {
         // Already have CPU data, just need to add GPU resources
         tilePtr = &existingIt->second;
     } else {
-        // Need to load from disk
-        std::string path = getTilePath(coord, lod);
-
-        int width, height, channels;
-
-        // Load 16-bit PNG at NATIVE resolution - NO downsampling!
-        uint16_t* data = stbi_load_16(path.c_str(), &width, &height, &channels, 1);
-        if (!data) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to load tile: %s",
-                        path.c_str());
-            return false;
-        }
-
-        // CRITICAL: Tiles must be 512x512 - refuse to resample
-        if (width != static_cast<int>(tileResolution) || height != static_cast<int>(tileResolution)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                         "TerrainTileCache: Tile %s is %dx%d, expected %ux%u - refusing to resample",
-                         path.c_str(), width, height, tileResolution, tileResolution);
-            stbi_image_free(data);
-            return false;
-        }
-
-        // Create tile entry
+        // Need to load from disk - create entry and populate with helper
         TerrainTile& tile = loadedTiles[key];
-        tile.coord = coord;
-        tile.lod = lod;
-
-        // Calculate world bounds for this tile
-        uint32_t lodTilesX = tilesX >> lod;
-        uint32_t lodTilesZ = tilesZ >> lod;
-        if (lodTilesX < 1) lodTilesX = 1;
-        if (lodTilesZ < 1) lodTilesZ = 1;
-
-        float tileWorldSizeX = terrainSize / lodTilesX;
-        float tileWorldSizeZ = terrainSize / lodTilesZ;
-
-        tile.worldMinX = (static_cast<float>(coord.x) / lodTilesX - 0.5f) * terrainSize;
-        tile.worldMinZ = (static_cast<float>(coord.z) / lodTilesZ - 0.5f) * terrainSize;
-        tile.worldMaxX = tile.worldMinX + tileWorldSizeX;
-        tile.worldMaxZ = tile.worldMinZ + tileWorldSizeZ;
-
-        // Convert to float32 directly - NO resampling
-        tile.cpuData.resize(tileResolution * tileResolution);
-        for (uint32_t i = 0; i < tileResolution * tileResolution; i++) {
-            tile.cpuData[i] = static_cast<float>(data[i]) / 65535.0f;
+        if (!loadTileDataFromDisk(coord, lod, tile)) {
+            loadedTiles.erase(key);
+            return false;
         }
-
-        stbi_image_free(data);
         tilePtr = &tile;
     }
 
@@ -690,7 +698,7 @@ bool TerrainTileCache::isTileLoaded(TileCoord coord, uint32_t lod) const {
 }
 
 bool TerrainTileCache::getHeightAt(float worldX, float worldZ, float& outHeight) const {
-    // Helper to sample height from a tile
+    // Helper to sample height from a tile using TerrainHeight bilinear sampling
     auto sampleTile = [&](const TerrainTile& tile) -> bool {
         if (tile.cpuData.empty()) return false;
         if (worldX < tile.worldMinX || worldX >= tile.worldMaxX ||
@@ -700,33 +708,9 @@ bool TerrainTileCache::getHeightAt(float worldX, float worldZ, float& outHeight)
         float u = (worldX - tile.worldMinX) / (tile.worldMaxX - tile.worldMinX);
         float v = (worldZ - tile.worldMinZ) / (tile.worldMaxZ - tile.worldMinZ);
 
-        // Clamp to valid range
-        u = std::clamp(u, 0.0f, 1.0f);
-        v = std::clamp(v, 0.0f, 1.0f);
-
-        // Sample with bilinear interpolation
-        float fx = u * (tileResolution - 1);
-        float fy = v * (tileResolution - 1);
-
-        int x0 = static_cast<int>(fx);
-        int y0 = static_cast<int>(fy);
-        int x1 = std::min(x0 + 1, static_cast<int>(tileResolution - 1));
-        int y1 = std::min(y0 + 1, static_cast<int>(tileResolution - 1));
-
-        float tx = fx - x0;
-        float ty = fy - y0;
-
-        float h00 = tile.cpuData[y0 * tileResolution + x0];
-        float h10 = tile.cpuData[y0 * tileResolution + x1];
-        float h01 = tile.cpuData[y1 * tileResolution + x0];
-        float h11 = tile.cpuData[y1 * tileResolution + x1];
-
-        float h0 = h00 * (1.0f - tx) + h10 * tx;
-        float h1 = h01 * (1.0f - tx) + h11 * tx;
-        float h = h0 * (1.0f - ty) + h1 * ty;
-
-        // Convert to world height using authoritative formula from TerrainHeight.h
-        outHeight = TerrainHeight::toWorld(h, heightScale);
+        // Sample and convert to world height using TerrainHeight helpers
+        outHeight = TerrainHeight::sampleWorldHeight(u, v, tile.cpuData.data(),
+                                                      tileResolution, heightScale);
         return true;
     };
 
@@ -867,53 +851,12 @@ bool TerrainTileCache::loadTileCPUOnly(TileCoord coord, uint32_t lod) {
         return true;  // Already has CPU data
     }
 
-    std::string path = getTilePath(coord, lod);
-
-    int width, height, channels;
-
-    // Load 16-bit PNG at NATIVE resolution - NO downsampling!
-    uint16_t* data = stbi_load_16(path.c_str(), &width, &height, &channels, 1);
-    if (!data) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to load tile (CPU): %s",
-                    path.c_str());
-        return false;
-    }
-
-    // CRITICAL: Tiles must be 512x512 - refuse to resample
-    if (width != static_cast<int>(tileResolution) || height != static_cast<int>(tileResolution)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "TerrainTileCache: Tile %s is %dx%d, expected %ux%u - refusing to resample",
-                     path.c_str(), width, height, tileResolution, tileResolution);
-        stbi_image_free(data);
-        return false;
-    }
-
-    // Create tile entry with CPU data only (no GPU)
+    // Create tile entry and load from disk using helper
     TerrainTile& tile = loadedTiles[key];
-    tile.coord = coord;
-    tile.lod = lod;
-
-    // Calculate world bounds for this tile
-    uint32_t lodTilesX = tilesX >> lod;
-    uint32_t lodTilesZ = tilesZ >> lod;
-    if (lodTilesX < 1) lodTilesX = 1;
-    if (lodTilesZ < 1) lodTilesZ = 1;
-
-    float tileWorldSizeX = terrainSize / lodTilesX;
-    float tileWorldSizeZ = terrainSize / lodTilesZ;
-
-    tile.worldMinX = (static_cast<float>(coord.x) / lodTilesX - 0.5f) * terrainSize;
-    tile.worldMinZ = (static_cast<float>(coord.z) / lodTilesZ - 0.5f) * terrainSize;
-    tile.worldMaxX = tile.worldMinX + tileWorldSizeX;
-    tile.worldMaxZ = tile.worldMinZ + tileWorldSizeZ;
-
-    // Convert to float32 directly - NO resampling
-    tile.cpuData.resize(tileResolution * tileResolution);
-    for (uint32_t i = 0; i < tileResolution * tileResolution; i++) {
-        tile.cpuData[i] = static_cast<float>(data[i]) / 65535.0f;
+    if (!loadTileDataFromDisk(coord, lod, tile)) {
+        loadedTiles.erase(key);
+        return false;
     }
-
-    stbi_image_free(data);
 
     // Leave loaded=false - GPU resources will be created later when needed
     tile.loaded = false;
@@ -1081,30 +1024,10 @@ bool TerrainTileCache::createBaseHeightMap() {
             if (tileIdx < baseTiles_.size()) {
                 const TerrainTile* tile = baseTiles_[tileIdx];
                 if (tile && !tile->cpuData.empty()) {
-                    // Calculate UV within tile
+                    // Calculate UV within tile and sample using helper
                     float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
                     float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
-                    u = std::clamp(u, 0.0f, 1.0f);
-                    v = std::clamp(v, 0.0f, 1.0f);
-
-                    // Bilinear sample
-                    float fx = u * (tileResolution - 1);
-                    float fy = v * (tileResolution - 1);
-                    int x0 = static_cast<int>(fx);
-                    int y0 = static_cast<int>(fy);
-                    int x1 = std::min(x0 + 1, static_cast<int>(tileResolution - 1));
-                    int y1 = std::min(y0 + 1, static_cast<int>(tileResolution - 1));
-
-                    float tx = fx - x0;
-                    float ty = fy - y0;
-
-                    float h00 = tile->cpuData[y0 * tileResolution + x0];
-                    float h10 = tile->cpuData[y0 * tileResolution + x1];
-                    float h01 = tile->cpuData[y1 * tileResolution + x0];
-                    float h11 = tile->cpuData[y1 * tileResolution + x1];
-
-                    height = (h00 * (1.0f - tx) + h10 * tx) * (1.0f - ty) +
-                             (h01 * (1.0f - tx) + h11 * tx) * ty;
+                    height = TerrainHeight::sampleBilinear(u, v, tile->cpuData.data(), tileResolution);
                 }
             }
 
@@ -1234,32 +1157,12 @@ bool TerrainTileCache::sampleBaseLOD(float worldX, float worldZ, float& outHeigh
     const TerrainTile* tile = baseTiles_[tileIdx];
     if (!tile || tile->cpuData.empty()) return false;
 
-    // Calculate UV within tile
+    // Calculate UV within tile and sample using helper
     float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
     float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
-    u = std::clamp(u, 0.0f, 1.0f);
-    v = std::clamp(v, 0.0f, 1.0f);
 
-    // Bilinear sample
-    float fx = u * (tileResolution - 1);
-    float fy = v * (tileResolution - 1);
-    int x0 = static_cast<int>(fx);
-    int y0 = static_cast<int>(fy);
-    int x1 = std::min(x0 + 1, static_cast<int>(tileResolution - 1));
-    int y1 = std::min(y0 + 1, static_cast<int>(tileResolution - 1));
-
-    float tx = fx - x0;
-    float ty = fy - y0;
-
-    float h00 = tile->cpuData[y0 * tileResolution + x0];
-    float h10 = tile->cpuData[y0 * tileResolution + x1];
-    float h01 = tile->cpuData[y1 * tileResolution + x0];
-    float h11 = tile->cpuData[y1 * tileResolution + x1];
-
-    float h = (h00 * (1.0f - tx) + h10 * tx) * (1.0f - ty) +
-              (h01 * (1.0f - tx) + h11 * tx) * ty;
-
-    outHeight = TerrainHeight::toWorld(h, heightScale);
+    outHeight = TerrainHeight::sampleWorldHeight(u, v, tile->cpuData.data(),
+                                                  tileResolution, heightScale);
     return true;
 }
 
@@ -1400,25 +1303,11 @@ void TerrainTileCache::worldToHoleMaskTexel(float x, float z, int& texelX, int& 
 }
 
 bool TerrainTileCache::isHole(float x, float z) const {
-    for (const auto& hole : holes_) {
-        if (hole.type == TerrainHole::Type::Circle) {
-            float dx = x - hole.centerX;
-            float dz = z - hole.centerZ;
-            if (dx * dx + dz * dz <= hole.radius * hole.radius) {
-                return true;
-            }
-        }
-    }
-    return false;
+    return TileGrid::isPointInHole(x, z, holes_);
 }
 
 void TerrainTileCache::addHoleCircle(float centerX, float centerZ, float radius) {
-    TerrainHole hole;
-    hole.type = TerrainHole::Type::Circle;
-    hole.centerX = centerX;
-    hole.centerZ = centerZ;
-    hole.radius = radius;
-    holes_.push_back(hole);
+    holes_.push_back({centerX, centerZ, radius});
 
     // Rasterize to global mask and mark dirty
     rasterizeHolesToGlobalMask();
@@ -1430,8 +1319,7 @@ void TerrainTileCache::addHoleCircle(float centerX, float centerZ, float radius)
 
 void TerrainTileCache::removeHoleCircle(float centerX, float centerZ, float radius) {
     auto it = std::remove_if(holes_.begin(), holes_.end(), [&](const TerrainHole& h) {
-        return h.type == TerrainHole::Type::Circle &&
-               std::abs(h.centerX - centerX) < 0.1f &&
+        return std::abs(h.centerX - centerX) < 0.1f &&
                std::abs(h.centerZ - centerZ) < 0.1f &&
                std::abs(h.radius - radius) < 0.1f;
     });
@@ -1445,40 +1333,11 @@ void TerrainTileCache::removeHoleCircle(float centerX, float centerZ, float radi
 }
 
 void TerrainTileCache::rasterizeHolesToGlobalMask() {
-    // Clear mask
-    std::fill(holeMaskCpuData_.begin(), holeMaskCpuData_.end(), 0);
-
-    // Rasterize each hole
-    for (const auto& hole : holes_) {
-        if (hole.type == TerrainHole::Type::Circle) {
-            float texelsPerUnit = static_cast<float>(holeMaskResolution_ - 1) / terrainSize;
-            int texelRadius = static_cast<int>(std::ceil(hole.radius * texelsPerUnit)) + 1;
-
-            int centerTexelX, centerTexelY;
-            worldToHoleMaskTexel(hole.centerX, hole.centerZ, centerTexelX, centerTexelY);
-
-            for (int dy = -texelRadius; dy <= texelRadius; dy++) {
-                for (int dx = -texelRadius; dx <= texelRadius; dx++) {
-                    int tx = centerTexelX + dx;
-                    int ty = centerTexelY + dy;
-
-                    if (tx < 0 || tx >= static_cast<int>(holeMaskResolution_) ||
-                        ty < 0 || ty >= static_cast<int>(holeMaskResolution_)) {
-                        continue;
-                    }
-
-                    float worldX = (static_cast<float>(tx) / (holeMaskResolution_ - 1) - 0.5f) * terrainSize;
-                    float worldZ = (static_cast<float>(ty) / (holeMaskResolution_ - 1) - 0.5f) * terrainSize;
-                    float distSq = (worldX - hole.centerX) * (worldX - hole.centerX) +
-                                  (worldZ - hole.centerZ) * (worldZ - hole.centerZ);
-
-                    if (distSq <= hole.radius * hole.radius) {
-                        holeMaskCpuData_[ty * holeMaskResolution_ + tx] = 255;
-                    }
-                }
-            }
-        }
-    }
+    // Use TileGrid helper to rasterize holes for the entire terrain
+    float halfTerrain = terrainSize * 0.5f;
+    holeMaskCpuData_ = TileGrid::rasterizeHolesForTile(
+        -halfTerrain, -halfTerrain, halfTerrain, halfTerrain,
+        holeMaskResolution_, holes_);
 }
 
 std::vector<uint8_t> TerrainTileCache::rasterizeHolesForTile(
@@ -1491,33 +1350,31 @@ std::vector<uint8_t> TerrainTileCache::rasterizeHolesForTile(
 
     // For each hole, check if it intersects this tile
     for (const auto& hole : holes_) {
-        if (hole.type == TerrainHole::Type::Circle) {
-            // Quick AABB check for circle-rectangle intersection
-            float closestX = std::clamp(hole.centerX, tileMinX, tileMaxX);
-            float closestZ = std::clamp(hole.centerZ, tileMinZ, tileMaxZ);
-            float dx = hole.centerX - closestX;
-            float dz = hole.centerZ - closestZ;
-            if (dx * dx + dz * dz > hole.radius * hole.radius) {
-                continue;  // Circle doesn't intersect tile
-            }
+        // Quick AABB check for circle-rectangle intersection
+        float closestX = std::clamp(hole.centerX, tileMinX, tileMaxX);
+        float closestZ = std::clamp(hole.centerZ, tileMinZ, tileMaxZ);
+        float dx = hole.centerX - closestX;
+        float dz = hole.centerZ - closestZ;
+        if (dx * dx + dz * dz > hole.radius * hole.radius) {
+            continue;  // Circle doesn't intersect tile
+        }
 
-            // Rasterize circle into tile mask
-            // Shrink radius slightly to match GPU rendering
-            float shrinkAmount = tileWidth / resolution;
-            float effectiveRadius = hole.radius - shrinkAmount;
-            if (effectiveRadius <= 0.0f) effectiveRadius = hole.radius * 0.5f;
-            float radiusSq = effectiveRadius * effectiveRadius;
+        // Rasterize circle into tile mask
+        // Shrink radius slightly to match GPU rendering
+        float shrinkAmount = tileWidth / resolution;
+        float effectiveRadius = hole.radius - shrinkAmount;
+        if (effectiveRadius <= 0.0f) effectiveRadius = hole.radius * 0.5f;
+        float radiusSq = effectiveRadius * effectiveRadius;
 
-            for (uint32_t y = 0; y < resolution; y++) {
-                for (uint32_t x = 0; x < resolution; x++) {
-                    float worldX = tileMinX + (static_cast<float>(x) / (resolution - 1)) * tileWidth;
-                    float worldZ = tileMinZ + (static_cast<float>(y) / (resolution - 1)) * tileHeight;
+        for (uint32_t y = 0; y < resolution; y++) {
+            for (uint32_t x = 0; x < resolution; x++) {
+                float worldX = tileMinX + (static_cast<float>(x) / (resolution - 1)) * tileWidth;
+                float worldZ = tileMinZ + (static_cast<float>(y) / (resolution - 1)) * tileHeight;
 
-                    float distX = worldX - hole.centerX;
-                    float distZ = worldZ - hole.centerZ;
-                    if (distX * distX + distZ * distZ < radiusSq) {
-                        tileMask[y * resolution + x] = 255;
-                    }
+                float distX = worldX - hole.centerX;
+                float distZ = worldZ - hole.centerZ;
+                if (distX * distX + distZ * distZ < radiusSq) {
+                    tileMask[y * resolution + x] = 255;
                 }
             }
         }
