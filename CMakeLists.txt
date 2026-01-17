@@ -81,6 +81,7 @@ set(SOURCES
     src/core/HierarchicalPose.cpp
     src/core/PoseBlend.cpp
     src/core/NodeMask.cpp
+    src/core/LODLayerController.cpp
     # Atmosphere
     src/atmosphere/TimeSystem.cpp
     src/atmosphere/CelestialCalculator.cpp
