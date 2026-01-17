@@ -28,6 +28,7 @@
 #include "core/interfaces/IDebugControl.h"
 #include "core/interfaces/IWeatherState.h"
 #include "core/interfaces/ITerrainControl.h"
+#include "core/interfaces/IPlayerControl.h"
 
 #ifdef JPH_DEBUG_RENDERER
 #include "PhysicsDebugRenderer.h"
@@ -542,8 +543,8 @@ void Application::run() {
         // Update scene object transforms from physics
         renderer_->getSystems().scene().update(physics());
 
-        // Update player position for grass interaction (always, regardless of camera mode)
-        renderer_->setPlayerState(playerTransform.position, physicsVelocity, PlayerMovement::CAPSULE_RADIUS);
+        // Update player state in PlayerControlSubsystem for grass/snow/leaf interaction
+        renderer_->getPlayerControl().setPlayerState(playerTransform.position, physicsVelocity, PlayerMovement::CAPSULE_RADIUS);
 
         // Wait for previous frame's GPU work to complete before updating dynamic meshes.
         // This prevents race conditions where we destroy mesh buffers while the GPU

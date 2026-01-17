@@ -13,6 +13,7 @@
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/pipeline/FrameGraphBuilder.h"
 #include "core/FrameUpdater.h"
+#include "interfaces/IPlayerControl.h"
 
 // Subsystem includes for render loop
 // Core systems
@@ -217,16 +218,6 @@ void Renderer::setupFrameGraph() {
 
 // Note: initCoreVulkanResources(), initDescriptorInfrastructure(), initSubsystems(),
 // and initResizeCoordinator() are implemented in RendererInitPhases.cpp
-
-void Renderer::setPlayerPosition(const glm::vec3& position, float radius) {
-    setPlayerState(position, glm::vec3(0.0f), radius);
-}
-
-void Renderer::setPlayerState(const glm::vec3& position, const glm::vec3& velocity, float radius) {
-    playerPosition = position;
-    playerVelocity = velocity;
-    playerCapsuleRadius = radius;
-}
 
 void Renderer::updateRoadRiverVisualization() {
     if (!systems_->debugControl().isRoadRiverVisualizationEnabled()) {
@@ -1080,9 +1071,11 @@ FrameData Renderer::buildFrameData(const Camera& camera, float deltaTime, float 
     frame.sunDirection = glm::normalize(glm::vec3(ubo->toSunDirection));
     frame.sunIntensity = ubo->toSunDirection.w;
 
-    frame.playerPosition = playerPosition;
-    frame.playerVelocity = playerVelocity;
-    frame.playerCapsuleRadius = playerCapsuleRadius;
+    // Get player state from PlayerControlSubsystem
+    const auto& playerControl = systems_->playerControl();
+    frame.playerPosition = playerControl.getPlayerPosition();
+    frame.playerVelocity = playerControl.getPlayerVelocity();
+    frame.playerCapsuleRadius = playerControl.getPlayerCapsuleRadius();
 
     const auto& terrainConfig = systems_->terrain().getConfig();
     frame.terrainSize = terrainConfig.size;

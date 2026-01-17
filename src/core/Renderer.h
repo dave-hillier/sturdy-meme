@@ -180,9 +180,6 @@ public:
     void toggleCloudStyle() { useParaboloidClouds = !useParaboloidClouds; }
     bool isUsingParaboloidClouds() const { return useParaboloidClouds; }
 
-    // Player state for grass/snow interaction (used in render loop)
-    void setPlayerPosition(const glm::vec3& position, float radius);
-    void setPlayerState(const glm::vec3& position, const glm::vec3& velocity, float radius);
 
     // Physics debug (local state)
     void setPhysicsDebugEnabled(bool enabled) { physicsDebugEnabled = enabled; }
@@ -332,10 +329,6 @@ private:
     bool framebufferResized = false;       // true = window resized, need to recreate swapchain
     bool windowSuspended = false;          // true = window minimized/hidden (macOS screen lock)
 
-    // Player position for grass displacement
-    glm::vec3 playerPosition = glm::vec3(0.0f);
-    glm::vec3 playerVelocity = glm::vec3(0.0f);
-    float playerCapsuleRadius = 0.3f;      // Default capsule radius
 
     // Dynamic lights
     float lightCullRadius = 100.0f;        // Radius from camera for light culling
