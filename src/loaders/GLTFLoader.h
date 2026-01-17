@@ -48,6 +48,19 @@ struct Skeleton {
 
     void computeGlobalTransforms(std::vector<glm::mat4>& outGlobalTransforms) const;
     int32_t findJointIndex(const std::string& name) const;
+
+    // Helper to get parent's global transform for a joint (returns identity for root joints)
+    inline glm::mat4 getParentGlobalTransform(int32_t jointIndex,
+                                              const std::vector<glm::mat4>& globalTransforms) const {
+        if (jointIndex < 0 || static_cast<size_t>(jointIndex) >= joints.size()) {
+            return glm::mat4(1.0f);
+        }
+        int32_t parentIdx = joints[jointIndex].parentIndex;
+        if (parentIdx < 0 || static_cast<size_t>(parentIdx) >= globalTransforms.size()) {
+            return glm::mat4(1.0f);
+        }
+        return globalTransforms[parentIdx];
+    }
 };
 
 // Result of loading a glTF file (static mesh)

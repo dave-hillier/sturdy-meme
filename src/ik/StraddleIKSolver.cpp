@@ -63,9 +63,7 @@ void StraddleIKSolver::solve(
 
     // Apply hip tilt
     Joint& pelvisJoint = skeleton.joints[straddle.pelvisBoneIndex];
-    glm::mat4 parentGlobal = pelvisJoint.parentIndex >= 0
-        ? globalTransforms[pelvisJoint.parentIndex]
-        : glm::mat4(1.0f);
+    glm::mat4 parentGlobal = skeleton.getParentGlobalTransform(straddle.pelvisBoneIndex, globalTransforms);
 
     applyHipTilt(pelvisJoint, straddle.currentHipTilt * straddle.weight,
                  straddle.currentHipShift * straddle.weight, parentGlobal);
@@ -73,9 +71,7 @@ void StraddleIKSolver::solve(
     // Apply spine counter-rotation to keep upper body upright
     if (straddle.spineBaseBoneIndex >= 0) {
         Joint& spineJoint = skeleton.joints[straddle.spineBaseBoneIndex];
-        glm::mat4 spineParentGlobal = spineJoint.parentIndex >= 0
-            ? globalTransforms[spineJoint.parentIndex]
-            : glm::mat4(1.0f);
+        glm::mat4 spineParentGlobal = skeleton.getParentGlobalTransform(straddle.spineBaseBoneIndex, globalTransforms);
 
         // Counter-rotate spine to compensate for hip tilt
         float compensation = -straddle.currentHipTilt * 0.7f * straddle.weight;

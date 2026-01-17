@@ -186,10 +186,7 @@ bool TwoBoneIKSolver::solve(
     glm::vec3 newRootDir = glm::normalize(newMidPos - rootPos);
 
     // Get parent's world rotation to convert to local space
-    glm::mat4 parentGlobal = glm::mat4(1.0f);
-    if (rootJoint.parentIndex >= 0) {
-        parentGlobal = globalTransforms[rootJoint.parentIndex];
-    }
+    glm::mat4 parentGlobal = skeleton.getParentGlobalTransform(chain.rootBoneIndex, globalTransforms);
     glm::quat parentWorldRot = glm::quat_cast(glm::mat3(parentGlobal));
     glm::quat parentWorldRotInv = glm::inverse(parentWorldRot);
 

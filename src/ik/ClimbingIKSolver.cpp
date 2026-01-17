@@ -37,10 +37,7 @@ void ClimbingIKSolver::solve(
 
             // Orient hand to grip
             if (climbing.leftHandBoneIndex >= 0) {
-                int32_t parentIdx = skeleton.joints[climbing.leftHandBoneIndex].parentIndex;
-                glm::mat4 parentGlobal = (parentIdx >= 0 && static_cast<size_t>(parentIdx) < globalTransforms.size())
-                    ? globalTransforms[parentIdx]
-                    : glm::mat4(1.0f);
+                glm::mat4 parentGlobal = skeleton.getParentGlobalTransform(climbing.leftHandBoneIndex, globalTransforms);
                 orientHandToHold(skeleton.joints[climbing.leftHandBoneIndex],
                                 climbing.leftHandHold,
                                 parentGlobal);
@@ -55,10 +52,7 @@ void ClimbingIKSolver::solve(
             TwoBoneIKSolver::solveBlended(skeleton, armChains[1], globalTransforms, armChains[1].weight);
 
             if (climbing.rightHandBoneIndex >= 0) {
-                int32_t parentIdx = skeleton.joints[climbing.rightHandBoneIndex].parentIndex;
-                glm::mat4 parentGlobal = (parentIdx >= 0 && static_cast<size_t>(parentIdx) < globalTransforms.size())
-                    ? globalTransforms[parentIdx]
-                    : glm::mat4(1.0f);
+                glm::mat4 parentGlobal = skeleton.getParentGlobalTransform(climbing.rightHandBoneIndex, globalTransforms);
                 orientHandToHold(skeleton.joints[climbing.rightHandBoneIndex],
                                 climbing.rightHandHold,
                                 parentGlobal);
