@@ -141,9 +141,9 @@ void FootPlacementIKSolver::solve(
         IKUtils::decomposeTransform(footJoint.localTransform, t, currentLocalRot, s);
 
         // Get parent world rotation to convert between local and world space
-        int32_t parentIdx = skeleton.joints[foot.footBoneIndex].parentIndex;
-        if (parentIdx >= 0) {
-            glm::quat parentWorldRot = glm::quat_cast(glm::mat3(updatedGlobalTransforms[parentIdx]));
+        glm::mat4 footParentGlobal = skeleton.getParentGlobalTransform(foot.footBoneIndex, updatedGlobalTransforms);
+        if (skeleton.joints[foot.footBoneIndex].parentIndex >= 0) {
+            glm::quat parentWorldRot = glm::quat_cast(glm::mat3(footParentGlobal));
 
             // Compute the foot's world rotation from its current local rotation
             glm::quat footWorldRot = parentWorldRot * currentLocalRot;

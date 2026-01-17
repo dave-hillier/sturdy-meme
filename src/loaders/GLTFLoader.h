@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Mesh.h"
+#include "scene/Transform.h"
 #include <string>
 #include <optional>
 #include <vector>
@@ -61,6 +62,19 @@ struct Skeleton {
         }
         return globalTransforms[parentIdx];
     }
+
+    // Build the internal transform hierarchy from joints (call after loading)
+    void buildHierarchy();
+
+    // Check if hierarchy has been built
+    bool hasHierarchy() const { return !jointHandles_.empty(); }
+
+private:
+    mutable TransformHierarchy hierarchy_;
+    std::vector<TransformHandle> jointHandles_;
+
+    // Sync joint local transforms to hierarchy (called before computing global transforms)
+    void syncToHierarchy() const;
 };
 
 // Result of loading a glTF file (static mesh)
