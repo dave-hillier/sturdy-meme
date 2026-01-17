@@ -123,34 +123,6 @@ public:
     VulkanContext& getVulkanContext() { return *vulkanContext_; }
     const VulkanContext& getVulkanContext() const { return *vulkanContext_; }
 
-    // Interface accessors - provide access to GUI-facing control interfaces via RendererSystems
-    ILocationControl& getLocationControl() { return systems_->locationControl(); }
-    const ILocationControl& getLocationControl() const { return systems_->locationControl(); }
-    IWeatherState& getWeatherState() { return systems_->weatherState(); }
-    const IWeatherState& getWeatherState() const { return systems_->weatherState(); }
-    IEnvironmentControl& getEnvironmentControl() { return systems_->environmentControl(); }
-    const IEnvironmentControl& getEnvironmentControl() const { return systems_->environmentControl(); }
-    IPostProcessState& getPostProcessState() { return systems_->postProcessState(); }
-    const IPostProcessState& getPostProcessState() const { return systems_->postProcessState(); }
-    ICloudShadowControl& getCloudShadowControl() { return systems_->cloudShadowControl(); }
-    const ICloudShadowControl& getCloudShadowControl() const { return systems_->cloudShadowControl(); }
-    ITerrainControl& getTerrainControl() { return systems_->terrainControl(); }
-    const ITerrainControl& getTerrainControl() const { return systems_->terrainControl(); }
-    IWaterControl& getWaterControl() { return systems_->waterControl(); }
-    const IWaterControl& getWaterControl() const { return systems_->waterControl(); }
-    ITreeControl& getTreeControl() { return systems_->treeControl(); }
-    const ITreeControl& getTreeControl() const { return systems_->treeControl(); }
-    IDebugControl& getDebugControl() { return systems_->debugControl(); }
-    const IDebugControl& getDebugControl() const { return systems_->debugControl(); }
-    IProfilerControl& getProfilerControl() { return systems_->profilerControl(); }
-    const IProfilerControl& getProfilerControl() const { return systems_->profilerControl(); }
-    IPerformanceControl& getPerformanceControl() { return systems_->performanceControl(); }
-    const IPerformanceControl& getPerformanceControl() const { return systems_->performanceControl(); }
-    ISceneControl& getSceneControl() { return systems_->sceneControl(); }
-    const ISceneControl& getSceneControl() const { return systems_->sceneControl(); }
-    IPlayerControl& getPlayerControl() { return systems_->playerControl(); }
-    const IPlayerControl& getPlayerControl() const { return systems_->playerControl(); }
-
     // GUI rendering callback (called during swapchain render pass)
     using GuiRenderCallback = std::function<void(VkCommandBuffer)>;
     void setGuiRenderCallback(GuiRenderCallback callback) { guiRenderCallback = callback; }

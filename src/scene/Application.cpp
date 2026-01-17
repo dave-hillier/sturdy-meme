@@ -544,7 +544,7 @@ void Application::run() {
         renderer_->getSystems().scene().update(physics());
 
         // Update player state in PlayerControlSubsystem for grass/snow/leaf interaction
-        renderer_->getPlayerControl().setPlayerState(playerTransform.position, physicsVelocity, PlayerMovement::CAPSULE_RADIUS);
+        renderer_->getSystems().playerControl().setPlayerState(playerTransform.position, physicsVelocity, PlayerMovement::CAPSULE_RADIUS);
 
         // Wait for previous frame's GPU work to complete before updating dynamic meshes.
         // This prevents race conditions where we destroy mesh buffers while the GPU
