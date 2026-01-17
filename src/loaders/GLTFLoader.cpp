@@ -292,6 +292,9 @@ std::optional<GLTFLoadResult> load(const std::string& path) {
         }
 
         SDL_Log("GLTFLoader: Loaded skeleton with %zu joints", result.skeleton.joints.size());
+
+        // Build internal transform hierarchy for efficient global transform computation
+        result.skeleton.buildHierarchy();
     }
 
     // Log available animations (for debugging)
@@ -427,6 +430,9 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
         }
 
         SDL_Log("GLTFLoader: Loaded skinned mesh with %zu joints", result.skeleton.joints.size());
+
+        // Build internal transform hierarchy for efficient global transform computation
+        result.skeleton.buildHierarchy();
     }
 
     // Process meshes - for now, combine all primitives into one mesh
@@ -749,12 +755,104 @@ std::optional<GLTFSkinnedLoadResult> loadSkinned(const std::string& path) {
 void Skeleton::computeGlobalTransforms(std::vector<glm::mat4>& outGlobalTransforms) const {
     outGlobalTransforms.resize(joints.size());
 
+    // Use hierarchy if available (provides dirty tracking and caching)
+    if (!jointHandles_.empty()) {
+        syncToHierarchy();
+        hierarchy_.updateWorldMatrices();
+
+        for (size_t i = 0; i < joints.size(); ++i) {
+            if (jointHandles_[i].isValid()) {
+                outGlobalTransforms[i] = hierarchy_.getWorldMatrix(jointHandles_[i]);
+            } else {
+                // Fallback for invalid handles
+                if (joints[i].parentIndex < 0) {
+                    outGlobalTransforms[i] = joints[i].localTransform;
+                } else {
+                    outGlobalTransforms[i] = outGlobalTransforms[joints[i].parentIndex] * joints[i].localTransform;
+                }
+            }
+        }
+        return;
+    }
+
+    // Legacy path: direct computation without hierarchy
     for (size_t i = 0; i < joints.size(); ++i) {
         if (joints[i].parentIndex < 0) {
             outGlobalTransforms[i] = joints[i].localTransform;
         } else {
             outGlobalTransforms[i] = outGlobalTransforms[joints[i].parentIndex] * joints[i].localTransform;
         }
+    }
+}
+
+void Skeleton::buildHierarchy() {
+    jointHandles_.clear();
+    jointHandles_.reserve(joints.size());
+
+    // Create nodes for each joint
+    // Joints are assumed to be in topological order (parents before children)
+    for (size_t i = 0; i < joints.size(); ++i) {
+        TransformHandle parent = TransformHandle::null();
+        if (joints[i].parentIndex >= 0 && static_cast<size_t>(joints[i].parentIndex) < jointHandles_.size()) {
+            parent = jointHandles_[joints[i].parentIndex];
+        }
+
+        TransformHandle handle = hierarchy_.create(joints[i].name, parent);
+        jointHandles_.push_back(handle);
+
+        // Set initial local transform
+        glm::vec3 translation, scale;
+        glm::quat rotation;
+        // Decompose localTransform to set in hierarchy
+        glm::mat4 m = joints[i].localTransform;
+        translation = glm::vec3(m[3]);
+        // Extract scale from columns
+        scale.x = glm::length(glm::vec3(m[0]));
+        scale.y = glm::length(glm::vec3(m[1]));
+        scale.z = glm::length(glm::vec3(m[2]));
+        // Remove scale to get rotation
+        glm::mat3 rotMat(
+            glm::vec3(m[0]) / scale.x,
+            glm::vec3(m[1]) / scale.y,
+            glm::vec3(m[2]) / scale.z
+        );
+        rotation = glm::quat_cast(rotMat);
+
+        hierarchy_.setLocal(handle, Transform(translation, rotation, scale));
+    }
+}
+
+void Skeleton::syncToHierarchy() const {
+    if (jointHandles_.empty()) return;
+
+    for (size_t i = 0; i < joints.size(); ++i) {
+        if (!jointHandles_[i].isValid()) continue;
+
+        // Decompose localTransform to set in hierarchy
+        const glm::mat4& m = joints[i].localTransform;
+        glm::vec3 translation = glm::vec3(m[3]);
+
+        // Extract scale from columns
+        glm::vec3 scale;
+        scale.x = glm::length(glm::vec3(m[0]));
+        scale.y = glm::length(glm::vec3(m[1]));
+        scale.z = glm::length(glm::vec3(m[2]));
+
+        // Avoid division by zero
+        if (scale.x < 0.0001f) scale.x = 1.0f;
+        if (scale.y < 0.0001f) scale.y = 1.0f;
+        if (scale.z < 0.0001f) scale.z = 1.0f;
+
+        // Remove scale to get rotation
+        glm::mat3 rotMat(
+            glm::vec3(m[0]) / scale.x,
+            glm::vec3(m[1]) / scale.y,
+            glm::vec3(m[2]) / scale.z
+        );
+        glm::quat rotation = glm::quat_cast(rotMat);
+
+        // Update hierarchy local transform
+        hierarchy_.setLocal(jointHandles_[i], Transform(translation, rotation, scale));
     }
 }
 

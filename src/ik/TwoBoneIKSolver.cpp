@@ -235,14 +235,9 @@ bool TwoBoneIKSolver::solve(
     glm::vec3 desiredEndDir = glm::normalize(desiredEndOffset);
 
     // Mid bone's parent is root bone (after IK), so we need the new root global transform
-    // Use finalRootLocalRot which includes pre-rotation
-    glm::mat4 newRootGlobal;
-    if (rootJoint.parentIndex >= 0) {
-        newRootGlobal = globalTransforms[rootJoint.parentIndex] *
-                        IKUtils::composeTransform(rootTranslation, finalRootLocalRot, rootScale);
-    } else {
-        newRootGlobal = IKUtils::composeTransform(rootTranslation, finalRootLocalRot, rootScale);
-    }
+    // Use getParentGlobalTransform which returns identity for root bones
+    glm::mat4 rootParentGlobal = skeleton.getParentGlobalTransform(chain.rootBoneIndex, globalTransforms);
+    glm::mat4 newRootGlobal = rootParentGlobal * IKUtils::composeTransform(rootTranslation, finalRootLocalRot, rootScale);
 
     glm::quat midParentWorldRot = glm::quat_cast(glm::mat3(newRootGlobal));
     glm::quat midParentWorldRotInv = glm::inverse(midParentWorldRot);

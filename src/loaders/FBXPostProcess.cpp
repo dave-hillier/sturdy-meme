@@ -289,6 +289,9 @@ void process(GLTFSkinnedLoadResult& result, const FBXImportSettings& settings) {
 
     SDL_Log("FBXPostProcess: Processed %zu vertices, %zu joints, %zu animations",
             result.vertices.size(), result.skeleton.joints.size(), result.animations.size());
+
+    // Build internal transform hierarchy for efficient global transform computation
+    result.skeleton.buildHierarchy();
 }
 
 void process(GLTFLoadResult& result, const FBXImportSettings& settings) {
