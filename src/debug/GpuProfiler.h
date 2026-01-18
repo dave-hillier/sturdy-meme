@@ -135,9 +135,9 @@ private:
     // Per-frame zone slot storage (one array per frame in flight)
     std::vector<std::unique_ptr<ZoneSlot[]>> zoneSlots_;  // [frameIndex][slotIndex]
 
-    // Per-frame data for result collection
-    std::unordered_map<uint32_t, uint32_t> frameQueryCounts;
-    std::unordered_map<uint32_t, uint32_t> frameZoneCounts;  // Number of zones recorded per frame
+    // Per-frame data for result collection (indexed by frameIndex, sized to framesInFlight)
+    std::vector<uint32_t> frameQueryCounts;
+    std::vector<uint32_t> frameZoneCounts;  // Number of zones recorded per frame
 
     // Results from previous frame
     FrameStats lastFrameStats;

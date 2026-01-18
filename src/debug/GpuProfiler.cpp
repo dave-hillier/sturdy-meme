@@ -122,6 +122,10 @@ bool GpuProfiler::initInternal(VkDevice dev, VkPhysicalDevice physicalDevice,
         zoneSlots_[i] = std::make_unique<ZoneSlot[]>(maxZones);
     }
 
+    // Pre-allocate per-frame query/zone count tracking
+    frameQueryCounts.resize(framesInFlight, 0);
+    frameZoneCounts.resize(framesInFlight, 0);
+
     SDL_Log("GPU Profiler initialized: %d zones max, %d frames in flight", maxZones, framesInFlight);
     return true;
 }
@@ -251,7 +255,7 @@ void GpuProfiler::collectResults(uint32_t frameIndex) {
 
     // We collect from the frame we're about to overwrite (previous use of this pool)
     // On first few frames, there won't be valid data
-    if (frameQueryCounts.find(frameIndex) == frameQueryCounts.end()) {
+    if (frameIndex >= frameQueryCounts.size() || frameQueryCounts[frameIndex] == 0) {
         return;  // No data for this frame yet
     }
 
