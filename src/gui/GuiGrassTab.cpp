@@ -21,7 +21,9 @@ void GuiGrassTab::render(IGrassControl& grass) {
     ImGui::PopStyleColor();
     ImGui::Separator();
 
-    uint32_t activeTiles = grass.getActiveTileCount();
+    // Fixed 5x5 tile dispatch around camera (not using tile manager)
+    constexpr uint32_t TILES_PER_AXIS = 5;
+    constexpr uint32_t activeTiles = TILES_PER_AXIS * TILES_PER_AXIS;
 
     // Calculate potential and max instances
     uint32_t gridSize = GrassConstants::TILE_GRID_SIZE + 1; // +1 for edge coverage
@@ -29,7 +31,7 @@ void GuiGrassTab::render(IGrassControl& grass) {
     uint32_t potentialBlades = activeTiles * bladesPerTile;
     uint32_t maxInstances = GrassConstants::MAX_INSTANCES;
 
-    ImGui::Text("Active Tiles: %u (5x5 grid)", activeTiles);
+    ImGui::Text("Active Tiles: %u (%ux%u grid)", activeTiles, TILES_PER_AXIS, TILES_PER_AXIS);
     ImGui::Text("Potential Blades: ~%uk", potentialBlades / 1000);
     ImGui::Text("Max Instances: %uk", maxInstances / 1000);
 
@@ -57,7 +59,7 @@ void GuiGrassTab::render(IGrassControl& grass) {
     ImGui::Text("Fade to Zero: %.0fm - %.0fm",
                 GrassConstants::CULL_START_DISTANCE,
                 GrassConstants::CULL_END_DISTANCE);
-    ImGui::Text("Falloff Power: %.1f (quadratic)", GrassConstants::CULL_POWER);
+    ImGui::Text("Falloff Power: %.1f (cubic)", GrassConstants::CULL_POWER);
 
     // Visual representation of distance falloff
     ImGui::Spacing();
