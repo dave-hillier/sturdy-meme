@@ -59,7 +59,7 @@ bool TerrainImporter::loadAndValidateMetadata(const TerrainImportConfig& config)
     std::string line;
     std::string cachedSourcePath;
     float cachedMinAlt = 0, cachedMaxAlt = 0, cachedMpp = 0;
-    uint32_t cachedTileRes = 0, cachedLODLevels = 0;
+    uint32_t cachedTileRes = 0, cachedLODLevels = 0, cachedTileOverlap = 0;
     uintmax_t cachedSourceSize = 0;
 
     while (std::getline(file, line)) {
@@ -76,7 +76,15 @@ bool TerrainImporter::loadAndValidateMetadata(const TerrainImportConfig& config)
             else if (key == "tileResolution") cachedTileRes = std::stoul(value);
             else if (key == "numLODLevels") cachedLODLevels = std::stoul(value);
             else if (key == "sourceFileSize") cachedSourceSize = std::stoull(value);
+            else if (key == "tileOverlap") cachedTileOverlap = std::stoul(value);
         }
+    }
+
+    // Require overlap tiles for seamless boundaries
+    // Old caches without overlap will be regenerated
+    if (cachedTileOverlap != 1) {
+        SDL_Log("Terrain cache: old format without overlap detected, regenerating for seamless boundaries");
+        return false;
     }
 
     // Validate config matches - use canonical paths for comparison
@@ -162,6 +170,8 @@ bool TerrainImporter::saveMetadata(const TerrainImportConfig& config) const {
     file << "sourceHeight=" << sourceHeight << "\n";
     file << "tilesX=" << tilesX << "\n";
     file << "tilesZ=" << tilesZ << "\n";
+    // Tiles are stored with +1 overlap for seamless boundaries
+    file << "tileOverlap=1\n";
 
     return true;
 }
@@ -309,8 +319,14 @@ bool TerrainImporter::generateLODLevel(const TerrainImportConfig& config, uint32
     std::atomic<uint32_t> processedTiles{0};
     std::atomic<bool> hasError{false};
 
-    SDL_Log("LOD %u: %ux%u tiles from %ux%u source (%u threads)",
-            lod, numTilesX, numTilesZ, lodWidth, lodHeight, ParallelProgress::getThreadCount());
+    // Tiles are stored with +1 overlap to ensure seamless boundaries
+    // Each tile is (tileRes+1) x (tileRes+1) pixels, where the last row/column
+    // overlaps with the neighbor's first row/column
+    uint32_t storedRes = tileRes + 1;
+
+    SDL_Log("LOD %u: %ux%u tiles from %ux%u source, stored as %ux%u with overlap (%u threads)",
+            lod, numTilesX, numTilesZ, lodWidth, lodHeight, storedRes, storedRes,
+            ParallelProgress::getThreadCount());
 
     // Parallel tile generation
     ParallelProgress::parallel_for(0, static_cast<int>(totalTiles), [&](int tileIndex) {
@@ -319,16 +335,16 @@ bool TerrainImporter::generateLODLevel(const TerrainImportConfig& config, uint32
         uint32_t tx = tileIndex % numTilesX;
         uint32_t tz = tileIndex / numTilesX;
 
-        // Each thread has its own tile buffer
-        std::vector<uint16_t> tileData(tileRes * tileRes);
+        // Each thread has its own tile buffer (with overlap)
+        std::vector<uint16_t> tileData(storedRes * storedRes);
 
         // Source pixel start for this tile
         uint32_t srcStartX = tx * tileRes;
         uint32_t srcStartZ = tz * tileRes;
 
-        // Extract pixels directly - no resampling
-        for (uint32_t py = 0; py < tileRes; py++) {
-            for (uint32_t px = 0; px < tileRes; px++) {
+        // Extract pixels with +1 overlap for seamless boundaries
+        for (uint32_t py = 0; py < storedRes; py++) {
+            for (uint32_t px = 0; px < storedRes; px++) {
                 uint32_t srcX = srcStartX + px;
                 uint32_t srcZ = srcStartZ + py;
 
@@ -336,13 +352,13 @@ bool TerrainImporter::generateLODLevel(const TerrainImportConfig& config, uint32
                 srcX = std::min(srcX, lodWidth - 1);
                 srcZ = std::min(srcZ, lodHeight - 1);
 
-                tileData[py * tileRes + px] = lodData[srcZ * lodWidth + srcX];
+                tileData[py * storedRes + px] = lodData[srcZ * lodWidth + srcX];
             }
         }
 
-        // Save tile
+        // Save tile with overlap
         std::string tilePath = getTilePath(config.cacheDirectory, tx, tz, lod);
-        if (!saveTile(tilePath, tileData, tileRes)) {
+        if (!saveTile(tilePath, tileData, storedRes)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to save tile: %s", tilePath.c_str());
             hasError.store(true);
             return;

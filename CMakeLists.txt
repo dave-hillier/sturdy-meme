@@ -1223,6 +1223,7 @@ if(BUILD_TESTS)
         tests/test_virtual_texture_types.cpp
         tests/test_virtual_texture_loader.cpp
         tests/test_tile_grid_logic.cpp
+        tests/test_tile_composition.cpp
         tests/test_transform.cpp
         # Source files needed by tests
         src/atmosphere/CelestialCalculator.cpp

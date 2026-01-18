@@ -68,10 +68,11 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
     }
 
     // Create tile array image (2D array texture with MAX_ACTIVE_TILES layers)
+    // Use storedTileResolution which includes overlap for seamless sampling
     {
         ManagedImage image;
         if (!ImageBuilder(allocator)
-                .setExtent(tileResolution, tileResolution)
+                .setExtent(storedTileResolution, storedTileResolution)
                 .setFormat(VK_FORMAT_R32_SFLOAT)
                 .setArrayLayers(MAX_ACTIVE_TILES)
                 .setUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
@@ -137,8 +138,8 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
     freeArrayLayers_.fill(true);
 
     SDL_Log("TerrainTileCache initialized: %s", cacheDirectory.c_str());
-    SDL_Log("  Terrain size: %.0fm, Tile resolution: %u, LOD levels: %u",
-            terrainSize, tileResolution, numLODLevels);
+    SDL_Log("  Terrain size: %.0fm, Tile resolution: %u (stored: %u with overlap), LOD levels: %u",
+            terrainSize, tileResolution, storedTileResolution, numLODLevels);
     SDL_Log("  LOD0 grid: %ux%u tiles", tilesX, tilesZ);
 
     // Load all base LOD tiles synchronously at startup
@@ -252,8 +253,14 @@ bool TerrainTileCache::loadMetadata() {
             else if (key == "sourceHeight") sourceHeight = std::stoul(value);
             else if (key == "minAltitude") minAltitude = std::stof(value);
             else if (key == "maxAltitude") maxAltitude = std::stof(value);
+            else if (key == "tileOverlap") tileOverlap = std::stoul(value);
         }
     }
+
+    // Calculate stored tile resolution (includes overlap for seamless boundaries)
+    storedTileResolution = tileResolution + tileOverlap;
+    SDL_Log("TerrainTileCache: Tile resolution %u, stored with +%u overlap = %u",
+            tileResolution, tileOverlap, storedTileResolution);
 
     // Recalculate height scale from altitude range
     heightScale = maxAltitude - minAltitude;
@@ -300,11 +307,25 @@ bool TerrainTileCache::loadTileDataFromDisk(TileCoord coord, uint32_t lod, Terra
         return false;
     }
 
-    // Tiles must match expected resolution
-    if (width != static_cast<int>(tileResolution) || height != static_cast<int>(tileResolution)) {
+    // Tiles must match expected stored resolution (with overlap)
+    // Accept both old format (tileResolution) and new format (storedTileResolution)
+    uint32_t loadedRes = static_cast<uint32_t>(width);
+    bool isOldFormat = (loadedRes == tileResolution);
+    bool isNewFormat = (loadedRes == storedTileResolution);
+
+    if (!isOldFormat && !isNewFormat) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "TerrainTileCache: Tile %s is %dx%d, expected %ux%u - refusing to resample",
-                     path.c_str(), width, height, tileResolution, tileResolution);
+                     "TerrainTileCache: Tile %s is %dx%d, expected %ux%u or %ux%u",
+                     path.c_str(), width, height, tileResolution, tileResolution,
+                     storedTileResolution, storedTileResolution);
+        stbi_image_free(data);
+        return false;
+    }
+
+    if (width != height) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "TerrainTileCache: Tile %s is not square (%dx%d)",
+                     path.c_str(), width, height);
         stbi_image_free(data);
         return false;
     }
@@ -315,8 +336,8 @@ bool TerrainTileCache::loadTileDataFromDisk(TileCoord coord, uint32_t lod, Terra
     calculateTileWorldBounds(coord, lod, tile);
 
     // Convert 16-bit to normalized float32
-    tile.cpuData.resize(tileResolution * tileResolution);
-    for (uint32_t i = 0; i < tileResolution * tileResolution; i++) {
+    tile.cpuData.resize(loadedRes * loadedRes);
+    for (uint32_t i = 0; i < loadedRes * loadedRes; i++) {
         tile.cpuData[i] = static_cast<float>(data[i]) / 65535.0f;
     }
 
@@ -551,9 +572,12 @@ bool TerrainTileCache::loadTile(TileCoord coord, uint32_t lod) {
 }
 
 bool TerrainTileCache::createTileGPUResources(TerrainTile& tile) {
+    // Infer resolution from loaded CPU data
+    uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile.cpuData.size()));
+
     ManagedImage image;
     if (!ImageBuilder(allocator)
-            .setExtent(tileResolution, tileResolution)
+            .setExtent(actualRes, actualRes)
             .setFormat(VK_FORMAT_R32_SFLOAT)
             .setUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
             .build(device, image, tile.imageView)) {
@@ -565,7 +589,9 @@ bool TerrainTileCache::createTileGPUResources(TerrainTile& tile) {
 }
 
 bool TerrainTileCache::uploadTileToGPU(TerrainTile& tile) {
-    VkDeviceSize imageSize = tileResolution * tileResolution * sizeof(float);
+    // Infer resolution from loaded CPU data
+    uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile.cpuData.size()));
+    VkDeviceSize imageSize = tile.cpuData.size() * sizeof(float);
 
     // Create staging buffer using RAII wrapper
     ManagedBuffer stagingBuffer;
@@ -618,7 +644,7 @@ bool TerrainTileCache::uploadTileToGPU(TerrainTile& tile) {
                 .setBaseArrayLayer(0)
                 .setLayerCount(1))
             .setImageOffset({0, 0, 0})
-            .setImageExtent({tileResolution, tileResolution, 1});
+            .setImageExtent({actualRes, actualRes, 1});
         vkCmd.copyBufferToImage(stagingBuffer.get(), tile.image, vk::ImageLayout::eTransferDstOptimal, region);
     }
 
@@ -708,9 +734,12 @@ bool TerrainTileCache::getHeightAt(float worldX, float worldZ, float& outHeight)
         float u = (worldX - tile.worldMinX) / (tile.worldMaxX - tile.worldMinX);
         float v = (worldZ - tile.worldMinZ) / (tile.worldMaxZ - tile.worldMinZ);
 
+        // Infer actual resolution from tile data (handles both old and new formats)
+        uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile.cpuData.size()));
+
         // Sample and convert to world height using TerrainHeight helpers
         outHeight = TerrainHeight::sampleWorldHeight(u, v, tile.cpuData.data(),
-                                                      tileResolution, heightScale);
+                                                      actualRes, heightScale);
         return true;
     };
 
@@ -734,8 +763,11 @@ bool TerrainTileCache::getHeightAt(float worldX, float worldZ, float& outHeight)
 void TerrainTileCache::copyTileToArrayLayer(TerrainTile* tile, uint32_t layerIndex) {
     if (!tile || tile->cpuData.empty() || layerIndex >= MAX_ACTIVE_TILES) return;
 
+    // Infer actual resolution from tile data
+    uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile->cpuData.size()));
+
     // Create staging buffer using RAII wrapper
-    VkDeviceSize imageSize = tileResolution * tileResolution * sizeof(float);
+    VkDeviceSize imageSize = tile->cpuData.size() * sizeof(float);
 
     ManagedBuffer stagingBuffer;
     if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
@@ -787,7 +819,7 @@ void TerrainTileCache::copyTileToArrayLayer(TerrainTile* tile, uint32_t layerInd
                 .setBaseArrayLayer(layerIndex)
                 .setLayerCount(1))
             .setImageOffset({0, 0, 0})
-            .setImageExtent({tileResolution, tileResolution, 1});
+            .setImageExtent({actualRes, actualRes, 1});
         vkCmd.copyBufferToImage(stagingBuffer.get(), tileArrayImage, vk::ImageLayout::eTransferDstOptimal, region);
     }
 
@@ -1027,7 +1059,9 @@ bool TerrainTileCache::createBaseHeightMap() {
                     // Calculate UV within tile and sample using helper
                     float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
                     float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
-                    height = TerrainHeight::sampleBilinear(u, v, tile->cpuData.data(), tileResolution);
+                    // Infer actual resolution from tile data
+                    uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile->cpuData.size()));
+                    height = TerrainHeight::sampleBilinear(u, v, tile->cpuData.data(), actualRes);
                 }
             }
 
@@ -1161,8 +1195,11 @@ bool TerrainTileCache::sampleBaseLOD(float worldX, float worldZ, float& outHeigh
     float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
     float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
 
+    // Infer actual resolution from tile data
+    uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile->cpuData.size()));
+
     outHeight = TerrainHeight::sampleWorldHeight(u, v, tile->cpuData.data(),
-                                                  tileResolution, heightScale);
+                                                  actualRes, heightScale);
     return true;
 }
 

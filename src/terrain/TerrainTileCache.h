@@ -137,6 +137,7 @@ public:
     // Accessors
     uint32_t getNumLODLevels() const { return numLODLevels; }
     uint32_t getTileResolution() const { return tileResolution; }
+    uint32_t getStoredTileResolution() const { return storedTileResolution; }
     uint32_t getTilesX() const { return tilesX; }
     uint32_t getTilesZ() const { return tilesZ; }
     float getTerrainSize() const { return terrainSize; }
@@ -266,7 +267,9 @@ private:
     float heightScale = 0.0f;
     float minAltitude = -15.0f;
     float maxAltitude = 220.0f;
-    uint32_t tileResolution = 512;
+    uint32_t tileResolution = 512;       // Nominal tile resolution (for world bounds)
+    uint32_t storedTileResolution = 513; // Actual stored resolution (with +1 overlap)
+    uint32_t tileOverlap = 1;            // Overlap pixels for seamless boundaries
     uint32_t numLODLevels = 4;
     uint32_t tilesX = 32;  // LOD0 tile count
     uint32_t tilesZ = 32;
