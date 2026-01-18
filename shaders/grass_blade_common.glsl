@@ -100,20 +100,22 @@ float grassSampleWind(vec2 worldPos, vec2 windDir, float windStrength, float win
     // Project position onto wind direction - waves travel along this axis
     float alongWind = dot(worldPos, windDir);
 
-    // Noise modulates the wave phase - creates organic variation in wave shape
-    // without breaking the rolling wave structure
+    // Position-based noise for organic variation
+    // Phase noise warps wave fronts, amplitude noise varies intensity by area
     float phaseNoise = grassPerlinNoise(worldPos.x * 0.1, worldPos.y * 0.1) * 2.0;
+    float ampNoise = grassPerlinNoise(worldPos.x * 0.05 + 100.0, worldPos.y * 0.05) * 0.5 + 0.75; // 0.5-1.25 range
 
     // Primary rolling wave with noise-modulated phase
     float primaryPhase = alongWind * 0.8 + phaseNoise;
     float primaryWave = sin(primaryPhase - windTime * windSpeed * 0.5);
 
-    // Secondary wave at different frequency, also noise-modulated
+    // Secondary wave at different frequency
     float secondaryPhase = alongWind * 1.3 + phaseNoise * 0.7;
     float secondaryWave = sin(secondaryPhase - windTime * windSpeed * 0.7) * 0.4;
 
-    // Combine waves and normalize to 0-1
+    // Combine waves, normalize to 0-1, apply position-based amplitude
     float wavePattern = (primaryWave + secondaryWave) * 0.5 + 0.5;
+    wavePattern *= ampNoise;
 
     // Time-varying gust affects overall intensity
     float gust = (sin(windTime * gustFreq * GRASS_TWO_PI) * 0.5 + 0.5) * gustAmp;
