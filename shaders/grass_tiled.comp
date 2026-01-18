@@ -97,13 +97,14 @@ bool shouldCullByDistance(vec2 worldPos, float distToCamera) {
         return true;
     }
 
-    // Calculate survival probability with power curve
+    // Calculate cull probability with power curve
     // t goes from 0 at start to 1 at end
     float t = (distToCamera - GRASS_CULL_START_DISTANCE) /
               (GRASS_CULL_END_DISTANCE - GRASS_CULL_START_DISTANCE);
 
-    // Apply power curve - higher power = faster falloff initially, slower at edges
-    float cullProbability = pow(t, 1.0 / GRASS_CULL_POWER);
+    // Apply power curve - pow(t, POWER) gives slow initial falloff, fast at end
+    // POWER=2: quadratic, POWER=3: cubic (denser near camera)
+    float cullProbability = pow(t, GRASS_CULL_POWER);
 
     // Use position-based hash for temporally stable culling
     // The hash ensures the same blade is consistently shown/hidden
