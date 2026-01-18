@@ -155,6 +155,9 @@ bool Renderer::initInternal(const InitInfo& info) {
         resourcePath
     );
 
+    // Inject VulkanServices into RendererSystems
+    systems_->setVulkanServices(vulkanServices_.get());
+
     // Phase 3: All subsystems (terrain, grass, weather, snow, water, etc.)
     {
         INIT_PROFILE_PHASE("Subsystems");

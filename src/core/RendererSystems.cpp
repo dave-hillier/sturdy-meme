@@ -289,20 +289,6 @@ void RendererSystems::setSkinnedMesh(std::unique_ptr<SkinnedMeshRenderer> system
     skinnedMeshRenderer_ = std::move(system);
 }
 
-bool RendererSystems::init(const InitContext& /*initCtx*/,
-                            VkRenderPass /*swapchainRenderPass*/,
-                            VkFormat /*swapchainImageFormat*/,
-                            VkDescriptorSetLayout /*mainDescriptorSetLayout*/,
-                            VkFormat /*depthFormat*/,
-                            VkSampler /*depthSampler*/,
-                            const std::string& /*resourcePath*/) {
-    // NOTE: This centralized init is not currently used.
-    // Initialization is done via RendererInitPhases.cpp which calls each subsystem directly.
-    // This stub exists for potential future refactoring.
-    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "RendererSystems::init() is not implemented - use RendererInitPhases instead");
-    return false;
-}
-
 void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     // Note: initialized_ flag is not used since initialization is done
     // via RendererInitPhases.cpp, not RendererSystems::init()

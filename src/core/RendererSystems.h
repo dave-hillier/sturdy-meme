@@ -4,7 +4,6 @@
 #include <functional>
 #include <vulkan/vulkan.h>
 
-#include "InitContext.h"
 #include "CoreResources.h"
 #include "AtmosphereSystemGroup.h"
 #include "VegetationSystemGroup.h"
@@ -40,7 +39,9 @@ class ISceneControl;
 class IPlayerControl;
 
 class VulkanContext;
+class VulkanServices;
 struct PerformanceToggles;
+struct InitContext;
 
 // Forward declarations for all subsystems
 class SkySystem;
@@ -118,16 +119,18 @@ public:
     RendererSystems& operator=(RendererSystems&&) = delete;
 
     /**
-     * Initialize all subsystems in proper dependency order
-     * Returns false if any critical system fails to initialize
+     * Inject VulkanServices for dependency injection.
+     * Must be called before subsystem initialization.
+     * RendererSystems does not own the VulkanServices - caller maintains ownership.
      */
-    bool init(const InitContext& initCtx,
-              VkRenderPass swapchainRenderPass,
-              VkFormat swapchainImageFormat,
-              VkDescriptorSetLayout mainDescriptorSetLayout,
-              VkFormat depthFormat,
-              VkSampler depthSampler,
-              const std::string& resourcePath);
+    void setVulkanServices(VulkanServices* services) { vulkanServices_ = services; }
+
+    /**
+     * Get the injected VulkanServices.
+     * Returns nullptr if not yet injected.
+     */
+    VulkanServices* getVulkanServices() { return vulkanServices_; }
+    const VulkanServices* getVulkanServices() const { return vulkanServices_; }
 
     /**
      * Destroy all subsystems in reverse dependency order
@@ -512,6 +515,9 @@ private:
     std::unique_ptr<PerformanceControlSubsystem> performanceControl_;
     std::unique_ptr<SceneControlSubsystem> sceneControl_;
     std::unique_ptr<PlayerControlSubsystem> playerControl_;
+
+    // Injected VulkanServices (not owned)
+    VulkanServices* vulkanServices_ = nullptr;
 
     bool initialized_ = false;
     bool controlsInitialized_ = false;
