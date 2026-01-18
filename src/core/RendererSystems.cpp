@@ -2,7 +2,6 @@
 // Groups all rendering subsystems with automatic lifecycle via unique_ptr
 
 #include "RendererSystems.h"
-#include "RendererInit.h"
 #include "CoreResources.h"
 
 // Include all subsystem headers

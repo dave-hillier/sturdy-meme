@@ -13,6 +13,7 @@
 #include "BufferUtils.h"
 #include "UBOs.h"
 #include "interfaces/ILeafControl.h"
+#include "interfaces/IRecordable.h"
 #include "core/FrameBuffered.h"
 #include <optional>
 
@@ -46,7 +47,7 @@ struct LeafPushConstants {
     int padding[2];
 };
 
-class LeafSystem : public ILeafControl {
+class LeafSystem : public ILeafControl, public IRecordableAnimated {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -93,8 +94,8 @@ public:
     // Record compute dispatch for particle simulation
     void recordResetAndCompute(VkCommandBuffer cmd, uint32_t frameIndex, float time, float deltaTime);
 
-    // Record draw commands for leaves (after opaque geometry, before weather)
-    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time);
+    // Record draw commands for leaves (implements IRecordableAnimated)
+    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time) override;
 
     // Double-buffer management
     void advanceBufferSet();

@@ -16,6 +16,7 @@
 #include "RenderableBuilder.h"
 #include "SkinnedMesh.h"
 #include "VulkanHelpers.h"
+#include "interfaces/IShadowMapProvider.h"
 
 // Number of cascades for CSM
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
@@ -28,7 +29,7 @@ struct alignas(16) ShadowPushConstants {
     int padding[3];    // Padding to align
 };
 
-class ShadowSystem {
+class ShadowSystem : public ICascadedShadowMapProvider {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -89,10 +90,22 @@ public:
     // Bind the skinned shadow pipeline (call once, then record multiple skinned meshes)
     void bindSkinnedShadowPipeline(VkCommandBuffer cmd, VkDescriptorSet descriptorSet);
 
-    // CSM resource accessors (for binding in main shader)
-    VkImageView getShadowImageView() const { return csmResources.getArrayView(); }
-    VkSampler getShadowSampler() const { return csmResources.getSampler(); }
-    VkRenderPass getShadowRenderPass() const { return shadowRenderPass; }
+    // IShadowMapProvider interface
+    vk::ImageView getShadowImageView() const override { return vk::ImageView(csmResources.getArrayView()); }
+    vk::Sampler getShadowSampler() const override { return vk::Sampler(csmResources.getSampler()); }
+    uint32_t getShadowMapSize() const override { return SHADOW_MAP_SIZE; }
+
+    // ICascadedShadowMapProvider interface
+    uint32_t getCascadeCount() const override { return NUM_SHADOW_CASCADES; }
+    vk::ImageView getCascadeView(uint32_t cascade) const override {
+        return cascade < NUM_SHADOW_CASCADES ? vk::ImageView(csmResources.getLayerView(cascade)) : vk::ImageView{};
+    }
+    vk::RenderPass getShadowRenderPass() const override { return vk::RenderPass(shadowRenderPass); }
+    vk::Framebuffer getCascadeFramebuffer(uint32_t cascade) const override {
+        return cascade < cascadeFramebuffers.size() ? vk::Framebuffer(cascadeFramebuffers[cascade]) : vk::Framebuffer{};
+    }
+
+    // Additional shadow pipeline accessors (not in interface)
     VkPipeline getShadowPipeline() const { return shadowPipeline; }
     VkPipelineLayout getShadowPipelineLayout() const { return shadowPipelineLayout; }
     VkPipeline getSkinnedShadowPipeline() const { return skinnedShadowPipeline; }
@@ -101,7 +114,6 @@ public:
     // Cascade data accessors
     const std::array<glm::mat4, NUM_SHADOW_CASCADES>& getCascadeMatrices() const { return cascadeMatrices; }
     const std::vector<float>& getCascadeSplitDepths() const { return cascadeSplitDepths; }
-    uint32_t getShadowMapSize() const { return SHADOW_MAP_SIZE; }
 
     // Dynamic shadow resource accessors (for binding in main shader)
     // Bounds-checked accessors to prevent O3 UB from OOB access

@@ -15,6 +15,8 @@
 #include <glm/glm.hpp>
 #include <vector>
 
+#include "ShadowPassResources.h"
+
 class RendererSystems;
 struct PerformanceToggles;
 struct Renderable;
@@ -27,6 +29,10 @@ public:
         PerformanceToggles* perfToggles = nullptr;
     };
 
+    // Construct with focused resources (preferred - reduced coupling)
+    explicit ShadowPassRecorder(const ShadowPassResources& resources);
+
+    // Construct with RendererSystems (convenience, collects resources internally)
     explicit ShadowPassRecorder(RendererSystems& systems);
 
     // Set configuration (can be updated per-frame if needed)
@@ -36,6 +42,6 @@ public:
     void record(VkCommandBuffer cmd, uint32_t frameIndex, float time, const glm::vec3& cameraPosition);
 
 private:
-    RendererSystems& systems_;
+    ShadowPassResources resources_;
     Config config_;
 };

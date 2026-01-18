@@ -4,7 +4,6 @@
 #include <array>
 #include <filesystem>
 #include "Renderer.h"
-#include "RendererInit.h"
 #include "MaterialDescriptorFactory.h"
 #include "PostProcessSystem.h"
 #include "BloomSystem.h"
@@ -23,8 +22,8 @@
 #include "CloudShadowSystem.h"
 #include "AtmosphereSystemGroup.h"
 #include "SnowSystemGroup.h"
+#include "GeometrySystemGroup.h"
 #include "HiZSystem.h"
-#include "CatmullClarkSystem.h"
 #include "RockSystem.h"
 #include "TreeSystem.h"
 #include "ThreadedTreeGenerator.h"
@@ -56,6 +55,8 @@
 #include "EnvironmentSettings.h"
 #include "UBOBuilder.h"
 #include "WindSystem.h"
+#include "SystemWiring.h"
+#include "TerrainFactory.h"
 #include "threading/TaskScheduler.h"
 #include <SDL3/SDL.h>
 
@@ -156,38 +157,19 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Initialize terrain system BEFORE scene so scene objects can query terrain height
     std::string terrainDataPath = resourcePath + "/terrain_data";
 
-    // Initialize terrain system with CBT (loads heightmap directly)
-    TerrainSystem::TerrainInitParams terrainParams{};
-    terrainParams.renderPass = systems_->postProcess().getHDRRenderPass();
-    terrainParams.shadowRenderPass = systems_->shadow().getShadowRenderPass();
-    terrainParams.shadowMapSize = systems_->shadow().getShadowMapSize();
-    terrainParams.texturePath = resourcePath + "/textures";
+    // Configure and create terrain via factory
+    TerrainFactory::Config terrainFactoryConfig{};
+    terrainFactoryConfig.hdrRenderPass = systems_->postProcess().getHDRRenderPass();
+    terrainFactoryConfig.shadowRenderPass = systems_->shadow().getShadowRenderPass();
+    terrainFactoryConfig.shadowMapSize = systems_->shadow().getShadowMapSize();
+    terrainFactoryConfig.resourcePath = resourcePath;
 
-    TerrainConfig terrainConfig{};
-    terrainConfig.size = 16384.0f;
-    terrainConfig.maxDepth = 20;
-    terrainConfig.minDepth = 5;
-    terrainConfig.targetEdgePixels = 16.0f;
-    terrainConfig.splitThreshold = 100.0f;
-    terrainConfig.mergeThreshold = 50.0f;
-    // Isle of Wight altitude range (-15m to 220m, includes beaches below sea level)
-    terrainConfig.minAltitude = -15.0f;
-    terrainConfig.maxAltitude = 220.0f;
-    // heightScale is computed from minAltitude/maxAltitude during init
+    // Get terrain config for other systems that need it
+    TerrainConfig terrainConfig = TerrainFactory::buildTerrainConfig(terrainFactoryConfig);
 
-    // Enable LOD-based tile streaming from preprocessed tile cache
-    terrainConfig.tileCacheDir = resourcePath + "/terrain_data";
-    terrainConfig.tileLoadRadius = 2000.0f;   // Load high-res tiles within 2km
-    terrainConfig.tileUnloadRadius = 3000.0f; // Unload tiles beyond 3km
-
-    // Enable virtual texturing (if tile directory exists)
-    terrainConfig.virtualTextureTileDir = resourcePath + "/vt_tiles";
-    terrainConfig.useVirtualTexture = true;
-
-    std::unique_ptr<TerrainSystem> terrainSystem;
     {
         INIT_PROFILE_PHASE("TerrainSystem");
-        terrainSystem = TerrainSystem::create(initCtx, terrainParams, terrainConfig);
+        auto terrainSystem = TerrainFactory::create(initCtx, terrainFactoryConfig);
         if (!terrainSystem) return false;
         systems_->setTerrain(std::move(terrainSystem));
     }
@@ -280,28 +262,11 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         if (vegBundle->impostorCull) systems_->setImpostorCull(std::move(vegBundle->impostorCull));
     }
 
-    const EnvironmentSettings* envSettings = &systems_->wind().getEnvironmentSettings();
+    // Create system wiring helper for cross-system descriptor set updates
+    SystemWiring wiring(device, MAX_FRAMES_IN_FLIGHT);
 
-    // Get wind buffers for grass and other descriptor sets
-    std::vector<VkBuffer> windBuffers(MAX_FRAMES_IN_FLIGHT);
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        windBuffers[i] = systems_->wind().getBufferInfo(i).buffer;
-    }
-
-    // Update terrain descriptor sets with shared resources
-    auto convertBuffers = [](const std::vector<VkBuffer>& raw) {
-        std::vector<vk::Buffer> result;
-        result.reserve(raw.size());
-        for (auto b : raw) result.push_back(vk::Buffer(b));
-        return result;
-    };
-    systems_->terrain().updateDescriptorSets(
-        vk::Device(device),
-        convertBuffers(systems_->globalBuffers().uniformBuffers.buffers),
-        vk::ImageView(systems_->shadow().getShadowImageView()),
-        vk::Sampler(systems_->shadow().getShadowSampler()),
-        convertBuffers(systems_->globalBuffers().snowBuffers.buffers),
-        convertBuffers(systems_->globalBuffers().cloudShadowBuffers.buffers));
+    // Wire terrain descriptors (UBOs, shadow maps, snow/cloud buffers)
+    wiring.wireTerrainDescriptors(*systems_);
 
     // Generate vegetation content using VegetationContentGenerator
     {
@@ -401,35 +366,10 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
     // Note: Tree descriptor sets are managed internally by TreeRenderer
 
-    // Connect leaf system to environment settings
-    systems_->leaf().setEnvironmentSettings(envSettings);
-
-    // Update weather system descriptor sets
-    systems_->weather().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers, windBuffers,
-                                        systems_->postProcess().getHDRDepthView(), systems_->shadow().getShadowSampler(),
-                                        &systems_->globalBuffers().dynamicRendererUBO);
-
-    // Connect snow to environment settings and systems
-    systems_->snowMask().setEnvironmentSettings(envSettings);
-    systems_->volumetricSnow().setEnvironmentSettings(envSettings);
-    systems_->terrain().setSnowMask(device, systems_->snowMask().getSnowMaskView(), systems_->snowMask().getSnowMaskSampler());
-    systems_->terrain().setVolumetricSnowCascades(device,
-        systems_->volumetricSnow().getCascadeView(0), systems_->volumetricSnow().getCascadeView(1),
-        systems_->volumetricSnow().getCascadeView(2), systems_->volumetricSnow().getCascadeSampler());
-    systems_->grass().setSnowMask(device, systems_->snowMask().getSnowMaskView(), systems_->snowMask().getSnowMaskSampler());
-
-    // Update leaf system descriptor sets
-    // Pass triple-buffered tile info buffers to avoid CPU-GPU sync issues
-    std::array<VkBuffer, 3> leafTileInfoBuffers = {
-        systems_->terrain().getTileInfoBuffer(0),
-        systems_->terrain().getTileInfoBuffer(1),
-        systems_->terrain().getTileInfoBuffer(2)
-    };
-    systems_->leaf().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers, windBuffers,
-                                     systems_->terrain().getHeightMapView(), systems_->terrain().getHeightMapSampler(),
-                                     systems_->grass().getDisplacementImageView(), systems_->grass().getDisplacementSampler(),
-                                     systems_->terrain().getTileArrayView(), systems_->terrain().getTileSampler(),
-                                     leafTileInfoBuffers, &systems_->globalBuffers().dynamicRendererUBO);
+    // Wire snow systems, leaf, and weather descriptors
+    wiring.wireSnowSystems(*systems_);
+    wiring.wireLeafDescriptors(*systems_);
+    wiring.wireWeatherDescriptors(*systems_);
 
     // Initialize atmosphere subsystems (Sky, Froxel, AtmosphereLUT, CloudShadow)
     // Uses self-initializing AtmosphereSystemGroup to invert dependencies
@@ -454,68 +394,29 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         AtmosphereSystemGroup::wireToPostProcess(systems_->froxel(), systems_->postProcess());
     }
 
-    // Update grass descriptor sets (now that CloudShadowSystem exists)
-    // Pass triple-buffered tile info buffers to avoid CPU-GPU sync issues
-    std::array<VkBuffer, 3> tileInfoBuffers = {
-        systems_->terrain().getTileInfoBuffer(0),
-        systems_->terrain().getTileInfoBuffer(1),
-        systems_->terrain().getTileInfoBuffer(2)
-    };
-    systems_->grass().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers, systems_->shadow().getShadowImageView(), systems_->shadow().getShadowSampler(), windBuffers, systems_->globalBuffers().lightBuffers.buffers,
-                                      systems_->terrain().getHeightMapView(), systems_->terrain().getHeightMapSampler(),
-                                      systems_->globalBuffers().snowBuffers.buffers, systems_->globalBuffers().cloudShadowBuffers.buffers,
-                                      systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler(),
-                                      systems_->terrain().getTileArrayView(), systems_->terrain().getTileSampler(),
-                                      tileInfoBuffers, &systems_->globalBuffers().dynamicRendererUBO);
+    // Wire grass descriptors (now that CloudShadowSystem exists)
+    wiring.wireGrassDescriptors(*systems_);
 
-    // Connect froxel volume to weather system
-    systems_->weather().setFroxelVolume(systems_->froxel().getScatteringVolumeView(), systems_->froxel().getVolumeSampler(),
-                                   systems_->froxel().getVolumetricFarPlane(), FroxelSystem::DEPTH_DISTRIBUTION);
+    // Wire atmosphere connections (froxel to weather, cloud shadow to terrain)
+    wiring.wireFroxelToWeather(*systems_);
+    wiring.wireCloudShadowToTerrain(*systems_);
+    wiring.wireCloudShadowBindings(*systems_);
 
-    // Connect cloud shadow map to terrain system
-    systems_->terrain().setCloudShadowMap(device, systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler());
+    // Initialize geometry systems via GeometrySystemGroup factory
+    {
+        INIT_PROFILE_PHASE("GeometrySubsystems");
+        GeometrySystemGroup::CreateDeps geomDeps{
+            initCtx,
+            core.hdr.renderPass,
+            systems_->globalBuffers().uniformBuffers.buffers,
+            resourcePath,
+            core.terrain.getHeightAt
+        };
+        auto geomBundle = GeometrySystemGroup::createAll(geomDeps);
+        if (!geomBundle) return false;
 
-    // Note: Caustics setup moved to initPhase4Complete after water system is created
-
-    // Update cloud shadow bindings across all descriptor sets
-    RendererInit::updateCloudShadowBindings(device, systems_->scene().getSceneBuilder().getMaterialRegistry(),
-                                            systems_->rock(), systems_->detritus(), systems_->skinnedMesh(),
-                                            systems_->cloudShadow().getShadowMapView(), systems_->cloudShadow().getShadowMapSampler(),
-                                            MAX_FRAMES_IN_FLIGHT);
-
-    // Initialize Catmull-Clark subdivision system via factory
-    float suzanneX = 5.0f, suzanneZ = -5.0f;
-    glm::vec3 suzannePos(suzanneX, core.terrain.getHeightAt(suzanneX, suzanneZ) + 2.0f, suzanneZ);
-
-    CatmullClarkSystem::InitInfo catmullClarkInfo{};
-    catmullClarkInfo.device = device;
-    catmullClarkInfo.physicalDevice = physicalDevice;
-    catmullClarkInfo.allocator = allocator;
-    catmullClarkInfo.renderPass = core.hdr.renderPass;
-    catmullClarkInfo.descriptorPool = initCtx.descriptorPool;
-    catmullClarkInfo.extent = initCtx.extent;
-    catmullClarkInfo.shaderPath = initCtx.shaderPath;
-    catmullClarkInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-    catmullClarkInfo.graphicsQueue = graphicsQueue;
-    catmullClarkInfo.commandPool = vulkanContext_->getCommandPool();
-    catmullClarkInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
-
-    CatmullClarkConfig catmullClarkConfig{};
-    catmullClarkConfig.position = suzannePos;
-    catmullClarkConfig.scale = glm::vec3(2.0f);
-    catmullClarkConfig.targetEdgePixels = 12.0f;
-    catmullClarkConfig.maxDepth = 16;
-    catmullClarkConfig.splitThreshold = 18.0f;
-    catmullClarkConfig.mergeThreshold = 6.0f;
-    catmullClarkConfig.objPath = resourcePath + "/assets/suzanne.obj";
-
-    auto catmullClarkSystem = CatmullClarkSystem::create(catmullClarkInfo, catmullClarkConfig);
-    if (!catmullClarkSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create CatmullClarkSystem");
-        return false;
+        systems_->setCatmullClark(std::move(geomBundle->catmullClark));
     }
-    systems_->setCatmullClark(std::move(catmullClarkSystem));
-    systems_->catmullClark().updateDescriptorSets(device, systems_->globalBuffers().uniformBuffers.buffers);
 
     // Create sky descriptor sets now that uniform buffers and LUTs are ready
     if (!systems_->sky().createDescriptorSets(systems_->globalBuffers().uniformBuffers.buffers, sizeof(UniformBufferObject), systems_->atmosphereLUT())) return false;
@@ -561,25 +462,16 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         if (waterBundle->gBuffer) systems_->setWaterGBuffer(std::move(waterBundle->gBuffer));
     }
 
-    // Initialize water subsystems (configure WaterSystem, generate flow map)
-    WaterSubsystems waterSubs{systems_->water(), systems_->waterDisplacement(), systems_->flowMap(), systems_->foam(), *systems_, systems_->waterTileCull(), systems_->waterGBuffer()};
-    if (!RendererInit::initWaterSubsystems(waterSubs, initCtx, core.hdr.renderPass,
-                                            systems_->shadow(), systems_->terrain(), terrainConfig, systems_->postProcess(), vulkanContext_->getDepthSampler())) return false;
+    // Configure water subsystems (water level, wave properties, flow map)
+    if (!WaterSystemGroup::configureSubsystems(*systems_, terrainConfig)) return false;
 
     // Create water descriptor sets
-    if (!RendererInit::createWaterDescriptorSets(waterSubs, systems_->globalBuffers().uniformBuffers.buffers,
-                                                  sizeof(UniformBufferObject), systems_->shadow(), systems_->terrain(),
-                                                  systems_->postProcess(), vulkanContext_->getDepthSampler())) return false;
+    if (!WaterSystemGroup::createDescriptorSets(*systems_, systems_->globalBuffers().uniformBuffers.buffers,
+                                                 sizeof(UniformBufferObject), systems_->shadow(), systems_->terrain(),
+                                                 systems_->postProcess(), vulkanContext_->getDepthSampler())) return false;
 
-    // Connect underwater caustics to terrain system (use foam texture as caustics pattern)
-    // Must happen after water system is fully initialized
-    if (systems_->water().getFoamTextureView() != VK_NULL_HANDLE) {
-        systems_->terrain().setCaustics(device,
-                                         systems_->water().getFoamTextureView(),
-                                         systems_->water().getFoamTextureSampler(),
-                                         systems_->water().getWaterLevel(),
-                                         true);  // Enable caustics
-    }
+    // Wire underwater caustics (must happen after water system is fully initialized)
+    wiring.wireCausticsToTerrain(*systems_);
 
     if (!createSyncObjects()) return false;
 
@@ -587,7 +479,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     {
         RendererCore::InitParams coreParams;
         coreParams.vulkanContext = vulkanContext_.get();
-        coreParams.frameGraph = &frameGraph_;
+        coreParams.frameGraph = &renderingInfra_.frameGraph();
         coreParams.frameSync = &frameSync_;
         if (!rendererCore_.init(coreParams)) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize RendererCore");

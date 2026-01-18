@@ -16,10 +16,11 @@
 #include "VmaResources.h"
 #include "core/FrameBuffered.h"
 #include "core/material/MaterialComponents.h"
+#include "interfaces/IRecordable.h"
 
 class ShadowSystem;
 
-class WaterSystem {
+class WaterSystem : public IRecordable {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -141,8 +142,8 @@ public:
     // Update water uniforms (call each frame)
     void updateUniforms(uint32_t frameIndex);
 
-    // Record water rendering commands
-    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex);
+    // Record water rendering commands (implements IRecordable)
+    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) override;
 
     // Record just mesh draw (for G-buffer pass with external pipeline)
     void recordMeshDraw(VkCommandBuffer cmd);

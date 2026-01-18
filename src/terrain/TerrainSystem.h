@@ -9,6 +9,9 @@
 #include <array>
 #include <memory>
 #include "interfaces/ITerrainControl.h"
+#include "interfaces/IRecordable.h"
+#include "interfaces/IShadowCaster.h"
+#include "interfaces/IHeightProvider.h"
 #include "UBOs.h"
 #include "TerrainTextures.h"
 #include "TerrainCBT.h"
@@ -132,7 +135,7 @@ struct TerrainConfig {
     bool useVirtualTexture = false;     // Enable virtual texturing for terrain
 };
 
-class TerrainSystem : public ITerrainControl {
+class TerrainSystem : public ITerrainControl, public IRecordable, public IShadowCaster, public ITiledHeightProvider {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -232,9 +235,20 @@ public:
     // Record terrain rendering
     void recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex);
 
+    // IRecordable interface implementation
+    void recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) override {
+        recordDraw(vk::CommandBuffer(cmd), frameIndex);
+    }
+
     // Record shadow pass for terrain
     void recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex,
                           const glm::mat4& lightViewProj, int cascadeIndex);
+
+    // IShadowCaster interface implementation
+    void recordShadowDraw(VkCommandBuffer cmd, uint32_t frameIndex,
+                          const glm::mat4& lightMatrix, int cascade) override {
+        recordShadowDraw(vk::CommandBuffer(cmd), frameIndex, lightMatrix, cascade);
+    }
 
     // Record shadow culling compute (call before recordShadowDraw for each cascade)
     void recordShadowCull(vk::CommandBuffer cmd, uint32_t frameIndex,
@@ -247,12 +261,12 @@ public:
     // Get terrain height at world position (CPU-side, for collision)
     float getHeightAt(float x, float z) const;
 
-    // Get raw heightmap data for flow map generation and other CPU-side uses
+    // IHeightProvider interface - Get raw heightmap data for flow map generation and other CPU-side uses
     // Uses tile cache base heightmap (combined from LOD3 tiles)
-    const float* getHeightMapData() const {
+    const float* getHeightMapData() const override {
         return tileCache ? tileCache->getBaseHeightMapData().data() : nullptr;
     }
-    uint32_t getHeightMapResolution() const {
+    uint32_t getHeightMapResolution() const override {
         return tileCache ? tileCache->getBaseHeightMapResolution() : 0;
     }
 
@@ -276,12 +290,12 @@ public:
     const TerrainConfig& getConfig() const { return config; }
     void setConfig(const TerrainConfig& newConfig) { config = newConfig; }
 
-    // Heightmap accessors for grass integration and water rendering
+    // IHeightProvider interface - Heightmap accessors for grass integration and water rendering
     // Uses tile cache base heightmap (combined from LOD3 tiles)
-    vk::ImageView getHeightMapView() const {
+    vk::ImageView getHeightMapView() const override {
         return tileCache ? vk::ImageView(tileCache->getBaseHeightMapView()) : vk::ImageView{};
     }
-    vk::Sampler getHeightMapSampler() const {
+    vk::Sampler getHeightMapSampler() const override {
         return tileCache ? vk::Sampler(tileCache->getBaseHeightMapSampler()) : vk::Sampler{};
     }
 
@@ -299,14 +313,14 @@ public:
     TerrainTileCache* getTileCache() { return tileCache.get(); }
     const TerrainTileCache* getTileCache() const { return tileCache.get(); }
 
-    // Tile cache GPU resource accessors (for grass/other systems)
-    vk::ImageView getTileArrayView() const {
+    // ITiledHeightProvider interface - Tile cache GPU resource accessors (for grass/other systems)
+    vk::ImageView getTileArrayView() const override {
         return tileCache ? vk::ImageView(tileCache->getTileArrayView()) : vk::ImageView{};
     }
-    vk::Sampler getTileSampler() const {
+    vk::Sampler getTileSampler() const override {
         return tileCache ? vk::Sampler(tileCache->getSampler()) : vk::Sampler{};
     }
-    vk::Buffer getTileInfoBuffer(uint32_t frameIndex) const {
+    vk::Buffer getTileInfoBuffer(uint32_t frameIndex) const override {
         return tileCache ? vk::Buffer(tileCache->getTileInfoBuffer(frameIndex)) : vk::Buffer{};
     }
 

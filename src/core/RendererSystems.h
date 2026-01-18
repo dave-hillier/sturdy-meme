@@ -10,6 +10,7 @@
 #include "VegetationSystemGroup.h"
 #include "WaterSystemGroup.h"
 #include "SnowSystemGroup.h"
+#include "GeometrySystemGroup.h"
 #include "scene/SceneCollection.h"
 
 // Forward declarations for control subsystems (only those that coordinate multiple systems)
@@ -353,6 +354,16 @@ public:
             volumetricSnowSystem_.get(),
             weatherSystem_.get(),
             leafSystem_.get()
+        };
+    }
+
+    /**
+     * Get the geometry system group (Catmull-Clark subdivision, procedural meshes)
+     * Returns a lightweight struct with non-owning references to the systems.
+     */
+    GeometrySystemGroup geometry() {
+        return GeometrySystemGroup{
+            catmullClarkSystem_.get()
         };
     }
 

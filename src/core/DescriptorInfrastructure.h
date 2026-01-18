@@ -72,6 +72,15 @@ public:
         return graphicsPipeline_ ? **graphicsPipeline_ : vk::Pipeline{};
     }
 
+    // Pointer accessors for storing references in config structs
+    const vk::Pipeline* getGraphicsPipelinePtr() const {
+        return graphicsPipeline_ ? &**graphicsPipeline_ : nullptr;
+    }
+
+    const vk::PipelineLayout* getPipelineLayoutPtr() const {
+        return pipelineLayout_ ? &**pipelineLayout_ : nullptr;
+    }
+
     DescriptorManager::Pool* getDescriptorPool() {
         return descriptorManagerPool_.has_value() ? &*descriptorManagerPool_ : nullptr;
     }

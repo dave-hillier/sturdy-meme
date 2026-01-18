@@ -5,9 +5,11 @@
 
 #include <memory>
 #include <optional>
+#include <vector>
 #include <vulkan/vulkan.h>
 
 // Forward declarations
+struct TerrainConfig;
 class WaterSystem;
 class WaterDisplacement;
 class FlowMapGenerator;
@@ -15,6 +17,10 @@ class FoamBuffer;
 class SSRSystem;
 class WaterTileCull;
 class WaterGBuffer;
+class ShadowSystem;
+class TerrainSystem;
+class PostProcessSystem;
+class RendererSystems;
 
 /**
  * WaterSystemGroup - Groups water-related rendering systems
@@ -42,6 +48,10 @@ class WaterGBuffer;
  *       systems.setWater(std::move(bundle->system));
  *       // ... etc
  *   }
+ *
+ * Configuration (after systems are stored in RendererSystems):
+ *   WaterSystemGroup::configureSubsystems(systems, terrainConfig);
+ *   WaterSystemGroup::createDescriptorSets(systems, ...);
  */
 struct WaterSystemGroup {
     // Non-owning references to systems (owned by RendererSystems)
@@ -105,4 +115,31 @@ struct WaterSystemGroup {
      * additional wiring after other systems are ready.
      */
     static std::optional<Bundle> createAll(const CreateDeps& deps);
+
+    // ========================================================================
+    // Configuration methods (call after systems are in RendererSystems)
+    // ========================================================================
+
+    /**
+     * Configure water subsystems with terrain-derived parameters.
+     * Sets water level, extent, wave properties, and generates flow map.
+     */
+    static bool configureSubsystems(
+        RendererSystems& systems,
+        const TerrainConfig& terrainConfig
+    );
+
+    /**
+     * Create descriptor sets for water rendering.
+     * Must be called after configureSubsystems().
+     */
+    static bool createDescriptorSets(
+        RendererSystems& systems,
+        const std::vector<VkBuffer>& uniformBuffers,
+        size_t uniformBufferSize,
+        ShadowSystem& shadowSystem,
+        const TerrainSystem& terrainSystem,
+        const PostProcessSystem& postProcessSystem,
+        VkSampler depthSampler
+    );
 };

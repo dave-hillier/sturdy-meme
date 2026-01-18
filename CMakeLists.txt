@@ -39,9 +39,9 @@ set(SOURCES
     # Core
     src/core/Renderer.cpp
     src/core/RendererCore.cpp
-    src/core/RendererInit.cpp
     src/core/RendererInitPhases.cpp
     src/core/CoreResources.cpp
+    src/core/SystemWiring.cpp
     src/core/ResizeCoordinator.cpp
     src/core/UBOBuilder.cpp
     src/core/RendererSystems.cpp
@@ -65,9 +65,11 @@ set(SOURCES
     src/core/passes/ComputePasses.cpp
     src/core/passes/ShadowPasses.cpp
     src/core/passes/ShadowPassRecorder.cpp
+    src/core/passes/ShadowPassResources.cpp
     src/core/passes/WaterPasses.cpp
     src/core/passes/HDRPass.cpp
     src/core/passes/HDRPassRecorder.cpp
+    src/core/passes/HDRPassResources.cpp
     src/core/passes/PostPasses.cpp
     src/core/FrameUpdater.cpp
     src/core/FrameDataBuilder.cpp
@@ -92,6 +94,8 @@ set(SOURCES
     src/core/material/MaterialRegistry.cpp
     src/core/asset/AssetRegistry.cpp
     src/core/RenderableBuilder.cpp
+    src/core/RenderingInfrastructure.cpp
+    src/core/DescriptorInfrastructure.cpp
     # Atmosphere
     src/atmosphere/TimeSystem.cpp
     src/atmosphere/CelestialCalculator.cpp
@@ -154,6 +158,7 @@ set(SOURCES
     src/physics/PhysicsDebugRenderer.cpp
     # Terrain
     src/terrain/TerrainSystem.cpp
+    src/terrain/TerrainFactory.cpp
     src/terrain/TerrainBuffers.cpp
     src/terrain/TerrainCameraOptimizer.cpp
     src/terrain/TerrainEffects.cpp
@@ -197,6 +202,7 @@ set(SOURCES
     src/subdivision/CatmullClarkCBT.cpp
     src/subdivision/CatmullClarkMesh.cpp
     src/subdivision/CatmullClarkSystem.cpp
+    src/subdivision/GeometrySystemGroup.cpp
     # Loaders
     src/loaders/OBJLoader.cpp
     src/loaders/GLTFLoader.cpp
