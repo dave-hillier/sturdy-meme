@@ -448,6 +448,7 @@ void Application::run() {
             systems.terrainControl(),
             systems.waterControl(),
             systems.treeControl(),
+            systems.grassControl(),
             systems.debugControl(),
             systems.profilerControl(),
             systems.performanceControl(),

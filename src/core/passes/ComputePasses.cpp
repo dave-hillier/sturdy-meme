@@ -9,6 +9,7 @@
 // Subsystem headers for compute passes
 #include "TerrainSystem.h"
 #include "CatmullClarkSystem.h"
+#include "DisplacementSystem.h"
 #include "GrassSystem.h"
 #include "WeatherSystem.h"
 #include "LeafSystem.h"
@@ -62,7 +63,7 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& con
             // Grass compute pass (displacement + simulation)
             if (perfToggles->grassCompute) {
                 systems.profiler().beginGpuZone(cmd, "GrassCompute");
-                systems.grass().recordDisplacementUpdate(cmd, frameIndex);
+                systems.displacement().recordUpdate(cmd, frameIndex);
                 systems.grass().recordResetAndCompute(cmd, frameIndex, renderCtx->frame.time);
                 systems.profiler().endGpuZone(cmd, "GrassCompute");
             }

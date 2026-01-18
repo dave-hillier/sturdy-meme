@@ -1,7 +1,11 @@
 #pragma once
 
 #include "GrassTile.h"
+#include "GrassTileTracker.h"
+#include "GrassTileResourcePool.h"
+#include "GrassTileLoadQueue.h"
 #include "GrassConstants.h"
+#include "GrassLODStrategy.h"
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
 #include <vulkan/vulkan.hpp>
@@ -19,14 +23,22 @@ struct TiledGrassPushConstants;  // Defined in GrassSystem.h
 /**
  * GrassTileManager - Manages streaming grass tiles around the camera
  *
+ * Composed of:
+ * - GrassTileTracker: Pure logic for tile decisions (no Vulkan)
+ * - GrassTileResourcePool: Vulkan resource management
+ * - GrassTileLoadQueue: Async loading with frame budget
+ *
  * Based on Ghost of Tsushima's approach:
  * - World is divided into a grid of tiles
- * - Tiles around the camera are loaded (3x3 = 9 tiles)
- * - Each tile has its own compute dispatch and draw call
- * - Double-buffering: compute to one set while rendering from another
+ * - Tiles around the camera are loaded (multi-LOD)
+ * - Each tile has its own compute dispatch
+ * - Async loading prevents frame hitches
  */
 class GrassTileManager {
 public:
+    using TileCoord = GrassTile::TileCoord;
+    using TileCoordHash = GrassTile::TileCoordHash;
+
     struct InitInfo {
         vk::Device device;
         VmaAllocator allocator = VK_NULL_HANDLE;
@@ -35,13 +47,16 @@ public:
         std::string shaderPath;
 
         // Pipeline layouts/descriptor set layouts from GrassSystem
-        // (shared between tiled and non-tiled rendering)
         vk::DescriptorSetLayout computeDescriptorSetLayout;
         vk::PipelineLayout computePipelineLayout;
         vk::Pipeline computePipeline;
         vk::DescriptorSetLayout graphicsDescriptorSetLayout;
         vk::PipelineLayout graphicsPipelineLayout;
         vk::Pipeline graphicsPipeline;
+
+        // Async loading configuration
+        uint32_t maxLoadsPerFrame = 3;        // Max tiles to load per frame
+        float teleportThreshold = 500.0f;     // Distance to detect teleportation
     };
 
     GrassTileManager() = default;
@@ -64,15 +79,12 @@ public:
     /**
      * Update active tiles based on camera position
      * Call this once per frame before compute/render
-     * @param cameraPos Current camera position
-     * @param frameNumber Current frame number (for tracking tile usage)
-     * @param currentTime Current time in seconds (for tile fade-in effects)
+     * Uses async loading to prevent hitches
      */
     void updateActiveTiles(const glm::vec3& cameraPos, uint64_t frameNumber, float currentTime);
 
     /**
      * Update descriptor sets with shared resources
-     * Call when terrain/shadow resources are available
      */
     void updateDescriptorSets(
         vk::ImageView terrainHeightMapView, vk::Sampler terrainHeightMapSampler,
@@ -91,13 +103,11 @@ public:
 
     /**
      * Set shared buffers from GrassSystem
-     * In tiled mode, all tiles write to these shared buffers instead of per-tile buffers
      */
     void setSharedBuffers(vk::Buffer sharedInstanceBuffer, vk::Buffer sharedIndirectBuffer);
 
     /**
-     * Record draw calls - uses shared buffers with single draw call
-     * (same as non-tiled mode, just compute dispatches are tiled)
+     * Record draw calls
      */
     void recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time,
                     uint32_t renderBufferSet,
@@ -113,90 +123,83 @@ public:
     size_t getActiveTileCount() const { return activeTiles_.size(); }
 
     /**
-     * Check if the tiled system is enabled and initialized
+     * Get number of tiles pending load
+     */
+    size_t getPendingLoadCount() const { return loadQueue_.getPendingCount(); }
+
+    /**
+     * Check if the tiled system is enabled
      */
     bool isEnabled() const { return enabled_; }
 
     /**
-     * Get total number of loaded tiles (including inactive)
+     * Get total number of loaded tiles
      */
-    size_t getTotalTileCount() const { return tiles_.size(); }
+    size_t getTotalTileCount() const { return resourcePool_.getAllocatedTileCount(); }
+
+    /**
+     * Access to tracker for testing/debugging
+     */
+    const GrassTileTracker& getTracker() const { return tracker_; }
+
+    /**
+     * Access to load queue for configuration
+     */
+    GrassTileLoadQueue& getLoadQueue() { return loadQueue_; }
+
+    /**
+     * Set the LOD strategy (forwards to tracker)
+     */
+    void setLODStrategy(std::unique_ptr<IGrassLODStrategy> strategy) {
+        tracker_.setLODStrategy(std::move(strategy));
+    }
+
+    /**
+     * Get the current LOD strategy
+     */
+    const IGrassLODStrategy* getLODStrategy() const {
+        return tracker_.getLODStrategy();
+    }
 
 private:
     /**
-     * Unload tiles that are too far from camera and safe to release
-     * Uses hysteresis margin to prevent thrashing
+     * Process tile load requests (respects per-frame budget)
      */
-    void unloadDistantTiles(const glm::vec2& cameraXZ, uint64_t currentFrame);
-    /**
-     * Calculate which tile coordinate contains a world position at a given LOD level
-     */
-    GrassTile::TileCoord worldToTileCoord(const glm::vec2& worldPos, uint32_t lod) const;
+    void processLoadQueue(float currentTime);
 
     /**
-     * Check if a world position is covered by higher LOD (more detailed) tiles
-     * Used to avoid rendering lower LOD tiles where higher LOD tiles exist
+     * Process tile unload requests
      */
-    bool isCoveredByHigherLod(const glm::vec2& worldPos, uint32_t currentLod,
-                               const glm::vec2& cameraXZ) const;
-
-    /**
-     * Get or create a tile at the given coordinate
-     */
-    GrassTile* getOrCreateTile(const GrassTile::TileCoord& coord);
-
-    /**
-     * Create compute descriptor sets for a tile
-     */
-    bool createTileDescriptorSets(GrassTile* tile);
-
-    /**
-     * Update a tile's descriptor sets with current buffers
-     */
-    void updateTileDescriptorSets(GrassTile* tile, uint32_t bufferSetIndex);
+    void processUnloads(const std::vector<GrassTileTracker::TileRequest>& unloadRequests);
 
     bool enabled_ = false;
     vk::Device device_;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
-    DescriptorManager::Pool* descriptorPool_ = nullptr;
     uint32_t framesInFlight_ = 3;
 
-    // Shared pipeline resources (from GrassSystem)
-    vk::DescriptorSetLayout computeDescriptorSetLayout_;
+    // Composed components
+    GrassTileTracker tracker_;
+    GrassTileResourcePool resourcePool_;
+    GrassTileLoadQueue loadQueue_;
+
+    // Shared pipeline resources
     vk::PipelineLayout computePipelineLayout_;
     vk::Pipeline computePipeline_;
 
-    // Currently active tiles (indexed by tile coordinate)
-    std::unordered_map<GrassTile::TileCoord, std::unique_ptr<GrassTile>, GrassTile::TileCoordHash> tiles_;
-
-    // Ordered list of active tiles for iteration
-    std::vector<GrassTile*> activeTiles_;
-
-    // Per-tile descriptor sets (compute only - graphics uses shared descriptor)
-    // Key: tile pointer, Value: array of descriptor sets (one per buffer set)
-    std::unordered_map<GrassTile*, std::vector<vk::DescriptorSet>> tileDescriptorSets_;
-
-    // Current camera tile coordinate (for detecting movement)
-    GrassTile::TileCoord currentCameraTile_{0, 0};
-
-    // Frame tracking for tile unloading
-    uint64_t currentFrame_ = 0;
-
-    // Current time (for tile fade-in)
-    float currentTime_ = 0.0f;
-
-    // Shared buffers from GrassSystem (all tiles write to these)
+    // Shared buffers
     vk::Buffer sharedInstanceBuffer_;
     vk::Buffer sharedIndirectBuffer_;
 
-    // Shared resources for descriptor updates
-    vk::ImageView terrainHeightMapView_;
-    vk::Sampler terrainHeightMapSampler_;
-    vk::ImageView displacementView_;
-    vk::Sampler displacementSampler_;
-    vk::ImageView tileArrayView_;
-    vk::Sampler tileSampler_;
-    std::array<vk::Buffer, 3> tileInfoBuffers_;
-    std::vector<vk::Buffer> cullingUniformBuffers_;
-    std::vector<vk::Buffer> grassParamsBuffers_;
+    // Active tile data for rendering
+    struct ActiveTileData {
+        TileCoord coord;
+        float creationTime;
+    };
+    std::vector<ActiveTileData> activeTiles_;
+
+    // Tile creation times (for fade-in)
+    std::unordered_map<TileCoord, float, TileCoordHash> tileCreationTimes_;
+
+    // Current time (for tile fade-in)
+    float currentTime_ = 0.0f;
 };

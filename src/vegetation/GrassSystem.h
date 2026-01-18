@@ -12,7 +12,8 @@
 #include <optional>
 
 #include "BufferUtils.h"
-#include "ParticleSystem.h"
+#include "SystemLifecycleHelper.h"
+#include "BufferSetManager.h"
 #include "UBOs.h"
 #include "VmaResources.h"
 #include "core/FrameBuffered.h"
@@ -22,6 +23,7 @@
 // Forward declarations
 class WindSystem;
 class GrassTileManager;
+class DisplacementSystem;
 struct InitContext;
 
 // Legacy push constants for non-tiled mode (and shadow pass)
@@ -42,18 +44,6 @@ struct TiledGrassPushConstants {
     float padding;       // Padding to align to 16 bytes
 };
 
-// Displacement source for grass interaction (player, NPCs, etc.)
-struct DisplacementSource {
-    glm::vec4 positionAndRadius;   // xyz = world position, w = radius
-    glm::vec4 strengthAndVelocity; // x = strength, yzw = velocity (for directional push)
-};
-
-// Uniforms for displacement update compute shader
-struct DisplacementUniforms {
-    glm::vec4 regionCenter;        // xy = world center, z = region size, w = texel size
-    glm::vec4 params;              // x = decay rate, y = max displacement, z = delta time, w = num sources
-};
-
 struct GrassInstance {
     glm::vec4 positionAndFacing;  // xyz = position, w = facing angle
     glm::vec4 heightHashTilt;     // x = height, y = hash, z = tilt, w = clumpId
@@ -65,7 +55,15 @@ public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
 
-    struct InitInfo : public ParticleSystem::InitInfo {
+    struct InitInfo {
+        vk::Device device;
+        VmaAllocator allocator;
+        vk::RenderPass renderPass;
+        DescriptorManager::Pool* descriptorPool;
+        vk::Extent2D extent;
+        std::string shaderPath;
+        uint32_t framesInFlight;
+        const vk::raii::Device* raiiDevice = nullptr;
         vk::RenderPass shadowRenderPass;
         uint32_t shadowMapSize;
     };
@@ -106,8 +104,8 @@ public:
     GrassSystem& operator=(GrassSystem&&) = delete;
 
     // Update extent for viewport (on window resize)
-    void setExtent(vk::Extent2D newExtent) { particleSystem->setExtent(VkExtent2D{newExtent.width, newExtent.height}); }
-    void setExtent(VkExtent2D newExtent) { particleSystem->setExtent(newExtent); }  // Backward-compatible overload
+    void setExtent(vk::Extent2D newExtent) { extent_ = newExtent; }
+    void setExtent(VkExtent2D newExtent) { extent_ = vk::Extent2D{newExtent.width, newExtent.height}; }  // Backward-compatible overload
 
     void updateDescriptorSets(vk::Device device, const std::vector<vk::Buffer>& uniformBuffers,
                               vk::ImageView shadowMapView, vk::Sampler shadowSampler,
@@ -138,8 +136,6 @@ public:
 
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
                         float terrainSize, float terrainHeightScale, float time);
-    void updateDisplacementSources(const glm::vec3& playerPos, float playerRadius, float deltaTime);
-    void recordDisplacementUpdate(vk::CommandBuffer cmd, uint32_t frameIndex);
     void recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameIndex, float time);
     void recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time);
     void recordShadowDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float time, uint32_t cascadeIndex);
@@ -157,9 +153,12 @@ public:
     // Double-buffer management: call at frame start to swap compute/render buffer sets
     void advanceBufferSet();
 
-    // Displacement texture accessors (for sharing with LeafSystem)
-    vk::ImageView getDisplacementImageView() const { return displacementImageView_; }
-    vk::Sampler getDisplacementSampler() const { return displacementSampler_ ? **displacementSampler_ : VK_NULL_HANDLE; }
+    // Displacement system setter (required before recordResetAndCompute)
+    void setDisplacementSystem(DisplacementSystem* displacement) { displacementSystem_ = displacement; }
+
+    // Displacement texture accessors (delegate to DisplacementSystem)
+    vk::ImageView getDisplacementImageView() const;
+    vk::Sampler getDisplacementSampler() const;
 
     void setEnvironmentSettings(const EnvironmentSettings* settings) { environmentSettings = settings; }
 
@@ -179,8 +178,6 @@ private:
 
     bool createShadowPipeline();
     bool createBuffers();
-    bool createDisplacementResources();
-    bool createDisplacementPipeline();
     bool createComputeDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles);
     bool createComputePipeline(SystemLifecycleHelper::PipelineHandles& handles);
     bool createGraphicsDescriptorSetLayout(SystemLifecycleHelper::PipelineHandles& handles);
@@ -191,21 +188,36 @@ private:
     void writeComputeDescriptorSets();  // Called after init to write compute descriptor sets
     void destroyBuffers(VmaAllocator allocator);
 
-    // Accessors - use stored initInfo during init, particleSystem after init completes
+    // Accessors
     vk::Device getDevice() const { return device_; }
     VmaAllocator getAllocator() const { return allocator_; }
     vk::RenderPass getRenderPass() const { return renderPass_; }
     DescriptorManager::Pool* getDescriptorPool() const { return descriptorPool_; }
-    vk::Extent2D getExtent() const { return particleSystem ? vk::Extent2D{particleSystem->getExtent().width, particleSystem->getExtent().height} : extent_; }
+    vk::Extent2D getExtent() const { return extent_; }
     const std::string& getShaderPath() const { return shaderPath_; }
     uint32_t getFramesInFlight() const { return framesInFlight_; }
 
-    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return particleSystem->getComputePipelineHandles(); }
-    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return particleSystem->getGraphicsPipelineHandles(); }
+    SystemLifecycleHelper::PipelineHandles& getComputePipelineHandles() { return lifecycle_.getComputePipeline(); }
+    SystemLifecycleHelper::PipelineHandles& getGraphicsPipelineHandles() { return lifecycle_.getGraphicsPipeline(); }
 
-    std::unique_ptr<ParticleSystem> particleSystem;
+    // Buffer set management (double/triple-buffered resources)
+    uint32_t getComputeBufferSet() const { return bufferSets_.getComputeSet(); }
+    uint32_t getRenderBufferSet() const { return bufferSets_.getRenderSet(); }
+    uint32_t getBufferSetCount() const { return bufferSets_.getSetCount(); }
 
-    // Stored init info (available during initialization before particleSystem is created)
+    // Descriptor set access
+    VkDescriptorSet getComputeDescriptorSet(uint32_t index) const { return computeDescriptorSets_[index]; }
+    VkDescriptorSet getGraphicsDescriptorSet(uint32_t index) const { return graphicsDescriptorSets_[index]; }
+
+    // Core components (same as ParticleSystem - composed from identical parts)
+    SystemLifecycleHelper lifecycle_;
+    BufferSetManager bufferSets_;
+
+    // Compute and graphics descriptor sets (one per buffer set)
+    std::vector<VkDescriptorSet> computeDescriptorSets_;
+    std::vector<VkDescriptorSet> graphicsDescriptorSets_;
+
+    // Stored init info
     vk::Device device_;
     VmaAllocator allocator_ = VK_NULL_HANDLE;
     vk::RenderPass renderPass_;
@@ -225,34 +237,8 @@ private:
     std::optional<vk::raii::PipelineLayout> shadowPipelineLayout_;
     std::optional<vk::raii::Pipeline> shadowPipeline_;
 
-    // Displacement texture resources use unified constants from GrassConstants.h:
-    // GrassConstants::DISPLACEMENT_TEXTURE_SIZE (512x512 texels)
-    // GrassConstants::DISPLACEMENT_REGION_SIZE (50m x 50m coverage)
-    // GrassConstants::MAX_DISPLACEMENT_SOURCES (max sources per frame)
-
-    vk::Image displacementImage_;
-    VmaAllocation displacementAllocation_ = VK_NULL_HANDLE;
-    vk::ImageView displacementImageView_;
-    std::optional<vk::raii::Sampler> displacementSampler_;
-
-    // Displacement update compute pipeline
-    std::optional<vk::raii::DescriptorSetLayout> displacementDescriptorSetLayout_;
-    std::optional<vk::raii::PipelineLayout> displacementPipelineLayout_;
-    std::optional<vk::raii::Pipeline> displacementPipeline_;
-    // Per-frame descriptor sets for displacement update (double-buffered)
-    std::vector<vk::DescriptorSet> displacementDescriptorSets_;
-
-    // Displacement sources buffer (per-frame)
-    BufferUtils::PerFrameBufferSet displacementSourceBuffers;
-
-    // Displacement uniforms buffer (per-frame)
-    BufferUtils::PerFrameBufferSet displacementUniformBuffers;
-
-    // Current displacement region center (follows camera)
-    glm::vec2 displacementRegionCenter = glm::vec2(0.0f);
-
-    // Displacement source data for current frame
-    std::vector<DisplacementSource> currentDisplacementSources;
+    // Displacement system (owned externally, provides displacement texture)
+    DisplacementSystem* displacementSystem_ = nullptr;
 
     // Triple-buffered storage buffers: one per frame in flight
     // Each frame gets its own buffer set to avoid GPU read/CPU write conflicts.

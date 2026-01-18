@@ -2,6 +2,7 @@
 #include "RendererSystems.h"
 #include "Profiler.h"
 
+#include "DisplacementSystem.h"
 #include "GrassSystem.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
@@ -10,30 +11,46 @@
 #include "LeafSystem.h"
 #include "WindSystem.h"
 #include "ShadowSystem.h"
+#include "CloudShadowSystem.h"
 #include "GlobalBufferManager.h"
+#include "VegetationRenderContext.h"
 
 #include <cmath>
 
 void VegetationUpdater::update(RendererSystems& systems, const FrameData& frame, VkExtent2D extent) {
-    updateGrass(systems, frame);
-    updateTreeDescriptors(systems, frame);
+    // Build shared context once per frame
+    auto ctx = VegetationRenderContext::fromSystems(systems, frame);
+
+    updateGrass(systems, frame, ctx);
+    updateTreeDescriptors(systems, frame, ctx);
     updateTreeLOD(systems, frame, extent);
     updateLeaf(systems, frame);
 }
 
-void VegetationUpdater::updateGrass(RendererSystems& systems, const FrameData& frame) {
+void VegetationUpdater::updateGrass(RendererSystems& systems, const FrameData& frame,
+                                     const VegetationRenderContext& ctx) {
     systems.profiler().beginCpuZone("Update:Grass");
-    systems.grass().updateUniforms(frame.frameIndex, frame.cameraPosition, frame.viewProj,
-                                   frame.terrainSize, frame.heightScale, frame.time);
-    systems.grass().updateDisplacementSources(frame.playerPosition, frame.playerCapsuleRadius, frame.deltaTime);
+
+    // Update displacement system (shared by grass and leaves)
+    systems.displacement().updateRegionCenter(ctx.cameraPosition);
+    systems.displacement().updateSources(frame.playerPosition, frame.playerCapsuleRadius, ctx.deltaTime);
+
+    // Update grass uniforms using context data
+    systems.grass().updateUniforms(ctx.frameIndex, ctx.cameraPosition, ctx.viewProjectionMatrix,
+                                   ctx.terrainSize, ctx.terrainHeightScale, ctx.time);
     systems.profiler().endCpuZone("Update:Grass");
 }
 
-void VegetationUpdater::updateTreeDescriptors(RendererSystems& systems, const FrameData& frame) {
+void VegetationUpdater::updateTreeDescriptors(RendererSystems& systems, const FrameData& frame,
+                                               const VegetationRenderContext& ctx) {
     if (!systems.treeRenderer() || !systems.tree()) return;
 
     systems.profiler().beginCpuZone("Update:TreeDesc");
-    VkDescriptorBufferInfo windInfo = systems.wind().getBufferInfo(frame.frameIndex);
+
+    // Use wind UBO from context instead of querying each time
+    VkBuffer windBuffer = static_cast<VkBuffer>(ctx.windUBO);
+    VkImageView shadowView = static_cast<VkImageView>(ctx.shadowMapView);
+    VkSampler shadowSampler = static_cast<VkSampler>(ctx.shadowMapSampler);
 
     // Update descriptor sets for each bark texture type
     for (const auto& barkType : systems.tree()->getBarkTextureTypes()) {
@@ -41,12 +58,12 @@ void VegetationUpdater::updateTreeDescriptors(RendererSystems& systems, const Fr
         Texture* barkNormal = systems.tree()->getBarkNormalMap(barkType);
 
         systems.treeRenderer()->updateBarkDescriptorSet(
-            frame.frameIndex,
+            ctx.frameIndex,
             barkType,
-            systems.globalBuffers().uniformBuffers.buffers[frame.frameIndex],
-            windInfo.buffer,
-            systems.shadow().getShadowImageView(),
-            systems.shadow().getShadowSampler(),
+            systems.globalBuffers().uniformBuffers.buffers[ctx.frameIndex],
+            windBuffer,
+            shadowView,
+            shadowSampler,
             barkTex->getImageView(),
             barkNormal->getImageView(),
             barkTex->getImageView(),  // roughness placeholder
@@ -59,35 +76,35 @@ void VegetationUpdater::updateTreeDescriptors(RendererSystems& systems, const Fr
         Texture* leafTex = systems.tree()->getLeafTexture(leafType);
 
         systems.treeRenderer()->updateLeafDescriptorSet(
-            frame.frameIndex,
+            ctx.frameIndex,
             leafType,
-            systems.globalBuffers().uniformBuffers.buffers[frame.frameIndex],
-            windInfo.buffer,
-            systems.shadow().getShadowImageView(),
-            systems.shadow().getShadowSampler(),
+            systems.globalBuffers().uniformBuffers.buffers[ctx.frameIndex],
+            windBuffer,
+            shadowView,
+            shadowSampler,
             leafTex->getImageView(),
             leafTex->getSampler(),
             systems.tree()->getLeafInstanceBuffer(),
             systems.tree()->getLeafInstanceBufferSize(),
-            systems.globalBuffers().snowBuffers.buffers[frame.frameIndex]);
+            systems.globalBuffers().snowBuffers.buffers[ctx.frameIndex]);
 
         // Update culled leaf descriptor sets (for GPU culling path)
         systems.treeRenderer()->updateCulledLeafDescriptorSet(
-            frame.frameIndex,
+            ctx.frameIndex,
             leafType,
-            systems.globalBuffers().uniformBuffers.buffers[frame.frameIndex],
-            windInfo.buffer,
-            systems.shadow().getShadowImageView(),
-            systems.shadow().getShadowSampler(),
+            systems.globalBuffers().uniformBuffers.buffers[ctx.frameIndex],
+            windBuffer,
+            shadowView,
+            shadowSampler,
             leafTex->getImageView(),
             leafTex->getSampler(),
-            systems.globalBuffers().snowBuffers.buffers[frame.frameIndex]);
+            systems.globalBuffers().snowBuffers.buffers[ctx.frameIndex]);
     }
 
     // Update instanced shadow descriptor sets with UBO for cascadeViewProj matrices
     systems.treeRenderer()->updateInstancedShadowDescriptorSets(
-        frame.frameIndex,
-        systems.globalBuffers().uniformBuffers.buffers[frame.frameIndex]);
+        ctx.frameIndex,
+        systems.globalBuffers().uniformBuffers.buffers[ctx.frameIndex]);
 
     systems.profiler().endCpuZone("Update:TreeDesc");
 }

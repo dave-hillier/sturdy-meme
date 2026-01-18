@@ -32,6 +32,7 @@
 #include "GuiIKTab.h"
 #include "GuiPlayerTab.h"
 #include "GuiTreeTab.h"
+#include "GuiGrassTab.h"
 #include "GuiSceneGraphTab.h"
 
 #include "terrain/TerrainSystem.h"
@@ -317,6 +318,9 @@ void GuiSystem::render(GuiInterfaces& ui, const Camera& camera, float deltaTime,
     if (windowStates.showTrees) {
         renderTreesWindow(ui);
     }
+    if (windowStates.showGrass) {
+        renderGrassWindow(ui);
+    }
     if (windowStates.showPlayer) {
         renderPlayerWindow(ui);
     }
@@ -381,6 +385,7 @@ void GuiSystem::renderMainMenuBar() {
             ImGui::MenuItem("Terrain", nullptr, &windowStates.showTerrain);
             ImGui::MenuItem("Water", nullptr, &windowStates.showWater);
             ImGui::MenuItem("Trees", nullptr, &windowStates.showTrees);
+            ImGui::MenuItem("Grass", nullptr, &windowStates.showGrass);
             ImGui::EndMenu();
         }
 
@@ -652,6 +657,16 @@ void GuiSystem::renderTreesWindow(GuiInterfaces& ui) {
 
     if (ImGui::Begin("Trees", &windowStates.showTrees)) {
         GuiTreeTab::render(ui.tree);
+    }
+    ImGui::End();
+}
+
+void GuiSystem::renderGrassWindow(GuiInterfaces& ui) {
+    ImGui::SetNextWindowPos(ImVec2(320, 260), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(320, 450), ImGuiCond_FirstUseEver);
+
+    if (ImGui::Begin("Grass", &windowStates.showGrass)) {
+        GuiGrassTab::render(ui.grass);
     }
     ImGui::End();
 }

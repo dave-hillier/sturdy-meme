@@ -13,6 +13,7 @@
 #include "ShadowSystem.h"
 #include "TerrainSystem.h"
 #include "GrassSystem.h"
+#include "DisplacementSystem.h"
 #include "WeatherSystem.h"
 #include "SnowMaskSystem.h"
 #include "VolumetricSnowSystem.h"
@@ -254,6 +255,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         if (!vegBundle) return false;
 
         systems_->setWind(std::move(vegBundle->wind));
+        systems_->setDisplacement(std::move(vegBundle->displacement));
         systems_->setGrass(std::move(vegBundle->grass));
         systems_->setRock(std::move(vegBundle->rock));
         systems_->setTree(std::move(vegBundle->tree));

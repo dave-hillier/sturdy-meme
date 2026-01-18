@@ -1,6 +1,7 @@
 // VegetationSystemGroup.cpp - Self-initialization for vegetation systems
 
 #include "VegetationSystemGroup.h"
+#include "DisplacementSystem.h"
 #include "GrassSystem.h"
 #include "WindSystem.h"
 #include "RockSystem.h"
@@ -26,6 +27,19 @@ std::optional<VegetationSystemGroup::Bundle> VegetationSystemGroup::createAll(
         }
         bundle.grass = std::move(grassBundle->grass);
         bundle.wind = std::move(grassBundle->wind);
+    }
+
+    // 1b. Create DisplacementSystem
+    {
+        bundle.displacement = DisplacementSystem::create(ctx);
+        if (!bundle.displacement) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "VegetationSystemGroup: Failed to create DisplacementSystem");
+            return std::nullopt;
+        }
+        // Wire environment settings from wind to displacement
+        bundle.displacement->setEnvironmentSettings(&bundle.wind->getEnvironmentSettings());
+        // Wire displacement system to grass
+        bundle.grass->setDisplacementSystem(bundle.displacement.get());
     }
 
     // 2. Create RockSystem with rock placement config

@@ -17,7 +17,6 @@
 #include "VmaResources.h"
 #include <vulkan/vulkan_raii.hpp>
 #include "interfaces/IPostProcessState.h"
-#include "interfaces/IRenderTargetProvider.h"
 
 // Forward declarations
 class BloomSystem;
@@ -47,7 +46,7 @@ struct ExposureData {
     float adaptedExposure;
 };
 
-class PostProcessSystem : public IPostProcessState, public IRenderTargetProvider {
+class PostProcessSystem : public IPostProcessState {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -102,12 +101,12 @@ public:
 
     void resize(VkExtent2D newExtent);
 
-    // IRenderTargetProvider interface
-    vk::ImageView getHDRColorView() const override { return vk::ImageView(hdrColorView); }
-    vk::ImageView getHDRDepthView() const override { return vk::ImageView(hdrDepthView); }
-    vk::RenderPass getHDRRenderPass() const override { return vk::RenderPass(hdrRenderPass); }
-    vk::Framebuffer getHDRFramebuffer() const override { return vk::Framebuffer(hdrFramebuffer); }
-    vk::Extent2D getRenderExtent() const override { return vk::Extent2D(extent.width, extent.height); }
+    // Render target accessors (vulkan-hpp)
+    vk::ImageView getHDRColorView() const { return vk::ImageView(hdrColorView); }
+    vk::ImageView getHDRDepthView() const { return vk::ImageView(hdrDepthView); }
+    vk::RenderPass getHDRRenderPass() const { return vk::RenderPass(hdrRenderPass); }
+    vk::Framebuffer getHDRFramebuffer() const { return vk::Framebuffer(hdrFramebuffer); }
+    vk::Extent2D getRenderExtent() const { return vk::Extent2D{}.setWidth(extent.width).setHeight(extent.height); }
 
     // Legacy raw handle accessors (for existing code)
     VkExtent2D getExtent() const { return extent; }

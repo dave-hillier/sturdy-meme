@@ -12,6 +12,7 @@
 // Forward declarations
 class GrassSystem;
 class WindSystem;
+class DisplacementSystem;
 class TreeSystem;
 class TreeRenderer;
 class TreeLODSystem;
@@ -50,6 +51,7 @@ struct VegetationSystemGroup {
     // Non-owning references to systems (owned by RendererSystems)
     SYSTEM_MEMBER(GrassSystem, grass);
     SYSTEM_MEMBER(WindSystem, wind);
+    SYSTEM_MEMBER(DisplacementSystem, displacement);
     SYSTEM_MEMBER(TreeSystem, tree);
     SYSTEM_MEMBER(TreeRenderer, treeRenderer);
     SYSTEM_MEMBER(TreeLODSystem, treeLOD);
@@ -60,6 +62,7 @@ struct VegetationSystemGroup {
     // Required system accessors
     REQUIRED_SYSTEM_ACCESSORS(GrassSystem, grass)
     REQUIRED_SYSTEM_ACCESSORS(WindSystem, wind)
+    REQUIRED_SYSTEM_ACCESSORS(DisplacementSystem, displacement)
     REQUIRED_SYSTEM_ACCESSORS(RockSystem, rock)
 
     // Optional system accessors (may be null)
@@ -71,7 +74,7 @@ struct VegetationSystemGroup {
 
     // Validation (only required systems)
     bool isValid() const {
-        return grass_ && wind_ && rock_;
+        return grass_ && wind_ && displacement_ && rock_;
     }
 
     // ========================================================================
@@ -84,6 +87,7 @@ struct VegetationSystemGroup {
     struct Bundle {
         std::unique_ptr<GrassSystem> grass;
         std::unique_ptr<WindSystem> wind;
+        std::unique_ptr<DisplacementSystem> displacement;
         std::unique_ptr<RockSystem> rock;
         std::unique_ptr<TreeSystem> tree;
         std::unique_ptr<TreeRenderer> treeRenderer;

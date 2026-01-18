@@ -11,7 +11,6 @@
 #include "interfaces/ITerrainControl.h"
 #include "interfaces/IRecordable.h"
 #include "interfaces/IShadowCaster.h"
-#include "interfaces/IHeightProvider.h"
 #include "UBOs.h"
 #include "TerrainTextures.h"
 #include "TerrainCBT.h"
@@ -135,7 +134,7 @@ struct TerrainConfig {
     bool useVirtualTexture = false;     // Enable virtual texturing for terrain
 };
 
-class TerrainSystem : public ITerrainControl, public IRecordable, public IShadowCaster, public ITiledHeightProvider {
+class TerrainSystem : public ITerrainControl, public IRecordable, public IShadowCaster {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -261,12 +260,12 @@ public:
     // Get terrain height at world position (CPU-side, for collision)
     float getHeightAt(float x, float z) const;
 
-    // IHeightProvider interface - Get raw heightmap data for flow map generation and other CPU-side uses
+    // Get raw heightmap data for flow map generation and other CPU-side uses
     // Uses tile cache base heightmap (combined from LOD3 tiles)
-    const float* getHeightMapData() const override {
+    const float* getHeightMapData() const {
         return tileCache ? tileCache->getBaseHeightMapData().data() : nullptr;
     }
-    uint32_t getHeightMapResolution() const override {
+    uint32_t getHeightMapResolution() const {
         return tileCache ? tileCache->getBaseHeightMapResolution() : 0;
     }
 
@@ -290,12 +289,12 @@ public:
     const TerrainConfig& getConfig() const { return config; }
     void setConfig(const TerrainConfig& newConfig) { config = newConfig; }
 
-    // IHeightProvider interface - Heightmap accessors for grass integration and water rendering
+    // Heightmap accessors for grass integration and water rendering
     // Uses tile cache base heightmap (combined from LOD3 tiles)
-    vk::ImageView getHeightMapView() const override {
+    vk::ImageView getHeightMapView() const {
         return tileCache ? vk::ImageView(tileCache->getBaseHeightMapView()) : vk::ImageView{};
     }
-    vk::Sampler getHeightMapSampler() const override {
+    vk::Sampler getHeightMapSampler() const {
         return tileCache ? vk::Sampler(tileCache->getBaseHeightMapSampler()) : vk::Sampler{};
     }
 
@@ -313,14 +312,14 @@ public:
     TerrainTileCache* getTileCache() { return tileCache.get(); }
     const TerrainTileCache* getTileCache() const { return tileCache.get(); }
 
-    // ITiledHeightProvider interface - Tile cache GPU resource accessors (for grass/other systems)
-    vk::ImageView getTileArrayView() const override {
+    // Tile cache GPU resource accessors (for grass/other systems)
+    vk::ImageView getTileArrayView() const {
         return tileCache ? vk::ImageView(tileCache->getTileArrayView()) : vk::ImageView{};
     }
-    vk::Sampler getTileSampler() const override {
+    vk::Sampler getTileSampler() const {
         return tileCache ? vk::Sampler(tileCache->getSampler()) : vk::Sampler{};
     }
-    vk::Buffer getTileInfoBuffer(uint32_t frameIndex) const override {
+    vk::Buffer getTileInfoBuffer(uint32_t frameIndex) const {
         return tileCache ? vk::Buffer(tileCache->getTileInfoBuffer(frameIndex)) : vk::Buffer{};
     }
 

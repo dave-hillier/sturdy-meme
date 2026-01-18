@@ -10,6 +10,7 @@ class ICloudShadowControl;
 class ITerrainControl;
 class IWaterControl;
 class ITreeControl;
+class IGrassControl;
 class IDebugControl;
 class IProfilerControl;
 class IPerformanceControl;
@@ -35,6 +36,7 @@ struct GuiInterfaces {
     ITerrainControl& terrain;
     IWaterControl& water;
     ITreeControl& tree;
+    IGrassControl& grass;
     IDebugControl& debug;
     IProfilerControl& profiler;
     IPerformanceControl& performance;

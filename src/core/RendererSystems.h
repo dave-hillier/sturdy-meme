@@ -17,6 +17,7 @@
 class EnvironmentControlSubsystem;
 class WaterControlSubsystem;
 class TreeControlSubsystem;
+class GrassControlAdapter;
 class DebugControlSubsystem;
 class PerformanceControlSubsystem;
 class SceneControlSubsystem;
@@ -31,6 +32,7 @@ class ICloudShadowControl;
 class ITerrainControl;
 class IWaterControl;
 class ITreeControl;
+class IGrassControl;
 class IDebugControl;
 class IProfilerControl;
 class IPerformanceControl;
@@ -44,6 +46,7 @@ struct PerformanceToggles;
 class SkySystem;
 class GrassSystem;
 class WindSystem;
+class DisplacementSystem;
 class WeatherSystem;
 class LeafSystem;
 class PostProcessSystem;
@@ -180,6 +183,9 @@ public:
     WindSystem& wind() { return *windSystem_; }
     const WindSystem& wind() const { return *windSystem_; }
     void setWind(std::unique_ptr<WindSystem> system);
+    DisplacementSystem& displacement() { return *displacementSystem_; }
+    const DisplacementSystem& displacement() const { return *displacementSystem_; }
+    void setDisplacement(std::unique_ptr<DisplacementSystem> system);
     WeatherSystem& weather() { return *weatherSystem_; }
     const WeatherSystem& weather() const { return *weatherSystem_; }
     void setWeather(std::unique_ptr<WeatherSystem> system);
@@ -312,13 +318,14 @@ public:
     }
 
     /**
-     * Get the vegetation system group (grass, wind, trees, rocks, detritus)
+     * Get the vegetation system group (grass, wind, displacement, trees, rocks, detritus)
      * Returns a lightweight struct with non-owning references to the systems.
      */
     VegetationSystemGroup vegetation() {
         return VegetationSystemGroup{
             grassSystem_.get(),
             windSystem_.get(),
+            displacementSystem_.get(),
             treeSystem_.get(),
             treeRenderer_.get(),
             treeLODSystem_.get(),
@@ -400,6 +407,8 @@ public:
     const IWaterControl& waterControl() const;
     ITreeControl& treeControl();
     const ITreeControl& treeControl() const;
+    IGrassControl& grassControl();
+    const IGrassControl& grassControl() const;
     IDebugControl& debugControl();
     const IDebugControl& debugControl() const;
     // Direct access for internal callers that need concrete type
@@ -434,6 +443,7 @@ private:
     // Tier 2 - Environment
     std::unique_ptr<GrassSystem> grassSystem_;
     std::unique_ptr<WindSystem> windSystem_;
+    std::unique_ptr<DisplacementSystem> displacementSystem_;
     std::unique_ptr<WeatherSystem> weatherSystem_;
     std::unique_ptr<LeafSystem> leafSystem_;
 
@@ -498,6 +508,7 @@ private:
     std::unique_ptr<EnvironmentControlSubsystem> environmentControl_;
     std::unique_ptr<WaterControlSubsystem> waterControl_;
     std::unique_ptr<TreeControlSubsystem> treeControl_;
+    std::unique_ptr<GrassControlAdapter> grassControl_;
     std::unique_ptr<DebugControlSubsystem> debugControl_;
     std::unique_ptr<PerformanceControlSubsystem> performanceControl_;
     std::unique_ptr<SceneControlSubsystem> sceneControl_;
