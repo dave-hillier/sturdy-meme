@@ -109,7 +109,11 @@ class PhysicsDebugRenderer;
  */
 class RendererSystems {
 public:
-    RendererSystems();
+    /**
+     * Construct with injected VulkanServices.
+     * VulkanServices must outlive RendererSystems.
+     */
+    explicit RendererSystems(VulkanServices& services);
     ~RendererSystems();
 
     // Non-copyable, non-movable (owns complex GPU resources)
@@ -119,23 +123,15 @@ public:
     RendererSystems& operator=(RendererSystems&&) = delete;
 
     /**
-     * Inject VulkanServices for dependency injection.
-     * Must be called before subsystem initialization.
-     * RendererSystems does not own the VulkanServices - caller maintains ownership.
-     */
-    void setVulkanServices(VulkanServices* services) { vulkanServices_ = services; }
-
-    /**
      * Get the injected VulkanServices.
-     * Returns nullptr if not yet injected.
      */
-    VulkanServices* getVulkanServices() { return vulkanServices_; }
-    const VulkanServices* getVulkanServices() const { return vulkanServices_; }
+    VulkanServices& getVulkanServices() { return vulkanServices_; }
+    const VulkanServices& getVulkanServices() const { return vulkanServices_; }
 
     /**
      * Destroy all subsystems in reverse dependency order
      */
-    void destroy(VkDevice device, VmaAllocator allocator);
+    void destroy();
 
     /**
      * Get tier-1 core resources for dependent system initialization
@@ -516,8 +512,8 @@ private:
     std::unique_ptr<SceneControlSubsystem> sceneControl_;
     std::unique_ptr<PlayerControlSubsystem> playerControl_;
 
-    // Injected VulkanServices (not owned)
-    VulkanServices* vulkanServices_ = nullptr;
+    // Injected VulkanServices (reference, not owned)
+    VulkanServices& vulkanServices_;
 
     bool initialized_ = false;
     bool controlsInitialized_ = false;

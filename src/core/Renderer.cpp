@@ -97,9 +97,6 @@ bool Renderer::initInternal(const InitInfo& info) {
     resourcePath = info.resourcePath;
     config_ = info.config;
 
-    // Create subsystems container
-    systems_ = std::make_unique<RendererSystems>();
-
     // Initialize Vulkan context
     // If a pre-initialized context was provided (instance or device already created),
     // take ownership and complete any remaining initialization.
@@ -155,8 +152,8 @@ bool Renderer::initInternal(const InitInfo& info) {
         resourcePath
     );
 
-    // Inject VulkanServices into RendererSystems
-    systems_->setVulkanServices(vulkanServices_.get());
+    // Create subsystems container with injected VulkanServices
+    systems_ = std::make_unique<RendererSystems>(*vulkanServices_);
 
     // Phase 3: All subsystems (terrain, grass, weather, snow, water, etc.)
     {
@@ -290,7 +287,7 @@ void Renderer::cleanup() {
 
         // Destroy all subsystems via RendererSystems
         if (systems_) {
-            systems_->destroy(device, allocator);
+            systems_->destroy();
             systems_.reset();
         }
 

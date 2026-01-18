@@ -72,52 +72,13 @@
 
 #include <SDL3/SDL_log.h>
 
-RendererSystems::RendererSystems()
-    // Tier 1
-    // postProcessSystem_ created via factory in RendererInitPhases
-    // bloomSystem_ created via factory in RendererInitPhases
-    // shadowSystem_ created via factory in RendererInitPhases
-    // terrainSystem_ created via factory in RendererInitPhases
-    // Tier 2 - Sky/Atmosphere
-    // skySystem_ created via factory in RendererInitPhases
-    // atmosphereLUTSystem_ created via factory in RendererInitPhases
-    // froxelSystem_ created via factory in RendererInitPhases
-    // cloudShadowSystem_ created via factory in RendererInitPhases
-    // Tier 2 - Environment
-    // grassSystem_ created via factory in RendererInitPhases
-    // windSystem_ created via factory in RendererInitPhases
-    // weatherSystem_ created via factory in RendererInitPhases
-    // leafSystem_ created via factory in RendererInitPhases
-    // Tier 2 - Snow
-    // snowMaskSystem_ created via factory in RendererInitPhases
-    // volumetricSnowSystem_ created via factory in RendererInitPhases
-    // Tier 2 - Water
-    // waterSystem_ created via factory in RendererInitPhases
-    // waterDisplacement_ created via factory in RendererInitPhases
-    // flowMapGenerator_ created via factory in RendererInitPhases
-    // foamBuffer_ created via factory in RendererInitPhases
-    // ssrSystem_ created via factory in RendererInit
-    // waterTileCull_ created via factory in RendererInitPhases
-    // waterGBuffer_ created via factory in RendererInitPhases
-    // Tier 2 - Geometry
-    // catmullClarkSystem_ created via factory in RendererInitPhases
-    // rocksSystem_ created via factory in RendererInitPhases
-    // Tier 2 - Culling
-    // hiZSystem_ created via factory in RendererInit
-    // Infrastructure
-    // sceneManager_ created via factory in RendererInitPhases
-    // globalBufferManager_ created via factory in RendererInitPhases
-    : erosionDataLoader_(std::make_unique<ErosionDataLoader>())
+RendererSystems::RendererSystems(VulkanServices& services)
+    : vulkanServices_(services)
+    , erosionDataLoader_(std::make_unique<ErosionDataLoader>())
     , roadNetworkLoader_(std::make_unique<RoadNetworkLoader>())
     , roadRiverVisualization_(std::make_unique<RoadRiverVisualization>())
-    // skinnedMeshRenderer_ created via factory in RendererInitPhases
-    // Tools
-    // debugLineSystem_ created via factory in RendererInit
-    // profiler_ created via Profiler::create() factory in RendererInitPhases
-    // Coordination
     , resizeCoordinator_(std::make_unique<ResizeCoordinator>())
     , uboBuilder_(std::make_unique<UBOBuilder>())
-    // Time
     , timeSystem_(std::make_unique<TimeSystem>())
     , celestialCalculator_(std::make_unique<CelestialCalculator>())
     , environmentSettings_(std::make_unique<EnvironmentSettings>())
@@ -289,9 +250,8 @@ void RendererSystems::setSkinnedMesh(std::unique_ptr<SkinnedMeshRenderer> system
     skinnedMeshRenderer_ = std::move(system);
 }
 
-void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
-    // Note: initialized_ flag is not used since initialization is done
-    // via RendererInitPhases.cpp, not RendererSystems::init()
+void RendererSystems::destroy() {
+    // Note: Can access device/allocator via vulkanServices_ if needed
     SDL_Log("RendererSystems::destroy starting");
 
     // Destroy in reverse dependency order
