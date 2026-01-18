@@ -723,7 +723,8 @@ void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameInd
 
     // Dispatch tiles around camera for coarse-grain culling
     // Tiles provide frustum culling, while continuous stochastic culling handles density
-    constexpr int TILES_PER_AXIS = 3;  // 3x3 grid of tiles around camera
+    // 5x5 grid = 25 tiles, each ~28.8m = ~144m total coverage (exceeds 100m cull distance)
+    constexpr int TILES_PER_AXIS = 5;
     float tileSize = GrassConstants::TILE_SIZE;
 
     // Calculate center tile based on camera position
