@@ -227,7 +227,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         INIT_PROFILE_PHASE("VegetationSystems");
 
         // Rock placement configuration
-        RockConfig rockConfig{};
+        ScatterSystemFactory::RockConfig rockConfig{};
         rockConfig.rockVariations = 6;
         rockConfig.rocksPerVariation = 10;
         rockConfig.minRadius = 0.4f;
