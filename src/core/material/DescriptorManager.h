@@ -1,5 +1,6 @@
 #pragma once
 
+#include "IDescriptorAllocator.h"
 #include <vulkan/vulkan.hpp>
 #include <vector>
 #include <unordered_map>
@@ -122,7 +123,7 @@ public:
     };
 
     // Pool that automatically grows when exhausted
-    class Pool {
+    class Pool : public IDescriptorAllocator {
     public:
         // Backwards-compatible constructor (uses standard defaults)
         Pool(VkDevice device, uint32_t initialSetsPerPool = 32);
@@ -139,13 +140,13 @@ public:
         Pool& operator=(Pool&& other) noexcept;
 
         // Allocate descriptor sets (grows pool if needed)
-        std::vector<VkDescriptorSet> allocate(VkDescriptorSetLayout layout, uint32_t count);
+        std::vector<VkDescriptorSet> allocate(VkDescriptorSetLayout layout, uint32_t count) override;
 
         // Allocate a single set
-        VkDescriptorSet allocateSingle(VkDescriptorSetLayout layout);
+        VkDescriptorSet allocateSingle(VkDescriptorSetLayout layout) override;
 
         // Reset all pools (frees all allocated sets)
-        void reset();
+        void reset() override;
 
         // Destroy all pools
         void destroy();

@@ -1,5 +1,5 @@
 #include "MaterialRegistry.h"
-#include "DescriptorManager.h"
+#include "IDescriptorAllocator.h"
 #include "Texture.h"
 #include <SDL3/SDL_log.h>
 
@@ -46,7 +46,7 @@ const MaterialRegistry::MaterialDef* MaterialRegistry::getMaterial(MaterialId id
 
 void MaterialRegistry::createDescriptorSets(
     VkDevice device,
-    DescriptorManager::Pool& pool,
+    IDescriptorAllocator& allocator,
     VkDescriptorSetLayout layout,
     uint32_t frames,
     const std::function<MaterialDescriptorFactory::CommonBindings(uint32_t frameIndex)>& getCommonBindings) {
@@ -60,7 +60,7 @@ void MaterialRegistry::createDescriptorSets(
         const auto& mat = materials[id];
 
         // Allocate descriptor sets for all frames
-        descriptorSets[id] = pool.allocate(layout, framesInFlight);
+        descriptorSets[id] = allocator.allocate(layout, framesInFlight);
         if (descriptorSets[id].empty()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                 "MaterialRegistry: Failed to allocate descriptor sets for '%s'", mat.name.c_str());

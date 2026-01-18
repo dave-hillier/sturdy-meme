@@ -7,7 +7,7 @@
 #include <functional>
 #include "MaterialDescriptorFactory.h"
 
-class DescriptorManager;
+class IDescriptorAllocator;
 class Texture;
 
 /**
@@ -63,7 +63,7 @@ public:
     // Must be called after all materials are registered and resources are ready
     void createDescriptorSets(
         VkDevice device,
-        DescriptorManager::Pool& pool,
+        IDescriptorAllocator& allocator,
         VkDescriptorSetLayout layout,
         uint32_t framesInFlight,
         const std::function<MaterialDescriptorFactory::CommonBindings(uint32_t frameIndex)>& getCommonBindings);

@@ -9,6 +9,7 @@
 
 class VulkanContext;
 class PostProcessSystem;
+class IDescriptorAllocator;
 
 /**
  * DescriptorInfrastructure - Owns descriptor layouts, pools, and graphics pipeline
@@ -86,6 +87,11 @@ public:
     }
 
     const DescriptorManager::Pool* getDescriptorPool() const {
+        return descriptorManagerPool_.has_value() ? &*descriptorManagerPool_ : nullptr;
+    }
+
+    // Get allocator via interface (for reduced coupling)
+    IDescriptorAllocator* getDescriptorAllocator() {
         return descriptorManagerPool_.has_value() ? &*descriptorManagerPool_ : nullptr;
     }
 
