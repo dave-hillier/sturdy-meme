@@ -58,6 +58,7 @@
 #include "WindSystem.h"
 #include "SystemWiring.h"
 #include "TerrainFactory.h"
+#include "di/VulkanServices.h"
 #include "threading/TaskScheduler.h"
 #include <SDL3/SDL.h>
 
@@ -93,17 +94,20 @@ bool Renderer::initDescriptorInfrastructure() {
     return true;
 }
 
-bool Renderer::initSubsystems(const InitContext& initCtx) {
-    VkDevice device = vulkanContext_->getVkDevice();
-    VmaAllocator allocator = vulkanContext_->getAllocator();
-    VkPhysicalDevice physicalDevice = vulkanContext_->getVkPhysicalDevice();
-    VkQueue graphicsQueue = vulkanContext_->getVkGraphicsQueue();
+bool Renderer::initSubsystems(const VulkanServices& services) {
+    VkDevice device = services.device();
+    VmaAllocator allocator = services.allocator();
+    VkPhysicalDevice physicalDevice = services.physicalDevice();
+    VkQueue graphicsQueue = services.graphicsQueue();
     VkFormat swapchainImageFormat = static_cast<VkFormat>(vulkanContext_->getVkSwapchainImageFormat());
+
+    // For systems not yet migrated to VulkanServices
+    InitContext initCtx = services.toInitContext();
 
     // Initialize post-processing systems (PostProcessSystem, BloomSystem, BilateralGridSystem)
     {
         INIT_PROFILE_PHASE("PostProcessing");
-        auto bundle = PostProcessSystem::createWithDependencies(initCtx, vulkanContext_->getRenderPass(), swapchainImageFormat);
+        auto bundle = PostProcessSystem::createWithDependencies(services, vulkanContext_->getRenderPass(), swapchainImageFormat);
         if (!bundle) {
             return false;
         }
@@ -209,7 +213,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
     // Create all snow and weather systems using SnowSystemGroup factory
     {
-        SnowSystemGroup::CreateDeps snowDeps{initCtx, core.hdr.renderPass};
+        SnowSystemGroup::CreateDepsDI snowDeps{services, core.hdr.renderPass};
         auto snowBundle = SnowSystemGroup::createAll(snowDeps);
         if (!snowBundle) return false;
 
@@ -377,8 +381,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Uses self-initializing AtmosphereSystemGroup to invert dependencies
     {
         INIT_PROFILE_PHASE("AtmosphereSubsystems");
-        AtmosphereSystemGroup::CreateDeps atmosDeps{
-            initCtx,
+        AtmosphereSystemGroup::CreateDepsDI atmosDeps{
+            services,
             core.hdr.renderPass,
             core.shadow.cascadeView,
             core.shadow.sampler,
@@ -445,8 +449,8 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Create all water systems using WaterSystemGroup factory
     {
         INIT_PROFILE_PHASE("WaterSystems");
-        WaterSystemGroup::CreateDeps waterDeps{
-            initCtx,
+        WaterSystemGroup::CreateDepsDI waterDeps{
+            services,
             core.hdr.renderPass,
             65536.0f,  // waterSize - extend well beyond terrain for horizon
             resourcePath

@@ -148,16 +148,17 @@ bool Renderer::initInternal(const InitInfo& info) {
         if (!initDescriptorInfrastructure()) return false;
     }
 
-    // Build shared InitContext for subsystem initialization
-    // Pass pool sizes hint so subsystems can create consistent pools if needed
-    InitContext initCtx = InitContext::build(
-        *vulkanContext_, vulkanContext_->getCommandPool(), descriptorInfra_.getDescriptorPool(),
-        resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes);
+    // Create VulkanServices for dependency injection
+    vulkanServices_ = std::make_unique<VulkanServices>(
+        *vulkanContext_,
+        descriptorInfra_.getDescriptorPool(),
+        resourcePath
+    );
 
     // Phase 3: All subsystems (terrain, grass, weather, snow, water, etc.)
     {
         INIT_PROFILE_PHASE("Subsystems");
-        if (!initSubsystems(initCtx)) return false;
+        if (!initSubsystems(*vulkanServices_)) return false;
     }
 
     // Phase 4: Control subsystems (after systems are ready)
@@ -246,10 +247,7 @@ void Renderer::updatePhysicsDebug(PhysicsWorld& physics, const glm::vec3& camera
 
     // Create debug renderer on first use (after Jolt is initialized)
     if (!systems_->physicsDebugRenderer()) {
-        InitContext initCtx = InitContext::build(
-            *vulkanContext_, vulkanContext_->getCommandPool(), descriptorInfra_.getDescriptorPool(),
-            resourcePath, MAX_FRAMES_IN_FLIGHT);
-        systems_->createPhysicsDebugRenderer(initCtx, systems_->postProcess().getHDRRenderPass());
+        systems_->createPhysicsDebugRenderer(vulkanServices_->toInitContext(), systems_->postProcess().getHDRRenderPass());
     }
 
     auto* debugRenderer = systems_->physicsDebugRenderer();

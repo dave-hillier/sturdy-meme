@@ -17,6 +17,7 @@
 #include "RendererCore.h"
 #include "RenderingInfrastructure.h"
 #include "DescriptorInfrastructure.h"
+#include "di/VulkanServices.h"
 #include "passes/ShadowPassRecorder.h"
 #include "passes/HDRPassRecorder.h"
 
@@ -168,7 +169,7 @@ private:
     // High-level initialization phases
     bool initCoreVulkanResources();       // swapchain resources, command pool, threading
     bool initDescriptorInfrastructure();  // layouts, pools, sets
-    bool initSubsystems(const InitContext& initCtx);  // terrain, grass, weather, snow, water, etc.
+    bool initSubsystems(const VulkanServices& services);  // terrain, grass, weather, snow, water, etc.
     void initResizeCoordinator();         // resize registration
 
     bool createSyncObjects();
@@ -188,6 +189,9 @@ private:
     Config config_;  // Renderer configuration
 
     std::unique_ptr<VulkanContext> vulkanContext_;
+
+    // Consolidated Vulkan services for dependency injection
+    std::unique_ptr<VulkanServices> vulkanServices_;
 
     // All rendering subsystems - managed with automatic lifecycle
     std::unique_ptr<RendererSystems> systems_;
