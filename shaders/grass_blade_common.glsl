@@ -87,33 +87,40 @@ float grassPerlinNoise(float x, float y) {
     return (res + 1.0) * 0.5;
 }
 
-// Sample wind using scrolling Perlin noise
-// Multi-octave: 0.7*sin(x/10) + 0.2*sin(x/5) + 0.1*sin(x/2.5)
+// Sample wind creating rolling wave effect
+// Uses sinusoidal waves as the primary pattern for clear visible wave motion
 // windDir: xy = normalized direction
 // windStrength: wind strength
-// windSpeed: wind speed
+// windSpeed: wind speed (controls wave travel speed)
 // windTime: time for animation
 // gustFreq: gust frequency
 // gustAmp: gust amplitude
 float grassSampleWind(vec2 worldPos, vec2 windDir, float windStrength, float windSpeed,
                       float windTime, float gustFreq, float gustAmp) {
-    // Scroll position in wind direction
-    vec2 scrolledPos = worldPos - windDir * windTime * windSpeed * 0.4;
+    // Project position onto wind direction - waves travel along this axis
+    float alongWind = dot(worldPos, windDir);
 
-    // Three octaves: ~10m, ~5m, ~2.5m wavelengths using unified constants
-    float n1 = grassPerlinNoise(scrolledPos.x * GRASS_WIND_BASE_FREQ, scrolledPos.y * GRASS_WIND_BASE_FREQ);
-    float n2 = grassPerlinNoise(scrolledPos.x * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE2_MULT,
-                                 scrolledPos.y * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE2_MULT);
-    float n3 = grassPerlinNoise(scrolledPos.x * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE3_MULT,
-                                 scrolledPos.y * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE3_MULT);
+    // Position-based noise for organic variation
+    // Phase noise warps wave fronts, amplitude noise varies intensity by area
+    float phaseNoise = grassPerlinNoise(worldPos.x * 0.1, worldPos.y * 0.1) * 2.0;
+    float ampNoise = grassPerlinNoise(worldPos.x * 0.05 + 100.0, worldPos.y * 0.05) * 0.5 + 0.75; // 0.5-1.25 range
 
-    // Weighted sum dominated by first octave using unified constants
-    float noise = n1 * GRASS_WIND_OCTAVE1_WEIGHT + n2 * GRASS_WIND_OCTAVE2_WEIGHT + n3 * GRASS_WIND_OCTAVE3_WEIGHT;
+    // Primary rolling wave with noise-modulated phase
+    float primaryPhase = alongWind * 0.8 + phaseNoise;
+    float primaryWave = sin(primaryPhase - windTime * windSpeed * 0.5);
 
-    // Add time-varying gust
+    // Secondary wave at different frequency
+    float secondaryPhase = alongWind * 1.3 + phaseNoise * 0.7;
+    float secondaryWave = sin(secondaryPhase - windTime * windSpeed * 0.7) * 0.4;
+
+    // Combine waves, normalize to 0-1, apply position-based amplitude
+    float wavePattern = (primaryWave + secondaryWave) * 0.5 + 0.5;
+    wavePattern *= ampNoise;
+
+    // Time-varying gust affects overall intensity
     float gust = (sin(windTime * gustFreq * GRASS_TWO_PI) * 0.5 + 0.5) * gustAmp;
 
-    return (noise + gust) * windStrength;
+    return (wavePattern + gust) * windStrength;
 }
 
 // Quadratic Bezier evaluation
