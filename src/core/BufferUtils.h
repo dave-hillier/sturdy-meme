@@ -188,6 +188,80 @@ private:
     VmaAllocator allocator_ = VK_NULL_HANDLE;
 };
 
+// =============================================================================
+// FrameIndexedDescriptorSets - Type-safe per-frame descriptor set management
+// =============================================================================
+//
+// Similar to FrameIndexedBuffers, this enforces correct frame-indexed access
+// for descriptor sets. Descriptor sets are NOT owned by this class - they are
+// allocated from a DescriptorManager::Pool and managed there.
+//
+// Usage:
+//   FrameIndexedDescriptorSets sets;
+//   sets.resize(pool->allocate(layout, frameCount));  // allocate from pool
+//
+//   // In recordCompute(frameIndex):
+//   VkDescriptorSet set = sets.get(frameIndex);
+//
+//   // In recordDraw(frameIndex):
+//   VkDescriptorSet set = sets.get(frameIndex);  // Same set - guaranteed!
+//
+class FrameIndexedDescriptorSets {
+public:
+    FrameIndexedDescriptorSets() = default;
+
+    // Populate from a vector of allocated descriptor sets
+    void resize(const std::vector<VkDescriptorSet>& sets) {
+        sets_ = sets;
+        frameCount_ = static_cast<uint32_t>(sets.size());
+    }
+
+    // Move semantics for initialization from rvalue
+    void resize(std::vector<VkDescriptorSet>&& sets) {
+        sets_ = std::move(sets);
+        frameCount_ = static_cast<uint32_t>(sets_.size());
+    }
+
+    // Get descriptor set for a specific frame (primary access method)
+    VkDescriptorSet get(uint32_t frameIndex) const {
+        if (sets_.empty()) return VK_NULL_HANDLE;
+        return sets_[frameIndex % frameCount_];
+    }
+
+    // Get vk::DescriptorSet for vulkan-hpp APIs
+    vk::DescriptorSet getVk(uint32_t frameIndex) const {
+        return vk::DescriptorSet(get(frameIndex));
+    }
+
+    // Set a specific descriptor set (for manual updates)
+    void set(uint32_t index, VkDescriptorSet descriptorSet) {
+        if (index < sets_.size()) {
+            sets_[index] = descriptorSet;
+        }
+    }
+
+    bool empty() const { return sets_.empty(); }
+    uint32_t size() const { return frameCount_; }
+
+    // For descriptor set initialization where you need direct access
+    VkDescriptorSet operator[](uint32_t index) const {
+        assert(index < frameCount_ && "Index out of bounds");
+        return sets_[index];
+    }
+
+    // Access underlying vector for bulk operations
+    const std::vector<VkDescriptorSet>& data() const { return sets_; }
+    std::vector<VkDescriptorSet>& data() { return sets_; }
+
+    // Direct iteration for bulk updates
+    auto begin() const { return sets_.begin(); }
+    auto end() const { return sets_.end(); }
+
+private:
+    std::vector<VkDescriptorSet> sets_;
+    uint32_t frameCount_ = 0;
+};
+
 // Single buffer for one-shot allocations (e.g., staging buffers, one-time uniform buffers)
 struct SingleBuffer {
     VkBuffer buffer = VK_NULL_HANDLE;
