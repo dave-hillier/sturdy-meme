@@ -113,6 +113,7 @@ set(SOURCES
     src/vegetation/DisplacementSystem.cpp
     src/vegetation/GrassSystem.cpp
     src/vegetation/GrassTile.cpp
+    src/vegetation/VegetationRenderContext.cpp
     src/vegetation/GrassTileManager.cpp
     src/vegetation/LeafSystem.cpp
     src/vegetation/RockSystem.cpp
