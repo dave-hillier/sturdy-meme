@@ -24,8 +24,8 @@
  * - Renderable generation for the rendering pipeline
  * - Material properties (roughness, metallic, shadow casting)
  *
- * This class uses composition rather than inheritance. Systems like RockSystem
- * and DetritusSystem own a SceneMaterial and delegate common operations to it.
+ * This class uses composition rather than inheritance. Systems like ScatterSystem
+ * own a SceneMaterial and delegate common operations to it.
  */
 class SceneMaterial {
 public:

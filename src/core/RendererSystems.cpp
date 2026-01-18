@@ -20,13 +20,12 @@
 #include "CatmullClarkSystem.h"
 #include "SnowMaskSystem.h"
 #include "VolumetricSnowSystem.h"
-#include "RockSystem.h"
+#include "ScatterSystem.h"
 #include "scene/SceneMaterial.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
-#include "DetritusSystem.h"
 #include "CloudShadowSystem.h"
 #include "HiZSystem.h"
 #include "WaterSystem.h"
@@ -102,7 +101,7 @@ RendererSystems::RendererSystems()
     // waterGBuffer_ created via factory in RendererInitPhases
     // Tier 2 - Geometry
     // catmullClarkSystem_ created via factory in RendererInitPhases
-    // rockSystem_ created via factory in RendererInitPhases
+    // rocksSystem_ created via factory in RendererInitPhases
     // Tier 2 - Culling
     // hiZSystem_ created via factory in RendererInit
     // Infrastructure
@@ -242,15 +241,15 @@ void RendererSystems::setCatmullClark(std::unique_ptr<CatmullClarkSystem> system
     catmullClarkSystem_ = std::move(system);
 }
 
-void RendererSystems::setRock(std::unique_ptr<RockSystem> system) {
+void RendererSystems::setRocks(std::unique_ptr<ScatterSystem> system) {
     // Unregister old material if exists
-    if (rockSystem_) {
-        sceneCollection_.unregisterMaterial(&rockSystem_->getMaterial());
+    if (rocksSystem_) {
+        sceneCollection_.unregisterMaterial(&rocksSystem_->getMaterial());
     }
-    rockSystem_ = std::move(system);
+    rocksSystem_ = std::move(system);
     // Register new material
-    if (rockSystem_) {
-        sceneCollection_.registerMaterial(&rockSystem_->getMaterial());
+    if (rocksSystem_) {
+        sceneCollection_.registerMaterial(&rocksSystem_->getMaterial());
     }
 }
 
@@ -270,7 +269,7 @@ void RendererSystems::setImpostorCull(std::unique_ptr<ImpostorCullSystem> system
     impostorCullSystem_ = std::move(system);
 }
 
-void RendererSystems::setDetritus(std::unique_ptr<DetritusSystem> system) {
+void RendererSystems::setDetritus(std::unique_ptr<ScatterSystem> system) {
     // Unregister old material if exists
     if (detritusSystem_) {
         sceneCollection_.unregisterMaterial(&detritusSystem_->getMaterial());
@@ -330,7 +329,7 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     // Geometry/Vegetation
     detritusSystem_.reset();  // RAII cleanup via destructor
     catmullClarkSystem_.reset();  // RAII cleanup via destructor
-    rockSystem_.reset();  // RAII cleanup via destructor
+    rocksSystem_.reset();  // RAII cleanup via destructor
     treeLODSystem_.reset();  // RAII cleanup via destructor
     impostorCullSystem_.reset();  // RAII cleanup via destructor
     treeRenderer_.reset();  // RAII cleanup via destructor

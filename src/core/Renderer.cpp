@@ -48,12 +48,11 @@
 #include "threading/TaskScheduler.h"
 // Vegetation
 #include "GrassSystem.h"
-#include "RockSystem.h"
+#include "ScatterSystem.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
-#include "DetritusSystem.h"
 #include "CullCommon.h"  // For extractFrustumPlanes
 // Water
 #include "WaterSystem.h"

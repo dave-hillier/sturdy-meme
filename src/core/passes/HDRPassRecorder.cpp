@@ -16,8 +16,7 @@
 #include "LeafSystem.h"
 #include "WeatherSystem.h"
 #include "DebugLineSystem.h"
-#include "RockSystem.h"
-#include "DetritusSystem.h"
+#include "ScatterSystem.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
@@ -320,15 +319,15 @@ void HDRPassRecorder::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameInde
         renderObject(obj, currentDescSet);
     }
 
-    // Render procedural rocks (RockSystem owns its own descriptor sets)
-    if (resources_.vegetation.rock().hasDescriptorSets()) {
-        VkDescriptorSet rockDescSet = resources_.vegetation.rock().getDescriptorSet(frameIndex);
-        for (const auto& rock : resources_.vegetation.rock().getSceneObjects()) {
+    // Render procedural rocks (ScatterSystem owns its own descriptor sets)
+    if (resources_.vegetation.rocks().hasDescriptorSets()) {
+        VkDescriptorSet rockDescSet = resources_.vegetation.rocks().getDescriptorSet(frameIndex);
+        for (const auto& rock : resources_.vegetation.rocks().getSceneObjects()) {
             renderObject(rock, rockDescSet);
         }
     }
 
-    // Render woodland detritus (DetritusSystem owns its own descriptor sets)
+    // Render woodland detritus (ScatterSystem owns its own descriptor sets)
     if (resources_.vegetation.hasDetritus() && resources_.vegetation.detritus()->hasDescriptorSets()) {
         VkDescriptorSet detritusDescSet = resources_.vegetation.detritus()->getDescriptorSet(frameIndex);
         for (const auto& detritus : resources_.vegetation.detritus()->getSceneObjects()) {

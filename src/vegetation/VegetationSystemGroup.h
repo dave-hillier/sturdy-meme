@@ -2,7 +2,7 @@
 
 #include "SystemGroupMacros.h"
 #include "InitContext.h"
-#include "RockSystem.h"  // For RockConfig
+#include "ScatterSystemFactory.h"  // For RockConfig and DetritusConfig
 
 #include <memory>
 #include <optional>
@@ -17,14 +17,13 @@ class TreeSystem;
 class TreeRenderer;
 class TreeLODSystem;
 class ImpostorCullSystem;
-class DetritusSystem;
-class RockSystem;
+class ScatterSystem;
 
 /**
  * VegetationSystemGroup - Groups vegetation-related rendering systems
  *
  * This reduces coupling by providing a single interface to access
- * all vegetation-related systems (grass, trees, rocks, detritus).
+ * all vegetation-related systems (grass, trees, scatter decorations).
  *
  * Systems in this group:
  * - GrassSystem: Procedural grass with wind animation
@@ -33,8 +32,8 @@ class RockSystem;
  * - TreeRenderer: Tree rendering with wind animation
  * - TreeLODSystem: Impostor generation and LOD management
  * - ImpostorCullSystem: GPU-driven impostor culling
- * - DetritusSystem: Fallen branches and debris
- * - RockSystem: Static rock geometry
+ * - ScatterSystem (rocks): Static rock geometry
+ * - ScatterSystem (detritus): Fallen branches and debris
  *
  * Usage:
  *   auto& veg = systems.vegetation();
@@ -56,25 +55,25 @@ struct VegetationSystemGroup {
     SYSTEM_MEMBER(TreeRenderer, treeRenderer);
     SYSTEM_MEMBER(TreeLODSystem, treeLOD);
     SYSTEM_MEMBER(ImpostorCullSystem, impostorCull);
-    SYSTEM_MEMBER(DetritusSystem, detritus);
-    SYSTEM_MEMBER(RockSystem, rock);
+    SYSTEM_MEMBER(ScatterSystem, rocks);
+    SYSTEM_MEMBER(ScatterSystem, detritus);
 
     // Required system accessors
     REQUIRED_SYSTEM_ACCESSORS(GrassSystem, grass)
     REQUIRED_SYSTEM_ACCESSORS(WindSystem, wind)
     REQUIRED_SYSTEM_ACCESSORS(DisplacementSystem, displacement)
-    REQUIRED_SYSTEM_ACCESSORS(RockSystem, rock)
+    REQUIRED_SYSTEM_ACCESSORS(ScatterSystem, rocks)
 
     // Optional system accessors (may be null)
     OPTIONAL_SYSTEM_ACCESSORS(TreeSystem, tree, Tree)
     OPTIONAL_SYSTEM_ACCESSORS(TreeRenderer, treeRenderer, TreeRenderer)
     OPTIONAL_SYSTEM_ACCESSORS(TreeLODSystem, treeLOD, TreeLOD)
     OPTIONAL_SYSTEM_ACCESSORS(ImpostorCullSystem, impostorCull, ImpostorCull)
-    OPTIONAL_SYSTEM_ACCESSORS(DetritusSystem, detritus, Detritus)
+    OPTIONAL_SYSTEM_ACCESSORS(ScatterSystem, detritus, Detritus)
 
     // Validation (only required systems)
     bool isValid() const {
-        return grass_ && wind_ && displacement_ && rock_;
+        return grass_ && wind_ && displacement_ && rocks_;
     }
 
     // ========================================================================
@@ -88,12 +87,12 @@ struct VegetationSystemGroup {
         std::unique_ptr<GrassSystem> grass;
         std::unique_ptr<WindSystem> wind;
         std::unique_ptr<DisplacementSystem> displacement;
-        std::unique_ptr<RockSystem> rock;
+        std::unique_ptr<ScatterSystem> rocks;
         std::unique_ptr<TreeSystem> tree;
         std::unique_ptr<TreeRenderer> treeRenderer;
         std::unique_ptr<TreeLODSystem> treeLOD;
         std::unique_ptr<ImpostorCullSystem> impostorCull;
-        // Note: DetritusSystem needs tree positions, created separately after content generation
+        // Note: Detritus ScatterSystem needs tree positions, created separately after content generation
     };
 
     using HeightFunc = std::function<float(float, float)>;
@@ -108,7 +107,7 @@ struct VegetationSystemGroup {
         uint32_t shadowMapSize;
         float terrainSize;
         HeightFunc getTerrainHeight;
-        RockConfig rockConfig;  // Rock generation config
+        ScatterSystemFactory::RockConfig rockConfig;  // Rock generation config
     };
 
     /**

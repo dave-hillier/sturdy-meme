@@ -13,10 +13,13 @@ class TreeSystem;
 class TreeLODSystem;
 class ImpostorCullSystem;
 class TreeRenderer;
-class DetritusSystem;
+class ScatterSystem;
 class ThreadedTreeGenerator;
 struct TreeOptions;
-struct DetritusConfig;
+
+namespace ScatterSystemFactory {
+    struct DetritusConfig;
+}
 
 /**
  * VegetationContentGenerator - Generates vegetation content (trees, forests, detritus)
@@ -86,7 +89,7 @@ public:
         VkSampler shadowSampler);
 
     /**
-     * Create detritus system with fallen branches near trees.
+     * Create detritus scatter system with fallen branches near trees.
      * Call after trees are generated.
      */
     struct DetritusCreateInfo {
@@ -96,7 +99,7 @@ public:
         VkQueue graphicsQueue;
         VkPhysicalDevice physicalDevice;
     };
-    std::unique_ptr<DetritusSystem> createDetritusSystem(
+    std::unique_ptr<ScatterSystem> createDetritusSystem(
         const DetritusCreateInfo& info,
         const TreeSystem& treeSystem);
 
@@ -104,7 +107,7 @@ public:
      * Get detritus configuration based on tree positions.
      * Call after trees are placed.
      */
-    DetritusConfig getDetritusConfig() const;
+    ScatterSystemFactory::DetritusConfig getDetritusConfig() const;
 
     /**
      * Get tree positions for detritus scattering.

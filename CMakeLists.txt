@@ -124,7 +124,8 @@ set(SOURCES
     src/vegetation/GrassTileResourcePool.cpp
     src/vegetation/GrassControlAdapter.cpp
     src/vegetation/LeafSystem.cpp
-    src/vegetation/RockSystem.cpp
+    src/vegetation/ScatterSystem.cpp
+    src/vegetation/ScatterSystemFactory.cpp
     src/vegetation/TreeSystem.cpp
     src/vegetation/TreeGenerator.cpp
     src/vegetation/ThreadedTreeGenerator.cpp
@@ -139,7 +140,6 @@ set(SOURCES
     src/vegetation/TreeSpatialIndex.cpp
     src/vegetation/ImpostorCullSystem.cpp
     src/vegetation/BranchGenerator.cpp
-    src/vegetation/DetritusSystem.cpp
     src/vegetation/VegetationSystemGroup.cpp
     # Postprocess
     src/postprocess/PostProcessSystem.cpp

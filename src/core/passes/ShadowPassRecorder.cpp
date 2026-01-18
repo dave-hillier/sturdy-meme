@@ -8,8 +8,7 @@
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
-#include "RockSystem.h"
-#include "DetritusSystem.h"
+#include "ScatterSystem.h"
 #include "SkinnedMeshRenderer.h"
 #include "GlobalBufferManager.h"
 #include "SceneManager.h"
@@ -86,7 +85,7 @@ void ShadowPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float 
     bool hasCharacter = resources_.scene->getSceneBuilder().hasCharacter();
 
     size_t detritusCount = resources_.vegetation.hasDetritus() ? resources_.vegetation.detritus()->getSceneObjects().size() : 0;
-    size_t rockCount = resources_.vegetation.rock().getSceneObjects().size();
+    size_t rockCount = resources_.vegetation.rocks().getSceneObjects().size();
     allObjects.reserve(sceneObjects.size() + rockCount + detritusCount);
     for (size_t i = 0; i < sceneObjects.size(); ++i) {
         // Skip player character - rendered with skinned shadow pipeline
@@ -95,7 +94,7 @@ void ShadowPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float 
         }
         allObjects.push_back(sceneObjects[i]);
     }
-    allObjects.insert(allObjects.end(), resources_.vegetation.rock().getSceneObjects().begin(), resources_.vegetation.rock().getSceneObjects().end());
+    allObjects.insert(allObjects.end(), resources_.vegetation.rocks().getSceneObjects().begin(), resources_.vegetation.rocks().getSceneObjects().end());
     if (resources_.vegetation.hasDetritus()) {
         allObjects.insert(allObjects.end(), resources_.vegetation.detritus()->getSceneObjects().begin(), resources_.vegetation.detritus()->getSceneObjects().end());
     }

@@ -13,9 +13,8 @@
 
 #include "TerrainSystem.h"
 #include "TerrainTileCache.h"
-#include "RockSystem.h"
+#include "ScatterSystem.h"
 #include "TreeSystem.h"
-#include "DetritusSystem.h"
 #include "SceneManager.h"
 #include "WaterSystem.h"
 #include "WindSystem.h"
@@ -267,9 +266,9 @@ bool Application::init(const std::string& title, int width, int height) {
     renderer_->getSystems().scene().initPhysics(physics());
 
     // Create convex hull colliders for rocks using actual mesh geometry
-    const auto& rockSystem = renderer_->getSystems().rock();
-    const auto& rockInstances = rockSystem.getRockInstances();
-    const auto& rockMeshes = rockSystem.getRockMeshes();
+    const auto& rockSystem = renderer_->getSystems().rocks();
+    const auto& rockInstances = rockSystem.getInstances();
+    const auto& rockMeshes = rockSystem.getMeshes();
 
     for (const auto& rock : rockInstances) {
         // Rock position is adjusted down by 15% of scale in rendering
@@ -294,7 +293,7 @@ bool Application::init(const std::string& title, int width, int height) {
     SDL_Log("Created %zu rock convex hull colliders", rockInstances.size());
 
     // Create convex hull colliders for fallen branches (detritus)
-    if (const DetritusSystem* detritusSystem = renderer_->getSystems().detritus()) {
+    if (const ScatterSystem* detritusSystem = renderer_->getSystems().detritus()) {
         const auto& detritusInstances = detritusSystem->getInstances();
         const auto& detritusMeshes = detritusSystem->getMeshes();
 

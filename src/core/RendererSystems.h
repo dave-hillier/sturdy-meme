@@ -57,12 +57,11 @@ class TerrainSystem;
 class CatmullClarkSystem;
 class SnowMaskSystem;
 class VolumetricSnowSystem;
-class RockSystem;
+class ScatterSystem;
 class TreeSystem;
 class TreeRenderer;
 class TreeLODSystem;
 class ImpostorCullSystem;
-class DetritusSystem;
 class CloudShadowSystem;
 class HiZSystem;
 class WaterSystem;
@@ -229,9 +228,9 @@ public:
     CatmullClarkSystem& catmullClark() { return *catmullClarkSystem_; }
     const CatmullClarkSystem& catmullClark() const { return *catmullClarkSystem_; }
     void setCatmullClark(std::unique_ptr<CatmullClarkSystem> system);
-    RockSystem& rock() { return *rockSystem_; }
-    const RockSystem& rock() const { return *rockSystem_; }
-    void setRock(std::unique_ptr<RockSystem> system);
+    ScatterSystem& rocks() { return *rocksSystem_; }
+    const ScatterSystem& rocks() const { return *rocksSystem_; }
+    void setRocks(std::unique_ptr<ScatterSystem> system);
     TreeSystem* tree() { return treeSystem_.get(); }
     const TreeSystem* tree() const { return treeSystem_.get(); }
     void setTree(std::unique_ptr<TreeSystem> system);
@@ -244,9 +243,9 @@ public:
     ImpostorCullSystem* impostorCull() { return impostorCullSystem_.get(); }
     const ImpostorCullSystem* impostorCull() const { return impostorCullSystem_.get(); }
     void setImpostorCull(std::unique_ptr<ImpostorCullSystem> system);
-    DetritusSystem* detritus() { return detritusSystem_.get(); }
-    const DetritusSystem* detritus() const { return detritusSystem_.get(); }
-    void setDetritus(std::unique_ptr<DetritusSystem> system);
+    ScatterSystem* detritus() { return detritusSystem_.get(); }
+    const ScatterSystem* detritus() const { return detritusSystem_.get(); }
+    void setDetritus(std::unique_ptr<ScatterSystem> system);
 
     // Scene collection for unified material iteration (used by shadow pass)
     SceneCollection& sceneCollection() { return sceneCollection_; }
@@ -330,8 +329,8 @@ public:
             treeRenderer_.get(),
             treeLODSystem_.get(),
             impostorCullSystem_.get(),
-            detritusSystem_.get(),
-            rockSystem_.get()
+            rocksSystem_.get(),
+            detritusSystem_.get()
         };
     }
 
@@ -462,12 +461,12 @@ private:
 
     // Tier 2 - Geometry
     std::unique_ptr<CatmullClarkSystem> catmullClarkSystem_;
-    std::unique_ptr<RockSystem> rockSystem_;
+    std::unique_ptr<ScatterSystem> rocksSystem_;
     std::unique_ptr<TreeSystem> treeSystem_;
     std::unique_ptr<TreeRenderer> treeRenderer_;
     std::unique_ptr<TreeLODSystem> treeLODSystem_;
     std::unique_ptr<ImpostorCullSystem> impostorCullSystem_;
-    std::unique_ptr<DetritusSystem> detritusSystem_;
+    std::unique_ptr<ScatterSystem> detritusSystem_;
 
     // Scene collection for unified material iteration
     SceneCollection sceneCollection_;

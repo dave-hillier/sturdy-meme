@@ -25,13 +25,13 @@
 #include "SnowSystemGroup.h"
 #include "GeometrySystemGroup.h"
 #include "HiZSystem.h"
-#include "RockSystem.h"
+#include "ScatterSystem.h"
+#include "ScatterSystemFactory.h"
 #include "TreeSystem.h"
 #include "ThreadedTreeGenerator.h"
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
-#include "DetritusSystem.h"
 #include "VegetationContentGenerator.h"
 #include "VegetationSystemGroup.h"
 #include "WaterSystem.h"
@@ -227,7 +227,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         INIT_PROFILE_PHASE("VegetationSystems");
 
         // Rock placement configuration
-        RockConfig rockConfig{};
+        ScatterSystemFactory::RockConfig rockConfig{};
         rockConfig.rockVariations = 6;
         rockConfig.rocksPerVariation = 10;
         rockConfig.minRadius = 0.4f;
@@ -257,7 +257,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         systems_->setWind(std::move(vegBundle->wind));
         systems_->setDisplacement(std::move(vegBundle->displacement));
         systems_->setGrass(std::move(vegBundle->grass));
-        systems_->setRock(std::move(vegBundle->rock));
+        systems_->setRocks(std::move(vegBundle->rocks));
         systems_->setTree(std::move(vegBundle->tree));
         systems_->setTreeRenderer(std::move(vegBundle->treeRenderer));
         if (vegBundle->treeLOD) systems_->setTreeLOD(std::move(vegBundle->treeLOD));
@@ -342,18 +342,18 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         return common;
     };
 
-    // Create rock descriptor sets (RockSystem owns them)
-    if (!systems_->rock().createDescriptorSets(
+    // Create rocks descriptor sets (ScatterSystem owns them)
+    if (!systems_->rocks().createDescriptorSets(
             device,
             *descriptorInfra_.getDescriptorPool(),
             descriptorInfra_.getVkDescriptorSetLayout(),
             MAX_FRAMES_IN_FLIGHT,
             getCommonBindings)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create RockSystem descriptor sets");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create rocks ScatterSystem descriptor sets");
         return false;
     }
 
-    // Create detritus descriptor sets (DetritusSystem owns them)
+    // Create detritus descriptor sets (ScatterSystem owns them)
     if (systems_->detritus()) {
         if (!systems_->detritus()->createDescriptorSets(
                 device,
@@ -361,7 +361,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
                 descriptorInfra_.getVkDescriptorSetLayout(),
                 MAX_FRAMES_IN_FLIGHT,
                 getCommonBindings)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create DetritusSystem descriptor sets");
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create detritus ScatterSystem descriptor sets");
             return false;
         }
     }
@@ -435,7 +435,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
         // Initialize object data for culling
         systems_->hiZ().gatherObjects(systems_->scene().getRenderables(),
-                                       systems_->rock().getSceneObjects());
+                                       systems_->rocks().getSceneObjects());
     }
 
     // Initialize profiler for GPU and CPU timing

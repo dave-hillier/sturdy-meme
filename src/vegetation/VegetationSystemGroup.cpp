@@ -4,7 +4,8 @@
 #include "DisplacementSystem.h"
 #include "GrassSystem.h"
 #include "WindSystem.h"
-#include "RockSystem.h"
+#include "ScatterSystem.h"
+#include "ScatterSystemFactory.h"
 #include "TreeSystem.h"
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
@@ -42,9 +43,9 @@ std::optional<VegetationSystemGroup::Bundle> VegetationSystemGroup::createAll(
         bundle.grass->setDisplacementSystem(bundle.displacement.get());
     }
 
-    // 2. Create RockSystem with rock placement config
+    // 2. Create rock ScatterSystem with rock placement config
     {
-        RockSystem::InitInfo info{};
+        ScatterSystem::InitInfo info{};
         info.device = ctx.device;
         info.allocator = ctx.allocator;
         info.commandPool = ctx.commandPool;
@@ -54,9 +55,9 @@ std::optional<VegetationSystemGroup::Bundle> VegetationSystemGroup::createAll(
         info.terrainSize = deps.terrainSize;
         info.getTerrainHeight = deps.getTerrainHeight;
 
-        bundle.rock = RockSystem::create(info, deps.rockConfig);
-        if (!bundle.rock) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "VegetationSystemGroup: Failed to create RockSystem");
+        bundle.rocks = ScatterSystemFactory::createRocks(info, deps.rockConfig);
+        if (!bundle.rocks) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "VegetationSystemGroup: Failed to create rock ScatterSystem");
             return std::nullopt;
         }
     }

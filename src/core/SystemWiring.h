@@ -20,8 +20,7 @@ class VolumetricSnowSystem;
 class FroxelSystem;
 class PostProcessSystem;
 class WindSystem;
-class RockSystem;
-class DetritusSystem;
+class ScatterSystem;
 class SkinnedMeshRenderer;
 class MaterialRegistry;
 struct EnvironmentSettings;
@@ -97,7 +96,7 @@ public:
 
     /**
      * Update cloud shadow bindings across all descriptor sets.
-     * Requires: CloudShadowSystem, MaterialRegistry, RockSystem, DetritusSystem, SkinnedMeshRenderer
+     * Requires: CloudShadowSystem, MaterialRegistry, ScatterSystem (rocks, detritus), SkinnedMeshRenderer
      */
     void wireCloudShadowBindings(RendererSystems& systems);
 

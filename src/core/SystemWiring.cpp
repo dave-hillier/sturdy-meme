@@ -12,8 +12,7 @@
 #include "FroxelSystem.h"
 #include "PostProcessSystem.h"
 #include "WindSystem.h"
-#include "RockSystem.h"
-#include "DetritusSystem.h"
+#include "ScatterSystem.h"
 #include "SkinnedMeshRenderer.h"
 #include "SceneManager.h"
 #include "WaterSystem.h"
@@ -163,11 +162,11 @@ void SystemWiring::wireCloudShadowBindings(RendererSystems& systems) {
     systems.scene().getSceneBuilder().getMaterialRegistry().updateCloudShadowBinding(
         device_, cloudShadowView, cloudShadowSampler);
 
-    // Update descriptor sets owned by systems (rocks, detritus)
+    // Update descriptor sets owned by scatter systems (rocks, detritus)
     MaterialDescriptorFactory factory(device_);
-    if (systems.rock().hasDescriptorSets()) {
+    if (systems.rocks().hasDescriptorSets()) {
         for (uint32_t i = 0; i < framesInFlight_; i++) {
-            factory.updateCloudShadowBinding(systems.rock().getDescriptorSet(i),
+            factory.updateCloudShadowBinding(systems.rocks().getDescriptorSet(i),
                                               cloudShadowView, cloudShadowSampler);
         }
     }

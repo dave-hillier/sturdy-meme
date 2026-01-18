@@ -7,7 +7,8 @@
 #include "TreeRenderer.h"
 #include "ThreadedTreeGenerator.h"
 #include "TreeOptions.h"
-#include "DetritusSystem.h"
+#include "ScatterSystem.h"
+#include "ScatterSystemFactory.h"
 #include <SDL3/SDL.h>
 #include <filesystem>
 #include <cmath>
@@ -298,28 +299,24 @@ void VegetationContentGenerator::finalizeTreeSystems(
     }
 }
 
-std::unique_ptr<DetritusSystem> VegetationContentGenerator::createDetritusSystem(
+std::unique_ptr<ScatterSystem> VegetationContentGenerator::createDetritusSystem(
     const DetritusCreateInfo& info,
     const TreeSystem& treeSystem
 ) {
-    DetritusSystem::InitInfo detritusInfo{};
-    detritusInfo.device = info.device;
-    detritusInfo.allocator = info.allocator;
-    detritusInfo.commandPool = info.commandPool;
-    detritusInfo.graphicsQueue = info.graphicsQueue;
-    detritusInfo.physicalDevice = info.physicalDevice;
-    detritusInfo.resourcePath = config_.resourcePath;
-    detritusInfo.terrainSize = config_.terrainSize;
-    detritusInfo.getTerrainHeight = config_.getTerrainHeight;
+    ScatterSystem::InitInfo scatterInfo{};
+    scatterInfo.device = info.device;
+    scatterInfo.allocator = info.allocator;
+    scatterInfo.commandPool = info.commandPool;
+    scatterInfo.graphicsQueue = info.graphicsQueue;
+    scatterInfo.physicalDevice = info.physicalDevice;
+    scatterInfo.resourcePath = config_.resourcePath;
+    scatterInfo.terrainSize = config_.terrainSize;
+    scatterInfo.getTerrainHeight = config_.getTerrainHeight;
 
     // Gather tree positions for scattering detritus nearby
-    const auto& treeInstances = treeSystem.getTreeInstances();
-    detritusInfo.treePositions.reserve(treeInstances.size());
-    for (const auto& tree : treeInstances) {
-        detritusInfo.treePositions.push_back(tree.position());
-    }
+    std::vector<glm::vec3> treePositions = getTreePositionsForDetritus(treeSystem);
 
-    DetritusConfig detritusConfig{};
+    ScatterSystemFactory::DetritusConfig detritusConfig{};
     detritusConfig.branchVariations = 8;
     detritusConfig.branchesPerVariation = 4;
     detritusConfig.minLength = 0.5f;
@@ -328,21 +325,19 @@ std::unique_ptr<DetritusSystem> VegetationContentGenerator::createDetritusSystem
     detritusConfig.maxRadius = 0.12f;
     detritusConfig.placementRadius = 8.0f;
     detritusConfig.minDistanceBetween = 1.5f;
-    detritusConfig.breakChance = 0.7f;
-    detritusConfig.maxChildren = 3;
     detritusConfig.materialRoughness = 0.85f;
     detritusConfig.materialMetallic = 0.0f;
 
-    auto detritusSystem = DetritusSystem::create(detritusInfo, detritusConfig);
+    auto detritusSystem = ScatterSystemFactory::createDetritus(scatterInfo, detritusConfig, treePositions);
     if (detritusSystem) {
         SDL_Log("VegetationContentGenerator: Created detritus with %zu branches near %zu trees",
-                detritusSystem->getDetritusCount(), detritusInfo.treePositions.size());
+                detritusSystem->getInstanceCount(), treePositions.size());
     }
     return detritusSystem;
 }
 
-DetritusConfig VegetationContentGenerator::getDetritusConfig() const {
-    DetritusConfig config{};
+ScatterSystemFactory::DetritusConfig VegetationContentGenerator::getDetritusConfig() const {
+    ScatterSystemFactory::DetritusConfig config{};
     config.branchVariations = 8;
     config.branchesPerVariation = 4;
     config.minLength = 0.5f;
