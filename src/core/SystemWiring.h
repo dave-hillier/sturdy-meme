@@ -119,4 +119,14 @@ private:
 
     // Helper to convert raw buffers to vulkan-hpp buffers
     static std::vector<vk::Buffer> toVkBuffers(const std::vector<VkBuffer>& raw);
+
+    // Helper to convert raw buffer array to vulkan-hpp buffer array
+    template<size_t N>
+    static std::array<vk::Buffer, N> toVkBuffersArray(const std::array<VkBuffer, N>& raw) {
+        std::array<vk::Buffer, N> result;
+        for (size_t i = 0; i < N; ++i) {
+            result[i] = vk::Buffer(raw[i]);
+        }
+        return result;
+    }
 };

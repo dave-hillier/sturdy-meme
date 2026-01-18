@@ -121,20 +121,6 @@ public:
                               const std::array<vk::Buffer, 3>& tileInfoBuffers = {},
                               const BufferUtils::DynamicUniformBuffer* dynamicRendererUBO = nullptr);
 
-    // Backward-compatible overload for raw Vulkan types
-    void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
-                              VkImageView shadowMapView, VkSampler shadowSampler,
-                              const std::vector<VkBuffer>& windBuffers,
-                              const std::vector<VkBuffer>& lightBuffers,
-                              VkImageView terrainHeightMapView, VkSampler terrainHeightMapSampler,
-                              const std::vector<VkBuffer>& snowBuffers,
-                              const std::vector<VkBuffer>& cloudShadowBuffers,
-                              VkImageView cloudShadowMapView, VkSampler cloudShadowMapSampler,
-                              VkImageView tileArrayView = VK_NULL_HANDLE,
-                              VkSampler tileSampler = VK_NULL_HANDLE,
-                              const std::array<VkBuffer, 3>& tileInfoBuffers = {},
-                              const BufferUtils::DynamicUniformBuffer* dynamicRendererUBO = nullptr);
-
     void updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
                         float terrainSize, float terrainHeightScale, float time);
     void recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameIndex, float time);

@@ -863,50 +863,6 @@ void GrassSystem::setSnowMask(vk::Device device, vk::ImageView snowMaskView, vk:
     }
 }
 
-// Backward-compatible overload: convert raw Vulkan types to vk:: types
-void GrassSystem::updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
-                                        VkImageView shadowMapView, VkSampler shadowSampler,
-                                        const std::vector<VkBuffer>& windBuffers,
-                                        const std::vector<VkBuffer>& lightBuffersParam,
-                                        VkImageView terrainHeightMapViewParam, VkSampler terrainHeightMapSamplerParam,
-                                        const std::vector<VkBuffer>& snowBuffersParam,
-                                        const std::vector<VkBuffer>& cloudShadowBuffersParam,
-                                        VkImageView cloudShadowMapView, VkSampler cloudShadowMapSampler,
-                                        VkImageView tileArrayViewParam,
-                                        VkSampler tileSamplerParam,
-                                        const std::array<VkBuffer, 3>& tileInfoBuffersParam,
-                                        const BufferUtils::DynamicUniformBuffer* dynamicRendererUBO) {
-    // Convert vectors
-    std::vector<vk::Buffer> vkUniformBuffers(uniformBuffers.begin(), uniformBuffers.end());
-    std::vector<vk::Buffer> vkWindBuffers(windBuffers.begin(), windBuffers.end());
-    std::vector<vk::Buffer> vkLightBuffers(lightBuffersParam.begin(), lightBuffersParam.end());
-    std::vector<vk::Buffer> vkSnowBuffers(snowBuffersParam.begin(), snowBuffersParam.end());
-    std::vector<vk::Buffer> vkCloudShadowBuffers(cloudShadowBuffersParam.begin(), cloudShadowBuffersParam.end());
-    std::array<vk::Buffer, 3> vkTileInfoBuffers;
-    for (size_t i = 0; i < 3; ++i) {
-        vkTileInfoBuffers[i] = tileInfoBuffersParam[i];
-    }
-
-    // Call the vk:: version
-    updateDescriptorSets(
-        vk::Device(device),
-        vkUniformBuffers,
-        vk::ImageView(shadowMapView),
-        vk::Sampler(shadowSampler),
-        vkWindBuffers,
-        vkLightBuffers,
-        vk::ImageView(terrainHeightMapViewParam),
-        vk::Sampler(terrainHeightMapSamplerParam),
-        vkSnowBuffers,
-        vkCloudShadowBuffers,
-        vk::ImageView(cloudShadowMapView),
-        vk::Sampler(cloudShadowMapSampler),
-        vk::ImageView(tileArrayViewParam),
-        vk::Sampler(tileSamplerParam),
-        vkTileInfoBuffers,
-        dynamicRendererUBO);
-}
-
 void GrassSystem::advanceBufferSet() {
     bufferSets_.advance();
 }

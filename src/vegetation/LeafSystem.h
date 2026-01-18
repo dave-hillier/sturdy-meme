@@ -74,15 +74,15 @@ public:
     void setExtent(VkExtent2D newExtent) { particleSystem->setExtent(newExtent); }
 
     // Update descriptor sets with external resources (UBO, wind buffer, heightmap, displacement, tile cache)
-    void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
-                              const std::vector<VkBuffer>& windBuffers,
-                              VkImageView terrainHeightMapView,
-                              VkSampler terrainHeightMapSampler,
-                              VkImageView displacementMapView,
-                              VkSampler displacementMapSampler,
-                              VkImageView tileArrayView = VK_NULL_HANDLE,
-                              VkSampler tileSampler = VK_NULL_HANDLE,
-                              const std::array<VkBuffer, 3>& tileInfoBuffers = {},
+    void updateDescriptorSets(vk::Device device, const std::vector<vk::Buffer>& uniformBuffers,
+                              const std::vector<vk::Buffer>& windBuffers,
+                              vk::ImageView terrainHeightMapView,
+                              vk::Sampler terrainHeightMapSampler,
+                              vk::ImageView displacementMapView,
+                              vk::Sampler displacementMapSampler,
+                              vk::ImageView tileArrayView = {},
+                              vk::Sampler tileSampler = {},
+                              const std::array<vk::Buffer, 3>& tileInfoBuffers = {},
                               const BufferUtils::DynamicUniformBuffer* dynamicRendererUBO = nullptr);
 
     // Update leaf uniforms each frame

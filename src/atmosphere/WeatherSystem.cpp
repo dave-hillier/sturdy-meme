@@ -300,13 +300,19 @@ bool WeatherSystem::createDescriptorSets() {
     return true;
 }
 
-void WeatherSystem::updateDescriptorSets(VkDevice dev, const std::vector<VkBuffer>& rendererUniformBuffers,
-                                          const std::vector<VkBuffer>& windBuffers,
-                                          VkImageView depthImageView, VkSampler depthSampler,
+void WeatherSystem::updateDescriptorSets(vk::Device dev, const std::vector<vk::Buffer>& rendererUniformBuffers,
+                                          const std::vector<vk::Buffer>& windBuffers,
+                                          vk::ImageView depthImageView, vk::Sampler depthSampler,
                                           const BufferUtils::DynamicUniformBuffer* dynamicRendererUBO) {
-    // Store external buffer references (kept for backward compatibility)
-    externalWindBuffers = windBuffers;
-    externalRendererUniformBuffers = rendererUniformBuffers;
+    // Store external buffer references (convert to VkBuffer for internal storage)
+    externalWindBuffers.resize(windBuffers.size());
+    for (size_t i = 0; i < windBuffers.size(); ++i) {
+        externalWindBuffers[i] = static_cast<VkBuffer>(windBuffers[i]);
+    }
+    externalRendererUniformBuffers.resize(rendererUniformBuffers.size());
+    for (size_t i = 0; i < rendererUniformBuffers.size(); ++i) {
+        externalRendererUniformBuffers[i] = static_cast<VkBuffer>(rendererUniformBuffers[i]);
+    }
 
     // Store dynamic renderer UBO reference for per-frame binding with dynamic offsets
     dynamicRendererUBO_ = dynamicRendererUBO;

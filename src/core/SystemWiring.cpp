@@ -57,25 +57,22 @@ void SystemWiring::wireGrassDescriptors(RendererSystems& systems) {
     auto& terrain = systems.terrain();
     auto& cloudShadow = systems.cloudShadow();
 
-    auto windBuffers = collectWindBuffers(systems.wind());
-    auto tileInfoBuffers = collectTileInfoBuffers(terrain);
-
     grass.updateDescriptorSets(
-        device_,
-        globalBuffers.uniformBuffers.buffers,
-        shadow.getShadowImageView(),
-        shadow.getShadowSampler(),
-        windBuffers,
-        globalBuffers.lightBuffers.buffers,
-        terrain.getHeightMapView(),
-        terrain.getHeightMapSampler(),
-        globalBuffers.snowBuffers.buffers,
-        globalBuffers.cloudShadowBuffers.buffers,
-        cloudShadow.getShadowMapView(),
-        cloudShadow.getShadowMapSampler(),
-        terrain.getTileArrayView(),
-        terrain.getTileSampler(),
-        tileInfoBuffers,
+        vk::Device(device_),
+        toVkBuffers(globalBuffers.uniformBuffers.buffers),
+        vk::ImageView(shadow.getShadowImageView()),
+        vk::Sampler(shadow.getShadowSampler()),
+        toVkBuffers(collectWindBuffers(systems.wind())),
+        toVkBuffers(globalBuffers.lightBuffers.buffers),
+        vk::ImageView(terrain.getHeightMapView()),
+        vk::Sampler(terrain.getHeightMapSampler()),
+        toVkBuffers(globalBuffers.snowBuffers.buffers),
+        toVkBuffers(globalBuffers.cloudShadowBuffers.buffers),
+        vk::ImageView(cloudShadow.getShadowMapView()),
+        vk::Sampler(cloudShadow.getShadowMapSampler()),
+        vk::ImageView(terrain.getTileArrayView()),
+        vk::Sampler(terrain.getTileSampler()),
+        toVkBuffersArray<3>(collectTileInfoBuffers(terrain)),
         &globalBuffers.dynamicRendererUBO);
 }
 
@@ -85,20 +82,17 @@ void SystemWiring::wireLeafDescriptors(RendererSystems& systems) {
     auto& terrain = systems.terrain();
     auto& grass = systems.grass();
 
-    auto windBuffers = collectWindBuffers(systems.wind());
-    auto tileInfoBuffers = collectTileInfoBuffers(terrain);
-
     leaf.updateDescriptorSets(
-        device_,
-        globalBuffers.uniformBuffers.buffers,
-        windBuffers,
-        terrain.getHeightMapView(),
-        terrain.getHeightMapSampler(),
-        grass.getDisplacementImageView(),
-        grass.getDisplacementSampler(),
-        terrain.getTileArrayView(),
-        terrain.getTileSampler(),
-        tileInfoBuffers,
+        vk::Device(device_),
+        toVkBuffers(globalBuffers.uniformBuffers.buffers),
+        toVkBuffers(collectWindBuffers(systems.wind())),
+        vk::ImageView(terrain.getHeightMapView()),
+        vk::Sampler(terrain.getHeightMapSampler()),
+        vk::ImageView(grass.getDisplacementImageView()),
+        vk::Sampler(grass.getDisplacementSampler()),
+        vk::ImageView(terrain.getTileArrayView()),
+        vk::Sampler(terrain.getTileSampler()),
+        toVkBuffersArray<3>(collectTileInfoBuffers(terrain)),
         &globalBuffers.dynamicRendererUBO);
 }
 
@@ -108,14 +102,12 @@ void SystemWiring::wireWeatherDescriptors(RendererSystems& systems) {
     auto& postProcess = systems.postProcess();
     auto& shadow = systems.shadow();
 
-    auto windBuffers = collectWindBuffers(systems.wind());
-
     weather.updateDescriptorSets(
-        device_,
-        globalBuffers.uniformBuffers.buffers,
-        windBuffers,
-        postProcess.getHDRDepthView(),
-        shadow.getShadowSampler(),
+        vk::Device(device_),
+        toVkBuffers(globalBuffers.uniformBuffers.buffers),
+        toVkBuffers(collectWindBuffers(systems.wind())),
+        vk::ImageView(postProcess.getHDRDepthView()),
+        vk::Sampler(shadow.getShadowSampler()),
         &globalBuffers.dynamicRendererUBO);
 }
 

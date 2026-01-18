@@ -82,9 +82,9 @@ public:
     void setExtent(VkExtent2D newExtent) { particleSystem->setExtent(newExtent); }
 
     // Update descriptor sets with external resources (UBO, wind buffer)
-    void updateDescriptorSets(VkDevice device, const std::vector<VkBuffer>& uniformBuffers,
-                              const std::vector<VkBuffer>& windBuffers,
-                              VkImageView depthImageView, VkSampler depthSampler,
+    void updateDescriptorSets(vk::Device device, const std::vector<vk::Buffer>& uniformBuffers,
+                              const std::vector<vk::Buffer>& windBuffers,
+                              vk::ImageView depthImageView, vk::Sampler depthSampler,
                               const BufferUtils::DynamicUniformBuffer* dynamicRendererUBO = nullptr);
 
     // Set froxel volume for fog lighting on particles (Phase 4.3.9)
