@@ -63,9 +63,9 @@ CONST_FLOAT_DERIVED(GRASS_HEIGHT_RANGE, GRASS_HEIGHT_MAX - GRASS_HEIGHT_MIN);
 // =============================================================================
 
 // Tile grid size - each tile covers a square area of the world
-// 144 x 144 grid at 0.2m spacing = 28.8m x 28.8m per tile
-// Multiple tiles (e.g., 3x3) are dispatched around the camera for coverage
-CONST_UINT(GRASS_TILE_GRID_SIZE, 144);
+// 256 x 256 grid at 0.2m spacing = 51.2m x 51.2m per tile
+// With 5x5 tiles = ~256m total coverage
+CONST_UINT(GRASS_TILE_GRID_SIZE, 256);
 
 // Dispatch size in workgroups per tile
 CONST_UINT_DERIVED(GRASS_TILE_DISPATCH_SIZE, (GRASS_TILE_GRID_SIZE + GRASS_WORKGROUP_SIZE - 1) / GRASS_WORKGROUP_SIZE);
@@ -88,8 +88,8 @@ CONST_FLOAT_DERIVED(GRASS_COVERAGE_HALF_EXTENT, GRASS_TILE_SIZE * 1.5);
 
 // Distance-based density falloff for smooth LOD transitions
 // Full density up to CULL_START_DISTANCE, then linear falloff to zero at CULL_END_DISTANCE
-CONST_FLOAT(GRASS_CULL_START_DISTANCE, 20.0);   // Full density within this range
-CONST_FLOAT(GRASS_CULL_END_DISTANCE, 100.0);    // Zero density beyond this range
+CONST_FLOAT(GRASS_CULL_START_DISTANCE, 40.0);   // Full density within this range
+CONST_FLOAT(GRASS_CULL_END_DISTANCE, 200.0);    // Zero density beyond this range
 CONST_FLOAT(GRASS_CULL_POWER, 2.0);             // Power curve for falloff (2.0 = quadratic)
 
 // Legacy compatibility aliases (for code that still references tile system)
