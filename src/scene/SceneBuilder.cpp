@@ -94,6 +94,8 @@ void SceneBuilder::cleanup() {
     sphereMesh.reset();
     capsuleMesh.reset();
     flagPoleMesh.reset();
+    swordMesh.reset();
+    shieldMesh.reset();
 
     // Manually managed meshes (dynamic - re-uploaded during runtime)
     flagClothMesh.releaseGPUResources();
@@ -124,6 +126,16 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
     flagPoleMesh = std::make_unique<Mesh>();
     flagPoleMesh->createCylinder(0.05f, 3.0f, 16);
     if (!flagPoleMesh->upload(info.allocator, info.device, info.commandPool, info.graphicsQueue)) return false;
+
+    // Sword mesh (long thin cylinder: 0.02m radius, 0.8m length)
+    swordMesh = std::make_unique<Mesh>();
+    swordMesh->createCylinder(0.02f, 0.8f, 12);
+    if (!swordMesh->upload(info.allocator, info.device, info.commandPool, info.graphicsQueue)) return false;
+
+    // Shield mesh (flat wide cylinder: 0.2m radius, 0.03m thickness)
+    shieldMesh = std::make_unique<Mesh>();
+    shieldMesh->createCylinder(0.2f, 0.03f, 16);
+    if (!shieldMesh->upload(info.allocator, info.device, info.commandPool, info.graphicsQueue)) return false;
 
     // Flag cloth mesh will be initialized later by ClothSimulation
     // (it's dynamic and will be updated each frame)
@@ -195,6 +207,30 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
         capeMesh.upload(info.allocator, info.device, info.commandPool, info.graphicsQueue);
         hasCapeEnabled = true;
         SDL_Log("SceneBuilder: Initialized player cape");
+
+        // Find hand bone indices for weapon attachment
+        const auto& skeleton = animatedCharacter->getSkeleton();
+        // Try common bone name patterns (Mixamo uses "mixamorig:" prefix)
+        const std::vector<std::string> rightHandNames = {"RightHand", "mixamorig:RightHand", "R_Hand", "hand.R"};
+        const std::vector<std::string> leftHandNames = {"LeftHand", "mixamorig:LeftHand", "L_Hand", "hand.L"};
+
+        for (const auto& name : rightHandNames) {
+            rightHandBoneIndex = skeleton.findJointIndex(name);
+            if (rightHandBoneIndex >= 0) {
+                SDL_Log("SceneBuilder: Found right hand bone '%s' at index %d", name.c_str(), rightHandBoneIndex);
+                break;
+            }
+        }
+        for (const auto& name : leftHandNames) {
+            leftHandBoneIndex = skeleton.findJointIndex(name);
+            if (leftHandBoneIndex >= 0) {
+                SDL_Log("SceneBuilder: Found left hand bone '%s' at index %d", name.c_str(), leftHandBoneIndex);
+                break;
+            }
+        }
+        if (rightHandBoneIndex < 0 || leftHandBoneIndex < 0) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "SceneBuilder: Could not find hand bones for weapon attachment");
+        }
     } else {
         hasAnimatedCharacter = false;
         SDL_Log("SceneBuilder: Failed to load FBX character, using capsule fallback");
@@ -492,6 +528,34 @@ void SceneBuilder::createRenderables() {
             .build());
     }
 
+    // Player weapons - attached to hand bones, transforms updated each frame
+    if (hasAnimatedCharacter && rightHandBoneIndex >= 0) {
+        swordIndex = sceneObjects.size();
+        sceneObjects.push_back(RenderableBuilder()
+            .withTransform(glm::mat4(1.0f))  // Updated per frame
+            .withMesh(swordMesh.get())
+            .withTexture(metalTex)
+            .withMaterialId(metalMaterialId)
+            .withRoughness(0.2f)
+            .withMetallic(0.95f)
+            .withCastsShadow(true)
+            .build());
+        SDL_Log("SceneBuilder: Added sword renderable at index %zu", swordIndex);
+    }
+    if (hasAnimatedCharacter && leftHandBoneIndex >= 0) {
+        shieldIndex = sceneObjects.size();
+        sceneObjects.push_back(RenderableBuilder()
+            .withTransform(glm::mat4(1.0f))  // Updated per frame
+            .withMesh(shieldMesh.get())
+            .withTexture(metalTex)
+            .withMaterialId(metalMaterialId)
+            .withRoughness(0.3f)
+            .withMetallic(0.9f)
+            .withCastsShadow(true)
+            .build());
+        SDL_Log("SceneBuilder: Added shield renderable at index %zu", shieldIndex);
+    }
+
     // Flag pole - 3m pole, center at 1.5m above ground
     auto [flagPoleX, flagPoleZ] = worldPos(5.0f, 0.0f);
     flagPoleIndex = sceneObjects.size();
@@ -626,6 +690,46 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
 void SceneBuilder::startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) {
     if (!hasAnimatedCharacter) return;
     animatedCharacter->startJump(startPos, velocity, gravity, physics);
+}
+
+void SceneBuilder::updateWeaponTransforms(const glm::mat4& characterWorldTransform) {
+    if (!hasAnimatedCharacter) return;
+
+    // Compute global bone transforms
+    const auto& skeleton = animatedCharacter->getSkeleton();
+    std::vector<glm::mat4> globalTransforms;
+    skeleton.computeGlobalTransforms(globalTransforms);
+
+    // Update sword transform (attached to right hand)
+    if (rightHandBoneIndex >= 0 && swordIndex < sceneObjects.size()) {
+        // Get the right hand bone's global transform
+        glm::mat4 boneGlobal = globalTransforms[rightHandBoneIndex];
+
+        // Combine with character world transform
+        glm::mat4 weaponWorld = characterWorldTransform * boneGlobal;
+
+        // Offset sword so it extends from the hand:
+        // - Rotate to point along the hand's direction (along Y axis of the bone)
+        // - Translate so the base is at the hand position
+        glm::mat4 swordOffset = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.4f, 0.0f));
+        sceneObjects[swordIndex].transform = weaponWorld * swordOffset;
+    }
+
+    // Update shield transform (attached to left hand)
+    if (leftHandBoneIndex >= 0 && shieldIndex < sceneObjects.size()) {
+        // Get the left hand bone's global transform
+        glm::mat4 boneGlobal = globalTransforms[leftHandBoneIndex];
+
+        // Combine with character world transform
+        glm::mat4 weaponWorld = characterWorldTransform * boneGlobal;
+
+        // Offset shield so it's on the forearm:
+        // - Rotate 90 degrees to face forward (shield face perpendicular to arm)
+        // - Translate slightly up the arm
+        glm::mat4 shieldOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        shieldOffset = glm::translate(shieldOffset, glm::vec3(0.0f, -0.15f, 0.0f));
+        sceneObjects[shieldIndex].transform = weaponWorld * shieldOffset;
+    }
 }
 
 // Texture accessors (return raw pointer from shared_ptr)

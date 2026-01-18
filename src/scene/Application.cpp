@@ -585,6 +585,10 @@ void Application::run() {
             renderer_->getCommandPool(), renderer_->getVulkanContext().getVkGraphicsQueue(),
             movementSpeed, isGrounded, isJumping);
 
+        // Update weapon transforms based on current character pose
+        glm::mat4 characterTransform = playerMovement.getModelMatrix(playerTransform);
+        renderer_->getSystems().scene().getSceneBuilder().updateWeaponTransforms(characterTransform);
+
         // Update camera and player based on mode
         if (input.isThirdPersonMode()) {
             camera.setThirdPersonTarget(playerMovement.getFocusPoint(playerTransform.position));

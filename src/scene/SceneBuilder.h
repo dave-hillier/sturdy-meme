@@ -110,6 +110,15 @@ public:
     const AnimatedCharacter& getAnimatedCharacter() const { return *animatedCharacter; }
     bool hasCharacter() const { return hasAnimatedCharacter; }
 
+    // Player weapons access
+    bool hasWeapons() const { return rightHandBoneIndex >= 0 && leftHandBoneIndex >= 0; }
+    size_t getSwordIndex() const { return swordIndex; }
+    size_t getShieldIndex() const { return shieldIndex; }
+
+    // Update weapon transforms based on character bone positions
+    // Call after updating animated character each frame
+    void updateWeaponTransforms(const glm::mat4& characterWorldTransform);
+
     // Update animated character (call each frame)
     // movementSpeed: horizontal speed for animation state selection
     // isGrounded: whether on the ground
@@ -151,6 +160,8 @@ private:
     std::unique_ptr<Mesh> sphereMesh;
     std::unique_ptr<Mesh> capsuleMesh;
     std::unique_ptr<Mesh> flagPoleMesh;
+    std::unique_ptr<Mesh> swordMesh;   // Long cylinder for sword
+    std::unique_ptr<Mesh> shieldMesh;  // Flat cylinder for shield
 
     // Meshes (dynamic - manually managed, re-uploaded during runtime)
     Mesh flagClothMesh;
@@ -182,6 +193,10 @@ private:
     size_t wellEntranceIndex = 0;
     size_t capeIndex = 0;
     size_t emissiveOrbIndex = 0;  // Glowing orb that has a corresponding light
+    size_t swordIndex = 0;        // Player sword renderable index
+    size_t shieldIndex = 0;       // Player shield renderable index
+    int32_t rightHandBoneIndex = -1;  // Bone index for sword attachment
+    int32_t leftHandBoneIndex = -1;   // Bone index for shield attachment
 
     // Indices of objects that should have physics bodies (dynamic objects)
     // Objects NOT in this list are either static (lights, flags) or handled separately (player)
