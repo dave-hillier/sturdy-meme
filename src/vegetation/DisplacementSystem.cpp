@@ -4,6 +4,7 @@
 #include "ComputePipelineBuilder.h"
 #include "core/ImageBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
+#include "core/vulkan/SamplerFactory.h"
 #include <SDL3/SDL.h>
 
 // Uniforms for displacement update compute shader
