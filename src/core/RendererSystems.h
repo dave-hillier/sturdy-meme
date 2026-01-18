@@ -85,6 +85,7 @@ class SkinnedMeshRenderer;
 class TimeSystem;
 class CelestialCalculator;
 class BilateralGridSystem;
+class DeferredTerrainObjects;
 struct EnvironmentSettings;
 struct TerrainConfig;
 
@@ -246,6 +247,11 @@ public:
     ScatterSystem* detritus() { return detritusSystem_.get(); }
     const ScatterSystem* detritus() const { return detritusSystem_.get(); }
     void setDetritus(std::unique_ptr<ScatterSystem> system);
+
+    // Deferred terrain object generation (trees, rocks, detritus)
+    DeferredTerrainObjects* deferredTerrainObjects() { return deferredTerrainObjects_.get(); }
+    const DeferredTerrainObjects* deferredTerrainObjects() const { return deferredTerrainObjects_.get(); }
+    void setDeferredTerrainObjects(std::unique_ptr<DeferredTerrainObjects> deferred);
 
     // Scene collection for unified material iteration (used by shadow pass)
     SceneCollection& sceneCollection() { return sceneCollection_; }
@@ -467,6 +473,9 @@ private:
     std::unique_ptr<TreeLODSystem> treeLODSystem_;
     std::unique_ptr<ImpostorCullSystem> impostorCullSystem_;
     std::unique_ptr<ScatterSystem> detritusSystem_;
+
+    // Deferred terrain object generation
+    std::unique_ptr<DeferredTerrainObjects> deferredTerrainObjects_;
 
     // Scene collection for unified material iteration
     SceneCollection sceneCollection_;

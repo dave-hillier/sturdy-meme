@@ -26,6 +26,7 @@
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
+#include "DeferredTerrainObjects.h"
 #include "CloudShadowSystem.h"
 #include "HiZSystem.h"
 #include "WaterSystem.h"
@@ -281,6 +282,10 @@ void RendererSystems::setDetritus(std::unique_ptr<ScatterSystem> system) {
     }
 }
 
+void RendererSystems::setDeferredTerrainObjects(std::unique_ptr<DeferredTerrainObjects> deferred) {
+    deferredTerrainObjects_ = std::move(deferred);
+}
+
 void RendererSystems::setScene(std::unique_ptr<SceneManager> system) {
     sceneManager_ = std::move(system);
 }
@@ -327,6 +332,7 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     hiZSystem_.reset();  // RAII cleanup via destructor
 
     // Geometry/Vegetation
+    deferredTerrainObjects_.reset();  // RAII cleanup via destructor
     detritusSystem_.reset();  // RAII cleanup via destructor
     catmullClarkSystem_.reset();  // RAII cleanup via destructor
     rocksSystem_.reset();  // RAII cleanup via destructor

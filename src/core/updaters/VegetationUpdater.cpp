@@ -14,10 +14,16 @@
 #include "CloudShadowSystem.h"
 #include "GlobalBufferManager.h"
 #include "VegetationRenderContext.h"
+#include "DeferredTerrainObjects.h"
+#include "TerrainSystem.h"
+#include "ScatterSystem.h"
 
 #include <cmath>
 
 void VegetationUpdater::update(RendererSystems& systems, const FrameData& frame, VkExtent2D extent) {
+    // Try to generate deferred terrain objects (trees, detritus) if not yet done
+    tryGenerateDeferredObjects(systems);
+
     // Build shared context once per frame
     auto ctx = VegetationRenderContext::fromSystems(systems, frame);
 
@@ -25,6 +31,41 @@ void VegetationUpdater::update(RendererSystems& systems, const FrameData& frame,
     updateTreeDescriptors(systems, frame, ctx);
     updateTreeLOD(systems, frame, extent);
     updateLeaf(systems, frame);
+}
+
+void VegetationUpdater::tryGenerateDeferredObjects(RendererSystems& systems) {
+    auto* deferred = systems.deferredTerrainObjects();
+    if (!deferred || deferred->isGenerated()) {
+        return;  // No deferred loader or already generated
+    }
+
+    systems.profiler().beginCpuZone("DeferredTerrainGen");
+
+    // Check if terrain is ready (has base LOD tiles loaded)
+    // The terrain system loads base LOD tiles synchronously at startup,
+    // so this should be true on the first frame
+    bool terrainReady = true;  // Terrain base tiles are loaded during init
+
+    // Get a reference to detritus unique_ptr for the output
+    std::unique_ptr<ScatterSystem> detritusSystem;
+
+    // Try to generate the deferred content
+    bool generated = deferred->tryGenerate(
+        systems.tree(),
+        systems.treeLOD(),
+        systems.impostorCull(),
+        systems.treeRenderer(),
+        &systems.rocks(),
+        detritusSystem,
+        terrainReady
+    );
+
+    // If detritus was created, set it on the systems
+    if (generated && detritusSystem) {
+        systems.setDetritus(std::move(detritusSystem));
+    }
+
+    systems.profiler().endCpuZone("DeferredTerrainGen");
 }
 
 void VegetationUpdater::updateGrass(RendererSystems& systems, const FrameData& frame,
