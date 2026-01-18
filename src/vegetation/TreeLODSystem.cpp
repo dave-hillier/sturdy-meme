@@ -7,6 +7,7 @@
 #include "QueueSubmitDiagnostics.h"
 #include "shaders/bindings.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/DescriptorWriter.h"
 
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
@@ -815,103 +816,35 @@ void TreeLODSystem::initializeDescriptorSets(const std::vector<VkBuffer>& unifor
 
     vk::Device vkDevice(device_);
 
+    // Create reusable image/buffer info structs
+    auto albedoInfo = makeImageInfo(atlasSampler, albedoView);
+    auto normalInfo = makeImageInfo(atlasSampler, normalView);
+    auto shadowInfo = makeImageInfo(shadowSampler, shadowMap);
+    auto instanceInfo = makeBufferInfo(instanceBuffer_);
+
     // Initialize main impostor descriptor sets for all frames
     for (uint32_t frameIndex = 0; frameIndex < maxFramesInFlight_; ++frameIndex) {
-        auto uboInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(uniformBuffers[frameIndex])
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
+        auto uboInfo = makeBufferInfo(uniformBuffers[frameIndex]);
 
-        auto albedoInfo = vk::DescriptorImageInfo{}
-            .setSampler(atlasSampler)
-            .setImageView(albedoView)
-            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-
-        auto normalInfo = vk::DescriptorImageInfo{}
-            .setSampler(atlasSampler)
-            .setImageView(normalView)
-            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-
-        auto shadowInfo = vk::DescriptorImageInfo{}
-            .setSampler(shadowSampler)
-            .setImageView(shadowMap)
-            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-
-        auto instanceInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(instanceBuffer_)
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
-
-        std::array<vk::WriteDescriptorSet, 5> writes = {{
-            vk::WriteDescriptorSet{}
-                .setDstSet(impostorDescriptorSets_[frameIndex])
-                .setDstBinding(BINDING_TREE_IMPOSTOR_UBO)
-                .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-                .setBufferInfo(uboInfo),
-            vk::WriteDescriptorSet{}
-                .setDstSet(impostorDescriptorSets_[frameIndex])
-                .setDstBinding(BINDING_TREE_IMPOSTOR_ALBEDO)
-                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                .setImageInfo(albedoInfo),
-            vk::WriteDescriptorSet{}
-                .setDstSet(impostorDescriptorSets_[frameIndex])
-                .setDstBinding(BINDING_TREE_IMPOSTOR_NORMAL)
-                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                .setImageInfo(normalInfo),
-            vk::WriteDescriptorSet{}
-                .setDstSet(impostorDescriptorSets_[frameIndex])
-                .setDstBinding(BINDING_TREE_IMPOSTOR_SHADOW_MAP)
-                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                .setImageInfo(shadowInfo),
-            // Instance buffer (CPU instance buffer - will be overwritten by initializeGPUCulledDescriptors for GPU path)
-            vk::WriteDescriptorSet{}
-                .setDstSet(impostorDescriptorSets_[frameIndex])
-                .setDstBinding(BINDING_TREE_IMPOSTOR_INSTANCES)
-                .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-                .setBufferInfo(instanceInfo)
-        }};
-
-        vkDevice.updateDescriptorSets(writes, nullptr);
+        DescriptorWriter()
+            .add(WriteBuilder::uniformBuffer(BINDING_TREE_IMPOSTOR_UBO, uboInfo))
+            .add(WriteBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_ALBEDO, albedoInfo))
+            .add(WriteBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_NORMAL, normalInfo))
+            .add(WriteBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_SHADOW_MAP, shadowInfo))
+            .add(WriteBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_INSTANCES, instanceInfo))
+            .update(vkDevice, impostorDescriptorSets_[frameIndex]);
     }
 
     // Initialize shadow descriptor sets for all frames
     if (!shadowDescriptorSets_.empty()) {
         for (uint32_t frameIndex = 0; frameIndex < maxFramesInFlight_; ++frameIndex) {
-            auto uboInfo = vk::DescriptorBufferInfo{}
-                .setBuffer(uniformBuffers[frameIndex])
-                .setOffset(0)
-                .setRange(VK_WHOLE_SIZE);
+            auto uboInfo = makeBufferInfo(uniformBuffers[frameIndex]);
 
-            auto albedoInfo = vk::DescriptorImageInfo{}
-                .setSampler(atlasSampler)
-                .setImageView(albedoView)
-                .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-
-            auto instanceInfo = vk::DescriptorBufferInfo{}
-                .setBuffer(instanceBuffer_)
-                .setOffset(0)
-                .setRange(VK_WHOLE_SIZE);
-
-            std::array<vk::WriteDescriptorSet, 3> writes = {{
-                vk::WriteDescriptorSet{}
-                    .setDstSet(shadowDescriptorSets_[frameIndex])
-                    .setDstBinding(BINDING_TREE_IMPOSTOR_UBO)
-                    .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-                    .setBufferInfo(uboInfo),
-                vk::WriteDescriptorSet{}
-                    .setDstSet(shadowDescriptorSets_[frameIndex])
-                    .setDstBinding(BINDING_TREE_IMPOSTOR_ALBEDO)
-                    .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                    .setImageInfo(albedoInfo),
-                // Instance buffer (CPU instance buffer - will be overwritten by initializeGPUCulledDescriptors for GPU path)
-                vk::WriteDescriptorSet{}
-                    .setDstSet(shadowDescriptorSets_[frameIndex])
-                    .setDstBinding(BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES)
-                    .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-                    .setBufferInfo(instanceInfo)
-            }};
-
-            vkDevice.updateDescriptorSets(writes, nullptr);
+            DescriptorWriter()
+                .add(WriteBuilder::uniformBuffer(BINDING_TREE_IMPOSTOR_UBO, uboInfo))
+                .add(WriteBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_ALBEDO, albedoInfo))
+                .add(WriteBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES, instanceInfo))
+                .update(vkDevice, shadowDescriptorSets_[frameIndex]);
         }
     }
 
