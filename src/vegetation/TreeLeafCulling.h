@@ -14,7 +14,8 @@
 #include "TreeSpatialIndex.h"
 #include "CullCommon.h"
 #include "DescriptorManager.h"
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
+#include "FrameIndexedBuffers.h"
 
 // Forward declarations
 class TreeSystem;

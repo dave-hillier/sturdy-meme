@@ -11,7 +11,7 @@
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "VmaImage.h"
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
 #include "interfaces/ICloudShadowControl.h"
 
 // Cloud Shadow System

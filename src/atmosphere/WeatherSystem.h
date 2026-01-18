@@ -8,7 +8,9 @@
 #include <optional>
 #include <memory>
 
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
+#include "DoubleBufferedBuffer.h"
+#include "DynamicUniformBuffer.h"
 #include "ParticleSystem.h"
 #include "UBOs.h"
 #include "interfaces/IWeatherState.h"

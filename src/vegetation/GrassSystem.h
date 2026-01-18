@@ -11,7 +11,9 @@
 #include <memory>
 #include <optional>
 
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
+#include "DoubleBufferedBuffer.h"
+#include "DynamicUniformBuffer.h"
 #include "SystemLifecycleHelper.h"
 #include "BufferSetManager.h"
 #include "UBOs.h"

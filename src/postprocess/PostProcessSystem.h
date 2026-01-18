@@ -11,7 +11,7 @@
 #include <memory>
 #include <optional>
 #include "UBOs.h"
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "VmaBuffer.h"

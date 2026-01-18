@@ -1,7 +1,6 @@
 #include "CatmullClarkSystem.h"
 #include "OBJLoader.h"
 #include "ShaderLoader.h"
-#include "BufferUtils.h"
 #include "VmaBufferFactory.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include <SDL3/SDL.h>

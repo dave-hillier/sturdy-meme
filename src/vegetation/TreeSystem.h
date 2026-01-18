@@ -18,7 +18,6 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "RenderableBuilder.h"
-#include "BufferUtils.h"
 #include "scene/Transform.h"
 
 // GPU leaf instance data - matches shaders/tree_leaf_instance.glsl

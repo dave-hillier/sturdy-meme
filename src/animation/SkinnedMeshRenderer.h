@@ -15,7 +15,7 @@
 #include "MaterialDescriptorFactory.h"
 #include "RenderableBuilder.h"
 #include "GlobalBufferManager.h"
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
 
 class AnimatedCharacter;
 

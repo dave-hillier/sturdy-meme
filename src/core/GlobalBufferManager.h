@@ -8,7 +8,8 @@
 #include <cstring>
 #include <memory>
 
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
+#include "DynamicUniformBuffer.h"
 #include "Light.h"
 #include "UBOs.h"
 

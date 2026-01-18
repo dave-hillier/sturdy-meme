@@ -10,7 +10,7 @@
 #include <memory>
 #include <optional>
 
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
 #include "SystemLifecycleHelper.h"
 #include "EnvironmentSettings.h"
 

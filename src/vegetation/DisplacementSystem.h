@@ -1,7 +1,7 @@
 #pragma once
 
 #include "GrassConstants.h"
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
 #include "DescriptorManager.h"
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>

@@ -84,7 +84,6 @@ set(SOURCES
     src/core/loading/AsyncStartupLoader.cpp
     src/core/loading/LoadJobFactory.cpp
     src/core/Mesh.cpp
-    src/core/BufferUtils.cpp
     src/core/SingleBuffer.cpp
     src/core/PerFrameBuffer.cpp
     src/core/DoubleBufferedBuffer.cpp

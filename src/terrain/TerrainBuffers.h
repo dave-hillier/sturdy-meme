@@ -2,7 +2,8 @@
 
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
-#include "BufferUtils.h"
+#include "SingleBuffer.h"
+#include "PerFrameBuffer.h"
 #include <cstdint>
 #include <memory>
 

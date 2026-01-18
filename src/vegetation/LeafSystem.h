@@ -10,7 +10,9 @@
 #include <memory>
 
 #include "ParticleSystem.h"
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
+#include "DoubleBufferedBuffer.h"
+#include "DynamicUniformBuffer.h"
 #include "UBOs.h"
 #include "interfaces/ILeafControl.h"
 #include "interfaces/IRecordable.h"

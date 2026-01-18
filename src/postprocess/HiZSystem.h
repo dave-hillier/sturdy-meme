@@ -10,7 +10,7 @@
 #include <memory>
 #include <optional>
 
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "Mesh.h"

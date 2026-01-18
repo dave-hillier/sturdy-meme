@@ -7,7 +7,7 @@
 #include <vector>
 #include <memory>
 
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
 #include "UBOs.h"
 
 // Wind system for CPU-side wind management and GPU uniform updates

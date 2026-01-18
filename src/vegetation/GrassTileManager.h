@@ -6,7 +6,7 @@
 #include "GrassTileLoadQueue.h"
 #include "GrassConstants.h"
 #include "GrassLODStrategy.h"
-#include "BufferUtils.h"
+#include "DynamicUniformBuffer.h"
 #include "DescriptorManager.h"
 #include <vulkan/vulkan.hpp>
 #include <vk_mem_alloc.h>

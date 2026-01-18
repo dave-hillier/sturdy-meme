@@ -13,7 +13,8 @@
 
 #include "CullCommon.h"
 #include "DescriptorManager.h"
-#include "BufferUtils.h"
+#include "PerFrameBuffer.h"
+#include "FrameIndexedBuffers.h"
 
 class TreeSystem;
 class TreeLODSystem;
