@@ -46,7 +46,7 @@ void ShadowPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float 
         (void)lightMatrix;  // Grass uses cascade index only
         if (config_.perfToggles && config_.perfToggles->grassShadows) {
             resources_.profiler->beginGpuZone(cb, "Shadow:Grass");
-            resources_.vegetation.grass().recordShadowDraw(cb, frameIndex, time, cascade);
+            resources_.vegetation.grass().recordShadowDraw(cb, frameIndex, time, static_cast<int>(cascade));
             resources_.profiler->endGpuZone(cb, "Shadow:Grass");
         }
     };

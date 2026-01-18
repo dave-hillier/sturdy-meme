@@ -2,7 +2,6 @@
 
 #include "SystemGroupMacros.h"
 #include "InitContext.h"
-#include "TerrainConfig.h"
 
 #include <memory>
 #include <optional>
@@ -10,6 +9,7 @@
 #include <vulkan/vulkan.h>
 
 // Forward declarations
+struct TerrainConfig;
 class WaterSystem;
 class WaterDisplacement;
 class FlowMapGenerator;

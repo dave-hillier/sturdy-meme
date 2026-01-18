@@ -231,8 +231,9 @@ bool WaterSystemGroup::createDescriptorSets(
     }
 
     // Create water G-buffer descriptor sets
-    if (systems.waterGBuffer() && systems.waterGBuffer()->getPipeline() != VK_NULL_HANDLE) {
-        if (!systems.waterGBuffer()->createDescriptorSets(
+    auto waterGroup = systems.waterGroup();
+    if (waterGroup.hasGBuffer() && waterGroup.gBuffer()->getPipeline() != VK_NULL_HANDLE) {
+        if (!waterGroup.gBuffer()->createDescriptorSets(
                 uniformBuffers, uniformBufferSize,
                 systems.water().getUniformBuffers(), WaterSystem::getUniformBufferSize(),
                 terrainSystem.getHeightMapView(), terrainSystem.getHeightMapSampler(),

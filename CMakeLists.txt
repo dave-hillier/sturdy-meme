@@ -94,6 +94,8 @@ set(SOURCES
     src/core/material/MaterialRegistry.cpp
     src/core/asset/AssetRegistry.cpp
     src/core/RenderableBuilder.cpp
+    src/core/RenderingInfrastructure.cpp
+    src/core/DescriptorInfrastructure.cpp
     # Atmosphere
     src/atmosphere/TimeSystem.cpp
     src/atmosphere/CelestialCalculator.cpp
