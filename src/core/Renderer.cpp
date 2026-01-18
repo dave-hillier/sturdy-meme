@@ -238,7 +238,7 @@ void Renderer::setupFrameGraph() {
 
 #ifdef JPH_DEBUG_RENDERER
 void Renderer::updatePhysicsDebug(PhysicsWorld& physics, const glm::vec3& cameraPos) {
-    if (!physicsDebugEnabled) return;
+    if (!systems_->debugControlSubsystem().isPhysicsDebugEnabled()) return;
 
     // Begin debug line frame (clear previous and set frame index)
     // This is called here so physics debug lines can be collected before render()

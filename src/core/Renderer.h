@@ -134,11 +134,6 @@ public:
     void toggleSnowDepthDebug() { showSnowDepthDebug = !showSnowDepthDebug; }
     bool isShowingSnowDepthDebug() const { return showSnowDepthDebug; }
 
-
-    // Physics debug (local state)
-    void setPhysicsDebugEnabled(bool enabled) { physicsDebugEnabled = enabled; }
-    bool isPhysicsDebugEnabled() const { return physicsDebugEnabled; }
-
     // Resource access
     VkCommandPool getCommandPool() const { return vulkanContext_->getCommandPool(); }
     DescriptorManager::Pool* getDescriptorPool();
@@ -200,7 +195,6 @@ private:
     // Descriptor and pipeline infrastructure (extracted from Renderer)
     DescriptorInfrastructure descriptorInfra_;
 
-    bool physicsDebugEnabled = false;
     glm::mat4 lastViewProj{1.0f};  // Cached view-projection for debug rendering
     bool useVolumetricSnow = true;  // Use new volumetric system by default
 
