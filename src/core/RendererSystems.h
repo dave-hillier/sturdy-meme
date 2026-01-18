@@ -16,6 +16,7 @@
 class EnvironmentControlSubsystem;
 class WaterControlSubsystem;
 class TreeControlSubsystem;
+class GrassControlAdapter;
 class DebugControlSubsystem;
 class PerformanceControlSubsystem;
 class SceneControlSubsystem;
@@ -30,6 +31,7 @@ class ICloudShadowControl;
 class ITerrainControl;
 class IWaterControl;
 class ITreeControl;
+class IGrassControl;
 class IDebugControl;
 class IProfilerControl;
 class IPerformanceControl;
@@ -394,6 +396,8 @@ public:
     const IWaterControl& waterControl() const;
     ITreeControl& treeControl();
     const ITreeControl& treeControl() const;
+    IGrassControl& grassControl();
+    const IGrassControl& grassControl() const;
     IDebugControl& debugControl();
     const IDebugControl& debugControl() const;
     // Direct access for internal callers that need concrete type
@@ -493,6 +497,7 @@ private:
     std::unique_ptr<EnvironmentControlSubsystem> environmentControl_;
     std::unique_ptr<WaterControlSubsystem> waterControl_;
     std::unique_ptr<TreeControlSubsystem> treeControl_;
+    std::unique_ptr<GrassControlAdapter> grassControl_;
     std::unique_ptr<DebugControlSubsystem> debugControl_;
     std::unique_ptr<PerformanceControlSubsystem> performanceControl_;
     std::unique_ptr<SceneControlSubsystem> sceneControl_;

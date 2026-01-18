@@ -75,6 +75,7 @@ private:
     void renderTerrainWindow(GuiInterfaces& ui);
     void renderWaterWindow(GuiInterfaces& ui);
     void renderTreesWindow(GuiInterfaces& ui);
+    void renderGrassWindow(GuiInterfaces& ui);
     void renderPlayerWindow(GuiInterfaces& ui);
     void renderIKWindow(GuiInterfaces& ui, const Camera& camera);
     void renderDebugWindow(GuiInterfaces& ui);
@@ -115,6 +116,7 @@ private:
         bool showTerrain = false;
         bool showWater = false;
         bool showTrees = false;
+        bool showGrass = false;
         bool showPlayer = false;
         bool showIK = false;
         bool showDebug = false;

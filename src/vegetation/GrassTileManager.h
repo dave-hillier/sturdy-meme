@@ -5,6 +5,7 @@
 #include "GrassTileResourcePool.h"
 #include "GrassTileLoadQueue.h"
 #include "GrassConstants.h"
+#include "GrassLODStrategy.h"
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
 #include <vulkan/vulkan.hpp>
@@ -145,6 +146,20 @@ public:
      * Access to load queue for configuration
      */
     GrassTileLoadQueue& getLoadQueue() { return loadQueue_; }
+
+    /**
+     * Set the LOD strategy (forwards to tracker)
+     */
+    void setLODStrategy(std::unique_ptr<IGrassLODStrategy> strategy) {
+        tracker_.setLODStrategy(std::move(strategy));
+    }
+
+    /**
+     * Get the current LOD strategy
+     */
+    const IGrassLODStrategy* getLODStrategy() const {
+        return tracker_.getLODStrategy();
+    }
 
 private:
     /**

@@ -2,18 +2,20 @@
 
 #include "GrassTile.h"
 #include "GrassConstants.h"
+#include "GrassLODStrategy.h"
 #include <glm/glm.hpp>
 #include <vector>
 #include <unordered_set>
 #include <cmath>
 #include <algorithm>
+#include <memory>
 
 /**
  * GrassTileTracker - Pure logic class for grass tile management
  *
  * This class handles:
  * - Determining which tiles should be active based on camera position
- * - LOD level decisions
+ * - LOD level decisions (using configurable LOD strategy)
  * - Load/unload requests (returns requests, doesn't execute them)
  * - Tile coordinate calculations
  *
@@ -42,7 +44,18 @@ public:
         std::vector<TileCoord> activeTiles;       // All currently active tiles (sorted)
     };
 
-    GrassTileTracker() = default;
+    GrassTileTracker();
+
+    /**
+     * Set the LOD strategy (takes ownership)
+     * If null, uses default strategy
+     */
+    void setLODStrategy(std::unique_ptr<IGrassLODStrategy> strategy);
+
+    /**
+     * Get the current LOD strategy
+     */
+    const IGrassLODStrategy* getLODStrategy() const { return lodStrategy_.get(); }
 
     /**
      * Update active tiles based on camera position
@@ -117,6 +130,11 @@ private:
      */
     float getUnloadRadiusForLod(uint32_t lod) const;
 
+    /**
+     * Calculate tile coordinate using current LOD strategy
+     */
+    TileCoord worldToTileCoordWithStrategy(const glm::vec2& worldPos, uint32_t lod) const;
+
     // Tracking data for loaded tiles
     struct TileInfo {
         uint64_t lastUsedFrame = 0;
@@ -125,6 +143,9 @@ private:
     std::unordered_map<TileCoord, TileInfo, TileCoordHash> loadedTiles_;
     std::unordered_set<TileCoord, TileCoordHash> activeTileSet_;
     TileCoord currentCameraTile_{0, 0, 0};
+
+    // LOD strategy (owned)
+    std::unique_ptr<IGrassLODStrategy> lodStrategy_;
 };
 
 // Inline implementations

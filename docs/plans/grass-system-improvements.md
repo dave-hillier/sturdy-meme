@@ -384,9 +384,9 @@ Each phase should include:
 | 2 - VegetationRenderContext | ✅ Complete | Context struct introduced |
 | 3 - ParticleSystem decoupling | ✅ Complete | GrassSystem uses SystemLifecycleHelper + BufferSetManager directly |
 | 4 - TileManager split | ✅ Complete | GrassTileTracker (logic) + GrassTileResourcePool (Vulkan) |
-| 5 - LOD Strategy | Pending | |
+| 5 - LOD Strategy | ✅ Complete | IGrassLODStrategy interface with 4 presets (Default, Performance, Quality, Ultra) |
 | 6 - Async Loading | ✅ Complete | GrassTileLoadQueue with priority and frame budget |
-| 7 - Debug Viz | Pending | |
+| 7 - Debug Viz | ✅ Complete | ImGui grass panel with LOD controls, statistics, and debug visualization toggles |
 
 ---
 

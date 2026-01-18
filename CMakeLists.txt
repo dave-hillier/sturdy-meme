@@ -112,11 +112,13 @@ set(SOURCES
     # Vegetation
     src/vegetation/DisplacementSystem.cpp
     src/vegetation/GrassSystem.cpp
+    src/vegetation/GrassLODStrategy.cpp
     src/vegetation/GrassTile.cpp
     src/vegetation/VegetationRenderContext.cpp
     src/vegetation/GrassTileManager.cpp
     src/vegetation/GrassTileTracker.cpp
     src/vegetation/GrassTileResourcePool.cpp
+    src/vegetation/GrassControlAdapter.cpp
     src/vegetation/LeafSystem.cpp
     src/vegetation/RockSystem.cpp
     src/vegetation/TreeSystem.cpp
@@ -196,6 +198,7 @@ set(SOURCES
     src/gui/GuiPlayerTab.cpp
     src/gui/GuiPerformanceTab.cpp
     src/gui/GuiTreeTab.cpp
+    src/gui/GuiGrassTab.cpp
     src/gui/GuiSceneGraphTab.cpp
     # Subdivision
     src/subdivision/CatmullClarkCBT.cpp

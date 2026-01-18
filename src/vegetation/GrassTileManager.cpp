@@ -197,9 +197,10 @@ void GrassTileManager::recordCompute(vk::CommandBuffer cmd, uint32_t frameIndex,
                                computePipelineLayout_, 0,
                                descSet, {});
 
-        // Calculate tile properties
-        float tileSize = GrassConstants::getTileSizeForLod(tileData.coord.lod);
-        float spacingMult = GrassConstants::getSpacingMultForLod(tileData.coord.lod);
+        // Calculate tile properties using LOD strategy
+        const IGrassLODStrategy* strategy = tracker_.getLODStrategy();
+        float tileSize = strategy->getTileSize(tileData.coord.lod);
+        float spacingMult = strategy->getSpacingMultiplier(tileData.coord.lod);
         glm::vec2 tileOrigin(
             static_cast<float>(tileData.coord.x) * tileSize,
             static_cast<float>(tileData.coord.z) * tileSize

@@ -53,6 +53,12 @@ public:
      */
     void setConfig(const Config& config) { config_ = config; }
     const Config& getConfig() const { return config_; }
+    Config& getConfig() { return config_; }
+
+    /**
+     * Get max loads per frame
+     */
+    uint32_t getMaxLoadsPerFrame() const { return config_.maxLoadsPerFrame; }
 
     /**
      * Enqueue a tile for loading with priority

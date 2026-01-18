@@ -58,6 +58,7 @@
 #include "controls/EnvironmentControlSubsystem.h"
 #include "controls/WaterControlSubsystem.h"
 #include "controls/TreeControlSubsystem.h"
+#include "vegetation/GrassControlAdapter.h"
 #include "controls/DebugControlSubsystem.h"
 #include "controls/PerformanceControlSubsystem.h"
 #include "controls/SceneControlSubsystem.h"
@@ -399,6 +400,7 @@ void RendererSystems::initControlSubsystems(VulkanContext& vulkanContext, Perfor
         *postProcessSystem_, *environmentSettings_);
     waterControl_ = std::make_unique<WaterControlSubsystem>(*waterSystem_, *waterTileCull_);
     treeControl_ = std::make_unique<TreeControlSubsystem>(treeSystem_.get(), *this);
+    grassControl_ = std::make_unique<GrassControlAdapter>(*grassSystem_);
     debugControl_ = std::make_unique<DebugControlSubsystem>(*debugLineSystem_, *hiZSystem_, *this);
     performanceControl_ = std::make_unique<PerformanceControlSubsystem>(perfToggles, nullptr);
     sceneControl_ = std::make_unique<SceneControlSubsystem>(*sceneManager_, vulkanContext);
@@ -439,6 +441,9 @@ const IWaterControl& RendererSystems::waterControl() const { return *waterContro
 
 ITreeControl& RendererSystems::treeControl() { return *treeControl_; }
 const ITreeControl& RendererSystems::treeControl() const { return *treeControl_; }
+
+IGrassControl& RendererSystems::grassControl() { return *grassControl_; }
+const IGrassControl& RendererSystems::grassControl() const { return *grassControl_; }
 
 IDebugControl& RendererSystems::debugControl() { return *debugControl_; }
 const IDebugControl& RendererSystems::debugControl() const { return *debugControl_; }
