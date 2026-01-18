@@ -91,7 +91,7 @@ CONST_FLOAT_DERIVED(GRASS_COVERAGE_HALF_EXTENT, GRASS_TILE_SIZE * 1.5);
 // Distance-based density falloff for smooth LOD transitions
 // Ghost of Tsushima: ~83k rendered from 1M considered with 100k budget
 // Full density up to CULL_START_DISTANCE, then falloff to zero at CULL_END_DISTANCE
-CONST_FLOAT(GRASS_CULL_START_DISTANCE, 20.0);   // Full density within this range
+CONST_FLOAT(GRASS_CULL_START_DISTANCE, 5.0);    // Full density within this range
 CONST_FLOAT(GRASS_CULL_END_DISTANCE, 80.0);     // Zero density beyond this range
 CONST_FLOAT(GRASS_CULL_POWER, 3.0);             // Power curve for falloff (3.0 = cubic, more aggressive)
 
