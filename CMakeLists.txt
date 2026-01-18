@@ -85,6 +85,12 @@ set(SOURCES
     src/core/loading/LoadJobFactory.cpp
     src/core/Mesh.cpp
     src/core/BufferUtils.cpp
+    src/core/SingleBuffer.cpp
+    src/core/PerFrameBuffer.cpp
+    src/core/DoubleBufferedBuffer.cpp
+    src/core/DynamicUniformBuffer.cpp
+    src/core/DoubleBufferedImage.cpp
+    src/core/FrameIndexedBuffers.cpp
     src/core/TripleBuffering.cpp
     src/core/Texture.cpp
     src/core/ShaderLoader.cpp
