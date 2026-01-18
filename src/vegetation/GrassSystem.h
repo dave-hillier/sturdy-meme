@@ -26,6 +26,7 @@ class WindSystem;
 class GrassTileManager;
 class DisplacementSystem;
 struct InitContext;
+class VulkanServices;
 
 // Legacy push constants for non-tiled mode (and shadow pass)
 struct GrassPushConstants {
@@ -92,6 +93,17 @@ public:
      */
     static std::optional<Bundle> createWithDependencies(
         const InitContext& ctx,
+        vk::RenderPass hdrRenderPass,
+        vk::RenderPass shadowRenderPass,
+        uint32_t shadowMapSize
+    );
+
+    /**
+     * Factory: Create using VulkanServices (DI-friendly).
+     * Reduces boilerplate from 13 lines to 1 line.
+     */
+    static std::optional<Bundle> createWithDependencies(
+        const VulkanServices& services,
         vk::RenderPass hdrRenderPass,
         vk::RenderPass shadowRenderPass,
         uint32_t shadowMapSize

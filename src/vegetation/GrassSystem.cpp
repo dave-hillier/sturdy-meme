@@ -3,6 +3,7 @@
 #include "GrassTileManager.h"
 #include "WindSystem.h"
 #include "InitContext.h"
+#include "VulkanServices.h"
 #include "CullCommon.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
@@ -69,6 +70,54 @@ std::optional<GrassSystem::Bundle> GrassSystem::createWithDependencies(
     }
 
     // Wire environment settings from wind to grass
+    grassSystem->setEnvironmentSettings(&windSystem->getEnvironmentSettings());
+
+    return Bundle{
+        std::move(windSystem),
+        std::move(grassSystem)
+    };
+}
+
+std::optional<GrassSystem::Bundle> GrassSystem::createWithDependencies(
+    const VulkanServices& services,
+    vk::RenderPass hdrRenderPass,
+    vk::RenderPass shadowRenderPass,
+    uint32_t shadowMapSize
+) {
+    // DI version: 4 lines instead of 13
+    // Wind system: VulkanServices provides device, allocator, framesInFlight
+    WindSystem::InitInfo windInfo{
+        .device = services.device(),
+        .allocator = services.allocator(),
+        .framesInFlight = services.framesInFlight()
+    };
+
+    auto windSystem = WindSystem::create(windInfo);
+    if (!windSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize WindSystem");
+        return std::nullopt;
+    }
+
+    // Grass system: VulkanServices provides 7 common fields
+    InitInfo grassInfo{
+        .device = services.vkDevice(),
+        .allocator = services.allocator(),
+        .renderPass = hdrRenderPass,
+        .descriptorPool = services.descriptorPool(),
+        .extent = services.vkExtent(),
+        .shaderPath = services.shaderPath(),
+        .framesInFlight = services.framesInFlight(),
+        .raiiDevice = services.raiiDevice(),
+        .shadowRenderPass = shadowRenderPass,
+        .shadowMapSize = shadowMapSize
+    };
+
+    auto grassSystem = create(grassInfo);
+    if (!grassSystem) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GrassSystem");
+        return std::nullopt;
+    }
+
     grassSystem->setEnvironmentSettings(&windSystem->getEnvironmentSettings());
 
     return Bundle{
