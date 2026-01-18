@@ -733,15 +733,8 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     // Update config in case state changed at runtime
     HDRPassRecorder::Config config;
     config.terrainEnabled = terrainEnabled;
-<<<<<<< HEAD
-    config.sceneObjectsPipeline = descriptorInfra_.hasPipeline() ?
-        descriptorInfra_.getGraphicsPipelinePtr() : nullptr;
-    config.pipelineLayout = descriptorInfra_.hasPipeline() ?
-        descriptorInfra_.getPipelineLayoutPtr() : nullptr;
-=======
     config.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
     config.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
->>>>>>> origin/main
     config.lastViewProj = &lastViewProj;
     hdrPassRecorder_->setConfig(config);
 
@@ -754,15 +747,8 @@ void Renderer::recordHDRPassWithSecondaries(VkCommandBuffer cmd, uint32_t frameI
     // Update config in case state changed at runtime
     HDRPassRecorder::Config config;
     config.terrainEnabled = terrainEnabled;
-<<<<<<< HEAD
-    config.sceneObjectsPipeline = descriptorInfra_.hasPipeline() ?
-        descriptorInfra_.getGraphicsPipelinePtr() : nullptr;
-    config.pipelineLayout = descriptorInfra_.hasPipeline() ?
-        descriptorInfra_.getPipelineLayoutPtr() : nullptr;
-=======
     config.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
     config.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
->>>>>>> origin/main
     config.lastViewProj = &lastViewProj;
     hdrPassRecorder_->setConfig(config);
 
@@ -774,15 +760,8 @@ void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
     // Update config in case state changed at runtime
     HDRPassRecorder::Config config;
     config.terrainEnabled = terrainEnabled;
-<<<<<<< HEAD
-    config.sceneObjectsPipeline = descriptorInfra_.hasPipeline() ?
-        descriptorInfra_.getGraphicsPipelinePtr() : nullptr;
-    config.pipelineLayout = descriptorInfra_.hasPipeline() ?
-        descriptorInfra_.getPipelineLayoutPtr() : nullptr;
-=======
     config.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
     config.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
->>>>>>> origin/main
     config.lastViewProj = &lastViewProj;
     hdrPassRecorder_->setConfig(config);
 

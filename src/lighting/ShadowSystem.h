@@ -16,7 +16,6 @@
 #include "RenderableBuilder.h"
 #include "SkinnedMesh.h"
 #include "VulkanHelpers.h"
-#include "interfaces/IShadowMapProvider.h"
 
 // Number of cascades for CSM
 static constexpr uint32_t NUM_SHADOW_CASCADES = 4;
@@ -29,7 +28,7 @@ struct alignas(16) ShadowPushConstants {
     int padding[3];    // Padding to align
 };
 
-class ShadowSystem : public ICascadedShadowMapProvider {
+class ShadowSystem {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -90,18 +89,18 @@ public:
     // Bind the skinned shadow pipeline (call once, then record multiple skinned meshes)
     void bindSkinnedShadowPipeline(VkCommandBuffer cmd, VkDescriptorSet descriptorSet);
 
-    // IShadowMapProvider interface
-    vk::ImageView getShadowImageView() const override { return vk::ImageView(csmResources.getArrayView()); }
-    vk::Sampler getShadowSampler() const override { return vk::Sampler(csmResources.getSampler()); }
-    uint32_t getShadowMapSize() const override { return SHADOW_MAP_SIZE; }
+    // Shadow map accessors (vulkan-hpp)
+    vk::ImageView getShadowImageView() const { return vk::ImageView(csmResources.getArrayView()); }
+    vk::Sampler getShadowSampler() const { return vk::Sampler(csmResources.getSampler()); }
+    uint32_t getShadowMapSize() const { return SHADOW_MAP_SIZE; }
 
-    // ICascadedShadowMapProvider interface
-    uint32_t getCascadeCount() const override { return NUM_SHADOW_CASCADES; }
-    vk::ImageView getCascadeView(uint32_t cascade) const override {
+    // Cascade accessors (vulkan-hpp)
+    uint32_t getCascadeCount() const { return NUM_SHADOW_CASCADES; }
+    vk::ImageView getCascadeView(uint32_t cascade) const {
         return cascade < NUM_SHADOW_CASCADES ? vk::ImageView(csmResources.getLayerView(cascade)) : vk::ImageView{};
     }
-    vk::RenderPass getShadowRenderPass() const override { return vk::RenderPass(shadowRenderPass); }
-    vk::Framebuffer getCascadeFramebuffer(uint32_t cascade) const override {
+    vk::RenderPass getShadowRenderPass() const { return vk::RenderPass(shadowRenderPass); }
+    vk::Framebuffer getCascadeFramebuffer(uint32_t cascade) const {
         return cascade < cascadeFramebuffers.size() ? vk::Framebuffer(cascadeFramebuffers[cascade]) : vk::Framebuffer{};
     }
 

@@ -5,14 +5,12 @@
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
-#include <span>
 #include <cstring>
 #include <memory>
 
 #include "BufferUtils.h"
 #include "Light.h"
 #include "UBOs.h"
-#include "interfaces/IFrameBuffers.h"
 
 /**
  * GlobalBufferManager - Manages per-frame shared GPU buffers
@@ -26,7 +24,7 @@
  *   auto buffers = GlobalBufferManager::create(allocator, physicalDevice, frameCount);
  *   if (!buffers) { handle error; }
  */
-class GlobalBufferManager : public IExtendedFrameBuffers {
+class GlobalBufferManager {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -68,42 +66,22 @@ public:
     BufferUtils::DynamicUniformBuffer dynamicRendererUBO;
 
     // Configuration accessors
-    uint32_t getFramesInFlight() const override { return framesInFlight_; }
+    uint32_t getFramesInFlight() const { return framesInFlight_; }
     uint32_t getMaxBoneMatrices() const { return maxBoneMatrices_; }
 
-    // IFrameBuffers interface - Use reinterpret_cast since vk::Buffer is a zero-overhead wrapper
-    std::span<const vk::Buffer> getUniformBuffers() const override {
-        return std::span<const vk::Buffer>(
-            reinterpret_cast<const vk::Buffer*>(uniformBuffers.buffers.data()),
-            uniformBuffers.buffers.size()
-        );
-    }
-    size_t getUniformBufferSize() const override { return sizeof(UniformBufferObject); }
+    // Buffer accessors - Return raw VkBuffer vectors (wrapped by BufferUtils::PerFrameBufferSet)
+    const std::vector<VkBuffer>& getUniformBuffers() const { return uniformBuffers.buffers; }
+    size_t getUniformBufferSize() const { return sizeof(UniformBufferObject); }
 
-    std::span<const vk::Buffer> getLightBuffers() const override {
-        return std::span<const vk::Buffer>(
-            reinterpret_cast<const vk::Buffer*>(lightBuffers.buffers.data()),
-            lightBuffers.buffers.size()
-        );
-    }
-    size_t getLightBufferSize() const override { return sizeof(LightBuffer); }
+    const std::vector<VkBuffer>& getLightBuffers() const { return lightBuffers.buffers; }
+    size_t getLightBufferSize() const { return sizeof(LightBuffer); }
 
-    // IExtendedFrameBuffers interface
-    std::span<const vk::Buffer> getSnowBuffers() const override {
-        return std::span<const vk::Buffer>(
-            reinterpret_cast<const vk::Buffer*>(snowBuffers.buffers.data()),
-            snowBuffers.buffers.size()
-        );
-    }
-    size_t getSnowBufferSize() const override { return sizeof(SnowUBO); }
+    // Extended buffer accessors
+    const std::vector<VkBuffer>& getSnowBuffers() const { return snowBuffers.buffers; }
+    size_t getSnowBufferSize() const { return sizeof(SnowUBO); }
 
-    std::span<const vk::Buffer> getCloudShadowBuffers() const override {
-        return std::span<const vk::Buffer>(
-            reinterpret_cast<const vk::Buffer*>(cloudShadowBuffers.buffers.data()),
-            cloudShadowBuffers.buffers.size()
-        );
-    }
-    size_t getCloudShadowBufferSize() const override { return sizeof(CloudShadowUBO); }
+    const std::vector<VkBuffer>& getCloudShadowBuffers() const { return cloudShadowBuffers.buffers; }
+    size_t getCloudShadowBufferSize() const { return sizeof(CloudShadowUBO); }
 
 private:
     bool initInternal(VmaAllocator allocator, VkPhysicalDevice physicalDevice,
