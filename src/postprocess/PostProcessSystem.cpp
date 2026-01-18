@@ -9,6 +9,7 @@
 #include "VmaBuffer.h"
 #include "CommandBufferUtils.h"
 #include "core/vulkan/BarrierHelpers.h"
+#include "core/vulkan/RenderPassBuilder.h"
 #include "core/ImageBuilder.h"
 #include <SDL3/SDL.h>
 #include <array>
@@ -209,63 +210,19 @@ bool PostProcessSystem::createHDRRenderTarget() {
 }
 
 bool PostProcessSystem::createHDRRenderPass() {
-    auto colorAttachment = vk::AttachmentDescription{}
-        .setFormat(static_cast<vk::Format>(HDR_FORMAT))
-        .setSamples(vk::SampleCountFlagBits::e1)
-        .setLoadOp(vk::AttachmentLoadOp::eClear)
-        .setStoreOp(vk::AttachmentStoreOp::eStore)
-        .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
-        .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
-        .setInitialLayout(vk::ImageLayout::eUndefined)
-        .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
+    auto renderPassOpt = RenderPassBuilder()
+        .addColorAttachment(AttachmentBuilder::color(static_cast<vk::Format>(HDR_FORMAT))
+            .finalLayout(vk::ImageLayout::eShaderReadOnlyOptimal))
+        .setDepthAttachment(AttachmentBuilder::depth(static_cast<vk::Format>(DEPTH_FORMAT))
+            .storeOp(vk::AttachmentStoreOp::eStore)
+            .finalLayout(vk::ImageLayout::eDepthStencilReadOnlyOptimal))
+        .build(*raiiDevice_);
 
-    auto depthAttachment = vk::AttachmentDescription{}
-        .setFormat(static_cast<vk::Format>(DEPTH_FORMAT))
-        .setSamples(vk::SampleCountFlagBits::e1)
-        .setLoadOp(vk::AttachmentLoadOp::eClear)
-        .setStoreOp(vk::AttachmentStoreOp::eStore)  // Store for sampling in post-process
-        .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
-        .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
-        .setInitialLayout(vk::ImageLayout::eUndefined)
-        .setFinalLayout(vk::ImageLayout::eDepthStencilReadOnlyOptimal);  // For sampling
-
-    auto colorAttachmentRef = vk::AttachmentReference{}
-        .setAttachment(0)
-        .setLayout(vk::ImageLayout::eColorAttachmentOptimal);
-
-    auto depthAttachmentRef = vk::AttachmentReference{}
-        .setAttachment(1)
-        .setLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
-
-    auto subpass = vk::SubpassDescription{}
-        .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
-        .setColorAttachments(colorAttachmentRef)
-        .setPDepthStencilAttachment(&depthAttachmentRef);
-
-    auto dependency = vk::SubpassDependency{}
-        .setSrcSubpass(VK_SUBPASS_EXTERNAL)
-        .setDstSubpass(0)
-        .setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput |
-                         vk::PipelineStageFlagBits::eEarlyFragmentTests)
-        .setSrcAccessMask(vk::AccessFlags{})
-        .setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput |
-                         vk::PipelineStageFlagBits::eEarlyFragmentTests)
-        .setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite |
-                          vk::AccessFlagBits::eDepthStencilAttachmentWrite);
-
-    std::array<vk::AttachmentDescription, 2> attachments = {colorAttachment, depthAttachment};
-
-    auto renderPassInfo = vk::RenderPassCreateInfo{}
-        .setAttachments(attachments)
-        .setSubpasses(subpass)
-        .setDependencies(dependency);
-
-    auto result = vk::Device(device).createRenderPass(renderPassInfo);
-    if (!result) {
+    if (!renderPassOpt) {
         SDL_Log("Failed to create HDR render pass");
         return false;
     }
-    hdrRenderPass = result;
+    hdrRenderPass = **renderPassOpt;
 
     return true;
 }
