@@ -9,6 +9,7 @@
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/DescriptorSetLayoutBuilder.h"
 #include "core/vulkan/DescriptorWriter.h"
+#include "core/vulkan/VertexInputBuilder.h"
 
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
@@ -407,20 +408,12 @@ bool TreeLODSystem::createShadowPipeline() {
     }};
 
     // Vertex input: only billboard quad vertices (instances come from SSBO)
-    auto bindingDescription = vk::VertexInputBindingDescription{}
-        .setBinding(0)
-        .setStride(sizeof(glm::vec3) + sizeof(glm::vec2))
-        .setInputRate(vk::VertexInputRate::eVertex);
-
-    std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions = {{
-        vk::VertexInputAttributeDescription{}.setLocation(0).setBinding(0).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(0),  // inPosition
-        vk::VertexInputAttributeDescription{}.setLocation(1).setBinding(0).setFormat(vk::Format::eR32G32Sfloat).setOffset(sizeof(glm::vec3))  // inTexCoord
-    }};
-
-    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
-        .setVertexBindingDescriptionCount(1)
-        .setPVertexBindingDescriptions(&bindingDescription)
-        .setVertexAttributeDescriptions(attributeDescriptions);
+    // Position (vec3) + TexCoord (vec2)
+    auto vertexInput = VertexInputBuilder()
+        .addBinding(VertexBindingBuilder(0, sizeof(glm::vec3) + sizeof(glm::vec2)))
+        .addAttribute(AttributeBuilder::vec3(0, 0, 0))                    // inPosition
+        .addAttribute(AttributeBuilder::vec2(1, 0, sizeof(glm::vec3)));   // inTexCoord
+    auto vertexInputInfo = vertexInput.build();
 
     auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
         .setTopology(vk::PrimitiveTopology::eTriangleList);
