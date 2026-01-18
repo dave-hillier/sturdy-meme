@@ -57,6 +57,10 @@ const float GRASS_SSS_STRENGTH = 0.35;
 const float GRASS_SPECULAR_STRENGTH = 0.15;
 const float GRASS_BACKLIT_DIFFUSE = 0.6;
 
+// Blade normal curvature (makes blades appear rounded, not flat)
+// 0.0 = flat normals, 1.0 = strongly curved outward at edges
+const float GRASS_BLADE_CURVATURE = 0.6;
+
 // Rendering enhancements
 const float GRASS_EDGE_THICKEN_MAX = 3.0;
 const float GRASS_EDGE_THICKEN_FACTOR = 2.0;

@@ -137,8 +137,20 @@ void main() {
                         terrainNormal * localTangent.y +
                         T * localTangent.z;
 
-    // Normal is perpendicular to both tangent and blade width direction
-    vec3 normal = normalize(cross(worldTangent, bladeRight));
+    // Base normal is perpendicular to both tangent and blade width direction
+    vec3 surfaceNormal = normalize(cross(worldTangent, bladeRight));
+
+    // Add curvature to make blades appear rounded rather than flat
+    // Determine which side of blade this vertex is on (-1 = left, +1 = right, 0 = tip)
+    float sideFactor = 0.0;
+    if (widthAtT > 0.001) {
+        sideFactor = localPos.x / widthAtT;  // -1 for left edge, +1 for right edge
+    }
+
+    // Tilt normal outward at edges (along bladeRight direction)
+    // This creates a curved appearance even though geometry is flat
+    vec3 outwardTilt = bladeRight * sideFactor;
+    vec3 normal = normalize(mix(surfaceNormal, outwardTilt, GRASS_BLADE_CURVATURE * 0.5));
 
     // Color gradient: darker at base, lighter at tip using unified constants
     fragColor = mix(GRASS_COLOR_BASE, GRASS_COLOR_TIP, t);
