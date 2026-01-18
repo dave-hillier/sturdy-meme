@@ -704,19 +704,17 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     skeleton.computeGlobalTransforms(globalTransforms);
 
     // Hand bone is at the wrist - need to offset to palm position
-    // In Mixamo rigs: X = thumb direction, Y = up arm, Z = finger direction
+    // In Mixamo rigs: X = thumb direction, Y = up arm toward elbow, Z = finger direction
     const float wristToPalmOffset = 0.08f;  // ~8cm from wrist to palm center
 
     // Update sword transform (attached to right hand)
-    // Uses same approach as cape: worldTransform * boneGlobal
     if (rightHandBoneIndex >= 0 && swordIndex < sceneObjects.size()) {
         glm::mat4 boneWorld = worldTransform * globalTransforms[rightHandBoneIndex];
 
-        // Offset from wrist to palm, then rotate cylinder to point along Z (fingers)
-        // and offset along sword length so it extends from grip
-        glm::mat4 swordOffset = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, wristToPalmOffset));
-        swordOffset = glm::rotate(swordOffset, glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        swordOffset = glm::translate(swordOffset, glm::vec3(0.0f, 0.4f, 0.0f));  // Along sword length
+        // Cylinder has height along Y. We want it to point along bone's Z (finger direction).
+        // Rotate 90° around X to tip Y toward Z, then offset along sword length and to palm
+        glm::mat4 swordOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        swordOffset = glm::translate(swordOffset, glm::vec3(0.0f, wristToPalmOffset + 0.4f, 0.0f));  // Along sword (now Z dir)
 
         sceneObjects[swordIndex].transform = boneWorld * swordOffset;
     }
@@ -725,10 +723,10 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     if (leftHandBoneIndex >= 0 && shieldIndex < sceneObjects.size()) {
         glm::mat4 boneWorld = worldTransform * globalTransforms[leftHandBoneIndex];
 
-        // Offset from wrist to forearm, rotate so flat face points outward (along Z)
-        // Cylinder Y axis needs to point along bone Z (finger direction)
-        glm::mat4 shieldOffset = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, wristToPalmOffset));
-        shieldOffset = glm::rotate(shieldOffset, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        // Shield flat face (cylinder Y axis) should point outward from arm (along bone's Z)
+        // Rotate 90° around X to make Y point toward Z
+        glm::mat4 shieldOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        shieldOffset = glm::translate(shieldOffset, glm::vec3(0.0f, wristToPalmOffset, 0.0f));  // Offset to forearm
 
         sceneObjects[shieldIndex].transform = boneWorld * shieldOffset;
     }
