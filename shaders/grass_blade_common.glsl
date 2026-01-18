@@ -87,43 +87,40 @@ float grassPerlinNoise(float x, float y) {
     return (res + 1.0) * 0.5;
 }
 
-// Sample wind using scrolling Perlin noise with wave-aligned coordinates
-// Creates wave-like motion perpendicular to wind direction
+// Sample wind creating rolling wave effect
+// Uses sinusoidal waves as the primary pattern for clear visible wave motion
 // windDir: xy = normalized direction
 // windStrength: wind strength
-// windSpeed: wind speed
+// windSpeed: wind speed (controls wave travel speed)
 // windTime: time for animation
 // gustFreq: gust frequency
 // gustAmp: gust amplitude
 float grassSampleWind(vec2 worldPos, vec2 windDir, float windStrength, float windSpeed,
                       float windTime, float gustFreq, float gustAmp) {
-    // Project position onto wind-aligned coordinates for wave-like motion
-    // alongWind: distance in wind direction (creates wave fronts perpendicular to wind)
-    // acrossWind: distance perpendicular to wind (adds variation along wave fronts)
+    // Project position onto wind direction - this is the key to rolling waves
+    // Waves travel along this axis, creating bands perpendicular to wind
     float alongWind = dot(worldPos, windDir);
+
+    // Primary rolling wave - large scale waves traveling in wind direction
+    // Wavelength ~8m (0.8 frequency), travels at windSpeed
+    float primaryWave = sin(alongWind * 0.8 - windTime * windSpeed * 0.5);
+
+    // Secondary wave - adds complexity, different wavelength ~5m
+    float secondaryWave = sin(alongWind * 1.3 - windTime * windSpeed * 0.7) * 0.4;
+
+    // Combine waves (primary dominant)
+    float wavePattern = (primaryWave + secondaryWave) * 0.5 + 0.5; // Normalize to 0-1
+
+    // Add subtle noise variation along wave fronts (perpendicular to wind)
+    // This prevents waves from looking too uniform/artificial
     vec2 perpDir = vec2(-windDir.y, windDir.x);
     float acrossWind = dot(worldPos, perpDir);
+    float variation = grassPerlinNoise(acrossWind * 0.15, alongWind * 0.05) * 0.3;
 
-    // Scroll along wind direction - this makes waves propagate with the wind
-    float scrolledAlongWind = alongWind - windTime * windSpeed * 0.4;
-
-    // Three octaves with wave-aligned sampling
-    // Primary coordinate is alongWind (scrolled), secondary is acrossWind (scaled down)
-    // The 0.3 factor for acrossWind creates elongated wave shapes rather than circular noise
-    float n1 = grassPerlinNoise(scrolledAlongWind * GRASS_WIND_BASE_FREQ,
-                                 acrossWind * GRASS_WIND_BASE_FREQ * 0.3);
-    float n2 = grassPerlinNoise(scrolledAlongWind * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE2_MULT,
-                                 acrossWind * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE2_MULT * 0.3);
-    float n3 = grassPerlinNoise(scrolledAlongWind * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE3_MULT,
-                                 acrossWind * GRASS_WIND_BASE_FREQ * GRASS_WIND_OCTAVE3_MULT * 0.3);
-
-    // Weighted sum dominated by first octave using unified constants
-    float noise = n1 * GRASS_WIND_OCTAVE1_WEIGHT + n2 * GRASS_WIND_OCTAVE2_WEIGHT + n3 * GRASS_WIND_OCTAVE3_WEIGHT;
-
-    // Add time-varying gust
+    // Time-varying gust affects overall intensity
     float gust = (sin(windTime * gustFreq * GRASS_TWO_PI) * 0.5 + 0.5) * gustAmp;
 
-    return (noise + gust) * windStrength;
+    return (wavePattern + variation + gust) * windStrength;
 }
 
 // Quadratic Bezier evaluation
