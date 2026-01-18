@@ -94,6 +94,10 @@ public:
     bool hasCape() const { return hasCapeEnabled; }
     void setCapeEnabled(bool enabled) { hasCapeEnabled = enabled; }
 
+    // Weapon debug axes
+    void setShowWeaponAxes(bool show) { showWeaponAxes_ = show; }
+    bool getShowWeaponAxes() const { return showWeaponAxes_; }
+
     // Well entrance position (for creating terrain hole)
     float getWellEntranceX() const { return wellEntranceX; }
     float getWellEntranceZ() const { return wellEntranceZ; }
@@ -175,6 +179,9 @@ private:
     // Player cape (cloth simulation attached to character)
     PlayerCape playerCape;
     bool hasCapeEnabled = false;
+
+    // Weapon debug visualization
+    bool showWeaponAxes_ = false;
 
     // Textures (managed via AssetRegistry with shared_ptr)
     std::shared_ptr<Texture> crateTexture_;

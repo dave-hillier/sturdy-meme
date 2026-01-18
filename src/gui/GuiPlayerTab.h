@@ -8,7 +8,8 @@ struct PlayerSettings {
     bool capeEnabled = false;
     bool showCapeColliders = false;
 
-    // Future player settings can go here
+    // Weapons debug
+    bool showWeaponAxes = false;  // Show RGB axis indicators on hand bones
 };
 
 namespace GuiPlayerTab {

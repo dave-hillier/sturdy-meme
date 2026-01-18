@@ -32,6 +32,20 @@ void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& setting
     ImGui::Separator();
     ImGui::Spacing();
 
+    // Weapons section
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.8f, 0.9f, 1.0f));
+    ImGui::Text("WEAPONS DEBUG");
+    ImGui::PopStyleColor();
+
+    ImGui::Checkbox("Show Hand Axes", &settings.showWeaponAxes);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Show RGB axis indicators on hand bones (R=X, G=Y, B=Z)");
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
     // Cape info
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
     ImGui::Text("CAPE INFO");

@@ -577,8 +577,9 @@ void Application::run() {
         float movementSpeed = glm::length(glm::vec2(desiredVelocity.x, desiredVelocity.z));
         bool isGrounded = physics().isCharacterOnGround();
 
-        // Sync cape enabled state from GUI
+        // Sync settings from GUI
         renderer_->getSystems().scene().getSceneBuilder().setCapeEnabled(gui_->getPlayerSettings().capeEnabled);
+        renderer_->getSystems().scene().getSceneBuilder().setShowWeaponAxes(gui_->getPlayerSettings().showWeaponAxes);
 
         renderer_->getSystems().scene().getSceneBuilder().updateAnimatedCharacter(
             deltaTime, renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getVkDevice(),

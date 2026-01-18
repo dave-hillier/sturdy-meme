@@ -785,24 +785,39 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     if (rightHandBoneIndex >= 0) {
         glm::mat4 boneWorld = worldTransform * globalTransforms[rightHandBoneIndex];
 
+        // Hide axes by scaling to 0 when disabled
+        glm::mat4 hideTransform = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
+
         // X axis (Red) - rotate 90° around Z to point Y toward X
         if (rightHandAxisX < sceneObjects.size()) {
-            glm::mat4 xOffset = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-            xOffset = glm::translate(xOffset, glm::vec3(0.0f, 0.075f, 0.0f));  // Center the line
-            sceneObjects[rightHandAxisX].transform = boneWorld * xOffset;
+            if (showWeaponAxes_) {
+                glm::mat4 xOffset = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                xOffset = glm::translate(xOffset, glm::vec3(0.0f, 0.075f, 0.0f));
+                sceneObjects[rightHandAxisX].transform = boneWorld * xOffset;
+            } else {
+                sceneObjects[rightHandAxisX].transform = hideTransform;
+            }
         }
 
         // Y axis (Green) - no rotation needed, cylinder already points along Y
         if (rightHandAxisY < sceneObjects.size()) {
-            glm::mat4 yOffset = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.075f, 0.0f));  // Center the line
-            sceneObjects[rightHandAxisY].transform = boneWorld * yOffset;
+            if (showWeaponAxes_) {
+                glm::mat4 yOffset = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.075f, 0.0f));
+                sceneObjects[rightHandAxisY].transform = boneWorld * yOffset;
+            } else {
+                sceneObjects[rightHandAxisY].transform = hideTransform;
+            }
         }
 
         // Z axis (Blue) - rotate 90° around X to point Y toward Z
         if (rightHandAxisZ < sceneObjects.size()) {
-            glm::mat4 zOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-            zOffset = glm::translate(zOffset, glm::vec3(0.0f, 0.075f, 0.0f));  // Center the line
-            sceneObjects[rightHandAxisZ].transform = boneWorld * zOffset;
+            if (showWeaponAxes_) {
+                glm::mat4 zOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+                zOffset = glm::translate(zOffset, glm::vec3(0.0f, 0.075f, 0.0f));
+                sceneObjects[rightHandAxisZ].transform = boneWorld * zOffset;
+            } else {
+                sceneObjects[rightHandAxisZ].transform = hideTransform;
+            }
         }
     }
 }
