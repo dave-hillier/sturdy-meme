@@ -10,6 +10,7 @@
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/RenderPassBuilder.h"
 #include "core/vulkan/DescriptorSetLayoutBuilder.h"
+#include "core/vulkan/VertexInputBuilder.h"
 
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -78,22 +79,10 @@ bool TreeImpostorAtlas::createCapturePipeline() {
             .setPName("main")
     };
 
-    std::array<vk::VertexInputBindingDescription, 1> bindingDescriptions = {
-        vk::VertexInputBindingDescription{}
-            .setBinding(0)
-            .setStride(sizeof(Vertex))
-            .setInputRate(vk::VertexInputRate::eVertex)
-    };
-
-    std::array<vk::VertexInputAttributeDescription, 3> attributeDescriptions = {
-        vk::VertexInputAttributeDescription{}.setLocation(0).setBinding(0).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(offsetof(Vertex, position)),
-        vk::VertexInputAttributeDescription{}.setLocation(1).setBinding(0).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(offsetof(Vertex, normal)),
-        vk::VertexInputAttributeDescription{}.setLocation(2).setBinding(0).setFormat(vk::Format::eR32G32Sfloat).setOffset(offsetof(Vertex, texCoord))
-    };
-
-    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
-        .setVertexBindingDescriptions(bindingDescriptions)
-        .setVertexAttributeDescriptions(attributeDescriptions);
+    // Position + Normal + UV vertex layout
+    auto vertexInput = VertexInputBuilder::positionNormalUV<Vertex>(
+        offsetof(Vertex, position), offsetof(Vertex, normal), offsetof(Vertex, texCoord));
+    auto vertexInputInfo = vertexInput.build();
 
     auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
         .setTopology(vk::PrimitiveTopology::eTriangleList);
@@ -203,19 +192,10 @@ bool TreeImpostorAtlas::createLeafCapturePipeline() {
             .setPName("main")
     };
 
-    std::array<vk::VertexInputBindingDescription, 1> bindingDescriptions = {
-        vk::VertexInputBindingDescription{}.setBinding(0).setStride(sizeof(Vertex)).setInputRate(vk::VertexInputRate::eVertex)
-    };
-
-    std::array<vk::VertexInputAttributeDescription, 3> attributeDescriptions = {
-        vk::VertexInputAttributeDescription{}.setLocation(0).setBinding(0).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(offsetof(Vertex, position)),
-        vk::VertexInputAttributeDescription{}.setLocation(1).setBinding(0).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(offsetof(Vertex, normal)),
-        vk::VertexInputAttributeDescription{}.setLocation(2).setBinding(0).setFormat(vk::Format::eR32G32Sfloat).setOffset(offsetof(Vertex, texCoord))
-    };
-
-    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
-        .setVertexBindingDescriptions(bindingDescriptions)
-        .setVertexAttributeDescriptions(attributeDescriptions);
+    // Position + Normal + UV vertex layout (same as branch capture)
+    auto vertexInput = VertexInputBuilder::positionNormalUV<Vertex>(
+        offsetof(Vertex, position), offsetof(Vertex, normal), offsetof(Vertex, texCoord));
+    auto vertexInputInfo = vertexInput.build();
 
     auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}.setTopology(vk::PrimitiveTopology::eTriangleList);
     auto viewportState = vk::PipelineViewportStateCreateInfo{}.setViewportCount(1).setScissorCount(1);
