@@ -1,5 +1,5 @@
 #include "VirtualTextureFeedback.h"
-#include "VmaResources.h"
+#include "VmaBufferFactory.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <algorithm>

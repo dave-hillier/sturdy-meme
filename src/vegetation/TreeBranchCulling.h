@@ -12,7 +12,6 @@
 #include <optional>
 
 #include "CullCommon.h"
-#include "VmaResources.h"
 #include "DescriptorManager.h"
 #include "BufferUtils.h"
 

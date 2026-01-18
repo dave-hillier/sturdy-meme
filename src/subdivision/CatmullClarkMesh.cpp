@@ -1,5 +1,5 @@
 #include "CatmullClarkMesh.h"
-#include "VmaResources.h"
+#include "VmaBufferFactory.h"
 #include <SDL3/SDL.h>
 #include <cstring>
 

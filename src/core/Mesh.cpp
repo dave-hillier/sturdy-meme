@@ -1,5 +1,5 @@
 #include "Mesh.h"
-#include "VmaResources.h"
+#include "VmaBufferFactory.h"
 #include "CommandBufferUtils.h"
 #include <vulkan/vulkan.hpp>
 #include <cstring>

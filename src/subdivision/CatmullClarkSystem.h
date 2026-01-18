@@ -12,7 +12,7 @@
 #include "CatmullClarkCBT.h"
 #include "CatmullClarkMesh.h"
 #include "DescriptorManager.h"
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 #include "interfaces/IRecordable.h"
 
 // Push constants for rendering

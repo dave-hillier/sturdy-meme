@@ -1,6 +1,6 @@
 #include "BloomSystem.h"
 #include "GraphicsPipelineFactory.h"
-#include "VmaResources.h"
+#include "SamplerFactory.h"
 #include "DescriptorManager.h"
 #include "core/ImageBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"

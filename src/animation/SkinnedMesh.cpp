@@ -1,5 +1,5 @@
 #include "SkinnedMesh.h"
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 #include "CommandBufferUtils.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>

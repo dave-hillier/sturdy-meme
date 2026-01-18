@@ -7,7 +7,7 @@
 #include <vector>
 #include <memory>
 #include <optional>
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 
 namespace VirtualTexture {
 

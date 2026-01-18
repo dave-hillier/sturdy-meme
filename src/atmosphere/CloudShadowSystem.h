@@ -10,7 +10,7 @@
 #include <optional>
 #include "DescriptorManager.h"
 #include "InitContext.h"
-#include "VmaResources.h"
+#include "VmaImage.h"
 #include "BufferUtils.h"
 #include "interfaces/ICloudShadowControl.h"
 

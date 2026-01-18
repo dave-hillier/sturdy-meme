@@ -2,7 +2,7 @@
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
 #include "CommandBufferUtils.h"
-#include "core/vulkan/VmaResources.h"
+#include "core/vulkan/SamplerFactory.h"
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"

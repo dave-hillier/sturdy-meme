@@ -1,5 +1,6 @@
 #include "AtmosphereLUTSystem.h"
-#include "VmaResources.h"
+#include "VmaImage.h"
+#include "SamplerFactory.h"
 #include "core/ImageBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>

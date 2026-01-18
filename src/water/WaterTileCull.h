@@ -9,7 +9,7 @@
 #include <memory>
 #include <optional>
 
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 
 /**
  * WaterTileCull - Phase 7: Screen-Space Tile Visibility

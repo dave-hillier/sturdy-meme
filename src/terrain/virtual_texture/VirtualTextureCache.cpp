@@ -1,5 +1,6 @@
 #include "VirtualTextureCache.h"
-#include "VmaResources.h"
+#include "VmaBufferFactory.h"
+#include "SamplerFactory.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_log.h>
 #include <algorithm>

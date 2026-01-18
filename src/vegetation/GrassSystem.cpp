@@ -10,7 +10,6 @@
 #include "DescriptorManager.h"
 #include "QueueSubmitDiagnostics.h"
 #include "UBOs.h"
-#include "VmaResources.h"
 #include "core/vulkan/BarrierHelpers.h"
 #include "core/ImageBuilder.h"
 #include <vulkan/vulkan.hpp>

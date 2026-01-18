@@ -2,7 +2,7 @@
 
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 #include <deque>
 #include <functional>
 #include <mutex>

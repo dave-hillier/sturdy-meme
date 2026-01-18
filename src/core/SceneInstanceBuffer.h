@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <cstdint>
 
-#include "vulkan/VmaResources.h"
+#include "vulkan/VmaBuffer.h"
 #include "RenderableBuilder.h"
 #include "shaders/bindings.h"
 

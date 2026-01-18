@@ -3,7 +3,7 @@
 #include "Mesh.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
-#include "core/vulkan/VmaResources.h"
+#include "core/vulkan/SamplerFactory.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/ImageBuilder.h"
 #include <SDL3/SDL_log.h>

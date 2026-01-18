@@ -4,7 +4,7 @@
 #include <vk_mem_alloc.h>
 #include <cstdint>
 #include <memory>
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 
 // Concurrent Binary Tree (CBT) buffer for terrain subdivision
 class TerrainCBT {

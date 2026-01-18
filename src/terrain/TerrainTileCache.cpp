@@ -1,7 +1,8 @@
 #include "TerrainTileCache.h"
 #include "TerrainHeight.h"
 #include "CommandBufferUtils.h"
-#include "VmaResources.h"
+#include "VmaBufferFactory.h"
+#include "SamplerFactory.h"
 #include "core/ImageBuilder.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>

@@ -5,7 +5,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <cstdint>
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 
 // Halfedge mesh structure for Catmull-Clark subdivision
 // Based on the implementation from https://github.com/jdupuy/LongestEdgeBisection2D

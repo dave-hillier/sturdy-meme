@@ -1,5 +1,6 @@
 #include "FlowMapGenerator.h"
-#include "VmaResources.h"
+#include "VmaBufferFactory.h"
+#include "SamplerFactory.h"
 #include "CommandBufferUtils.h"
 #include "core/ImageBuilder.h"
 #include <SDL3/SDL.h>

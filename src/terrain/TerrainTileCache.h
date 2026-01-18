@@ -12,7 +12,8 @@
 #include <memory>
 #include <limits>
 #include <optional>
-#include "VmaResources.h"
+#include "VmaBuffer.h"
+#include "VmaImage.h"
 #include "core/FrameBuffered.h"
 #include "TileGridLogic.h"
 

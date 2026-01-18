@@ -1,7 +1,7 @@
 #include "WaterSystem.h"
 #include "ShadowSystem.h"
 #include "GraphicsPipelineFactory.h"
-#include "VmaResources.h"
+#include "VmaBufferFactory.h"
 #include "DescriptorManager.h"
 #include "debug/QueueSubmitDiagnostics.h"
 #include <vulkan/vulkan.hpp>

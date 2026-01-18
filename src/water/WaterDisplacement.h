@@ -9,7 +9,7 @@
 #include <memory>
 #include <optional>
 
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 
 /**
  * WaterDisplacement - Phase 4: Vector Displacement Maps (Interactive Splashes)

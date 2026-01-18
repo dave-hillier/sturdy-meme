@@ -14,7 +14,7 @@
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 #include <vulkan/vulkan_raii.hpp>
 #include "interfaces/IPostProcessState.h"
 

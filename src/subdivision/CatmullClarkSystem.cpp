@@ -2,7 +2,7 @@
 #include "OBJLoader.h"
 #include "ShaderLoader.h"
 #include "BufferUtils.h"
-#include "VmaResources.h"
+#include "VmaBufferFactory.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>

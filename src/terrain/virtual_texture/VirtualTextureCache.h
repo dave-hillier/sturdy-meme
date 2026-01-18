@@ -8,7 +8,7 @@
 #include <unordered_map>
 #include <optional>
 #include <memory>
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 
 namespace VirtualTexture {
 

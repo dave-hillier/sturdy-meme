@@ -1,6 +1,7 @@
 #include "TerrainTextures.h"
 #include "CommandBufferUtils.h"
-#include "VmaResources.h"
+#include "VmaBufferFactory.h"
+#include "SamplerFactory.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <stb_image.h>

@@ -13,7 +13,7 @@
 #include "Mesh.h"
 #include "Texture.h"
 #include "DescriptorManager.h"
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 #include "core/FrameBuffered.h"
 #include "core/material/MaterialComponents.h"
 #include "interfaces/IRecordable.h"

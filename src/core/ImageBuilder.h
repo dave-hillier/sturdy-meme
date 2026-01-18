@@ -4,7 +4,7 @@
 #include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <optional>
-#include "VmaResources.h"
+#include "VmaImage.h"
 #include <SDL3/SDL_log.h>
 #include <vector>
 #include <cmath>

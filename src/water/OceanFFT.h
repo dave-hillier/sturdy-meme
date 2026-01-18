@@ -9,7 +9,8 @@
 #include <memory>
 #include <optional>
 #include "InitContext.h"
-#include "VmaResources.h"
+#include "VmaBuffer.h"
+#include "VmaImage.h"
 
 /**
  * OceanFFT - FFT-based Ocean Simulation (Tessendorf Method)

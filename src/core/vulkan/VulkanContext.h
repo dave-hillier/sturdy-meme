@@ -8,7 +8,7 @@
 #include <vector>
 #include <memory>
 #include "PipelineCache.h"
-#include "VmaResources.h"
+#include "VmaImage.h"
 
 /**
  * VulkanContext encapsulates core Vulkan setup:

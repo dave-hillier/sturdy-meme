@@ -6,7 +6,6 @@
 #include <string>
 #include <optional>
 #include <memory>
-#include "VmaResources.h"
 
 // Terrain textures - albedo and grass far LOD textures
 class TerrainTextures {

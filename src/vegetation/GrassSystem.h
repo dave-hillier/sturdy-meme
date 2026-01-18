@@ -15,7 +15,6 @@
 #include "SystemLifecycleHelper.h"
 #include "BufferSetManager.h"
 #include "UBOs.h"
-#include "VmaResources.h"
 #include "core/FrameBuffered.h"
 #include "interfaces/IRecordable.h"
 #include "interfaces/IShadowCaster.h"

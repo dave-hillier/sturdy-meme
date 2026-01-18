@@ -1,5 +1,5 @@
 #include "GodRaysSystem.h"
-#include "VmaResources.h"
+#include "SamplerFactory.h"
 #include "DescriptorManager.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "ShaderLoader.h"

@@ -7,7 +7,8 @@
 #include <vector>
 #include <array>
 #include <optional>
-#include "VmaResources.h"
+#include "VmaImage.h"
+#include "SamplerFactory.h"
 
 // ============================================================================
 // Render Pass Configuration

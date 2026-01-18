@@ -1,7 +1,7 @@
 #include "VolumetricSnowSystem.h"
 #include "ShaderLoader.h"
 #include "PipelineBuilder.h"
-#include "VmaResources.h"
+#include "SamplerFactory.h"
 #include "DescriptorManager.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>

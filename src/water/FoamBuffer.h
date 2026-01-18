@@ -9,7 +9,7 @@
 #include <memory>
 #include <optional>
 
-#include "VmaResources.h"
+#include "VmaBuffer.h"
 
 /**
  * FoamBuffer - Phase 14 & 16: Temporal Foam Persistence + Wake System

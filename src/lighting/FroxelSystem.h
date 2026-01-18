@@ -12,7 +12,7 @@
 #include "BufferUtils.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
-#include "VmaResources.h"
+#include "VmaImage.h"
 #include "interfaces/IFogControl.h"
 
 // Froxel-based volumetric fog system (Phase 4.3)

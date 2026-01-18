@@ -1,5 +1,6 @@
 #include "AsyncTransferManager.h"
 #include "VulkanContext.h"
+#include "VmaBufferFactory.h"
 #include <SDL3/SDL_log.h>
 
 AsyncTransferManager::~AsyncTransferManager() {

@@ -1,6 +1,7 @@
 #include "HiZSystem.h"
 #include "ShaderLoader.h"
-#include "VmaResources.h"
+#include "VmaBufferFactory.h"
+#include "SamplerFactory.h"
 #include "core/ImageBuilder.h"
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"

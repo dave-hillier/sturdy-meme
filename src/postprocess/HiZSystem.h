@@ -14,7 +14,8 @@
 #include "DescriptorManager.h"
 #include "InitContext.h"
 #include "Mesh.h"
-#include "VmaResources.h"
+#include "VmaBuffer.h"
+#include "VmaImage.h"
 #include "core/ImageBuilder.h"
 #include "RenderableBuilder.h"
 

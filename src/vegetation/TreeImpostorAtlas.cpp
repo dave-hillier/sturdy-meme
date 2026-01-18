@@ -6,7 +6,7 @@
 #include "TreeSystem.h"
 #include "Mesh.h"
 #include "OctahedralMapping.h"
-#include "core/vulkan/VmaResources.h"
+#include "core/vulkan/SamplerFactory.h"
 
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>

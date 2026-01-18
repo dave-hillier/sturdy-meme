@@ -2,7 +2,7 @@
 #include <stb_image.h>
 #include "Texture.h"
 #include "DDSLoader.h"
-#include "VmaResources.h"
+#include "VmaBufferFactory.h"
 #include "CommandBufferUtils.h"
 #include "ImageBuilder.h"
 #include <vulkan/vulkan.hpp>
