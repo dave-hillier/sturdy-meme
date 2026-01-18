@@ -1,8 +1,7 @@
 #version 450
 
-// Enable tiled grass mode - this shader variant uses per-tile grid size
-// and positions grass relative to tile origin instead of centered on world origin
-#define GRASS_TILED_MODE 1
+// Simplified grass compute shader with continuous stochastic culling
+// No discrete LOD levels - just distance-based probability culling
 
 #extension GL_GOOGLE_include_directive : require
 #extension GL_KHR_shader_subgroup_ballot : require
@@ -17,8 +16,7 @@
 #define CULLING_UBO_BINDING BINDING_GRASS_COMPUTE_CULLING
 #include "ubo_culling.glsl"
 
-// 2D workgroup layout for better texture cache coherency - threads in the same
-// workgroup sample nearby terrain/displacement texels (16x16 = 256 threads)
+// 2D workgroup layout for better texture cache coherency
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
 struct GrassInstance {
@@ -26,8 +24,6 @@ struct GrassInstance {
     vec4 heightHashTilt;     // x = height, y = hash, z = tilt, w = clumpId
     vec4 terrainNormal;      // xyz = terrain normal (for tangent alignment), w = unused
 };
-
-// DrawIndirectCommand is now provided by instancing_common.glsl
 
 layout(std430, binding = BINDING_GRASS_COMPUTE_INSTANCES) buffer InstanceBuffer {
     GrassInstance instances[];
@@ -75,159 +71,47 @@ layout(push_constant) uniform PushConstants {
     float time;
     float tileOriginX;   // World X origin of this tile
     float tileOriginZ;   // World Z origin of this tile
-    float tileSize;      // Tile size in world units (varies by LOD: 64, 128, 256)
-    float spacingMult;   // Spacing multiplier for this LOD (1.0, 2.0, 4.0)
-    uint lodLevel;       // LOD level (0 = high detail, 1 = medium, 2 = low)
-    float tileLoadTime;  // Time when this tile was first loaded (for fade-in)
-    float padding;
+    float tileSize;      // Tile size in world units
+    float spacing;       // Blade spacing (always base spacing, no LOD multiplier)
+    uint tileIndex;      // Tile index for debugging
+    float unused1;       // Padding
+    float unused2;       // Padding
 } push;
 
-// Tiled mode uses per-tile grid size but shared global instance buffer
-#define EFFECTIVE_GRID_SIZE GRASS_TILE_GRID_SIZE
-// All tiles share one instance buffer, so use global limit (not per-tile)
-#define EFFECTIVE_MAX_INSTANCES GRASS_MAX_INSTANCES
-
-// LOD transition blade dropping
-// Ghost of Tsushima: "high LOD tiles drop 3 out of every 4 grass blades
-// before they transition to the low LOD tiles"
-//
-// This function implements deterministic blade dropping where we drop exactly
-// the blades that won't exist at the next LOD level:
-// - LOD 0→1: Drop 3/4 of blades (keep only those at even X AND even Z grid positions)
-// - LOD 1→2: Drop 3/4 of remaining (keep only those at positions divisible by 4)
-//
-// Hysteresis: Each blade gets a per-blade offset to its transition threshold.
-// This staggers when blades appear/disappear, preventing synchronized flickering
-// when the camera oscillates near a transition boundary.
-//
-// worldCell: base-spacing-aligned grid cell (used for subset selection)
-// distToCamera: distance to camera for transition zone calculation
-// lodLevel: current tile's LOD level
-bool shouldDropForLodTransition(vec2 worldCell, float distToCamera, uint lodLevel) {
-    // For LOD 0: progressively drop blades that won't exist at LOD 1
-    if (lodLevel == 0) {
-        // Transition zone starts at LOD0_DISTANCE_END - TRANSITION_ZONE
-        float transitionStart = GRASS_LOD0_DISTANCE_END - GRASS_LOD_TRANSITION_ZONE;
-
-        if (distToCamera > transitionStart) {
-            // Calculate how far into transition zone we are (0 at start, 1 at end)
-            float t = (distToCamera - transitionStart) / GRASS_LOD_TRANSITION_ZONE;
-            t = clamp(t, 0.0, 1.0);
-
-            // Check if this blade will exist at LOD 1
-            // LOD 1 has 2x spacing, so only blades at even grid positions survive
-            ivec2 iCell = ivec2(worldCell);
-            bool survivesAtLod1 = ((iCell.x & 1) == 0) && ((iCell.y & 1) == 0);
-
-            // If blade won't survive at LOD 1, progressively drop it
-            if (!survivesAtLod1) {
-                // Use position-based hash for smooth staggered dropping
-                float dropHash = hash2D(worldCell + vec2(850.0, 850.0));
-
-                // Hysteresis: give each blade a unique offset to stagger transitions
-                // This prevents all blades at the same distance from flickering together
-                float hysteresisHash = hash2D(worldCell + vec2(1234.0, 5678.0));
-                float hysteresisOffset = (hysteresisHash - 0.5) * GRASS_LOD_HYSTERESIS;
-                float effectiveT = clamp(t + hysteresisOffset, 0.0, 1.0);
-
-                return dropHash < effectiveT;
-            }
-        }
-    }
-    // For LOD 1: progressively drop blades that won't exist at LOD 2
-    else if (lodLevel == 1) {
-        float transitionStart = GRASS_LOD1_DISTANCE_END - GRASS_LOD_TRANSITION_ZONE;
-
-        if (distToCamera > transitionStart) {
-            float t = (distToCamera - transitionStart) / GRASS_LOD_TRANSITION_ZONE;
-            t = clamp(t, 0.0, 1.0);
-
-            // Check if this blade will exist at LOD 2
-            // LOD 2 has 4x spacing, so only blades at positions divisible by 4 survive
-            ivec2 iCell = ivec2(worldCell);
-            bool survivesAtLod2 = ((iCell.x & 3) == 0) && ((iCell.y & 3) == 0);
-
-            if (!survivesAtLod2) {
-                float dropHash = hash2D(worldCell + vec2(850.0, 850.0));
-
-                // Hysteresis: give each blade a unique offset to stagger transitions
-                float hysteresisHash = hash2D(worldCell + vec2(1234.0, 5678.0));
-                float hysteresisOffset = (hysteresisHash - 0.5) * GRASS_LOD_HYSTERESIS;
-                float effectiveT = clamp(t + hysteresisOffset, 0.0, 1.0);
-
-                return dropHash < effectiveT;
-            }
-        }
-    }
-    // LOD 2 is the furthest, no transition dropping needed
-
-    return false;
-}
-
-// Tile fade-in dropping
-// When a new tile loads, stochastically fade in grass blades over time
-// to prevent density "popping" when transitioning between LOD levels.
-//
-// Key insight: When a tile becomes a higher LOD (e.g., LOD 1 -> LOD 0),
-// we want the density to initially match the lower LOD, then gradually
-// add the extra blades. This makes the transition seamless.
-//
-// Two-phase fade-in:
-// - "Survivor" blades (would exist at lower LOD): fast fade (0.15s)
-// - "Extra" blades (only at this LOD): slow fade (0.75s)
-//
-// worldPos: final jittered world position (for hash randomization)
-// worldCell: base-spacing-aligned grid cell (for LOD survival check)
-// lodLevel: current tile's LOD level
-// Returns true if blade should be dropped (not yet faded in)
-bool shouldDropForTileFadeIn(vec2 worldPos, vec2 worldCell, uint lodLevel) {
-    float tileAge = push.time - push.tileLoadTime;
-
-    // Skip fade-in logic if tile is already fully loaded
-    if (tileAge >= GRASS_TILE_FADE_IN_DURATION) {
-        return false;
-    }
-
-    // Check if this blade would exist at the PREVIOUS (lower detail) LOD level
-    ivec2 iCell = ivec2(worldCell);
-    bool survivesAtLowerLod = false;
-
-    if (lodLevel == 0) {
-        // LOD 0 blade survives at LOD 1 if at even grid positions
-        survivesAtLowerLod = ((iCell.x & 1) == 0) && ((iCell.y & 1) == 0);
-    } else if (lodLevel == 1) {
-        // LOD 1 blade survives at LOD 2 if at positions divisible by 4
-        // (relative to base spacing, so checking if cell coords are even)
-        survivesAtLowerLod = ((iCell.x & 1) == 0) && ((iCell.y & 1) == 0);
-    } else {
-        // LOD 2 is the lowest detail - no previous LOD to match
-        survivesAtLowerLod = true;
-    }
-
-    // Survivor blades appear IMMEDIATELY - no fade at all
-    // These match what the previous LOD was showing, so instant transition
-    if (survivesAtLowerLod) {
-        return false;
-    }
-
-    // Extra blades fade in over time, with initial offset to avoid frame-1 pop
-    float t = clamp(tileAge / GRASS_TILE_FADE_IN_DURATION, 0.0, 1.0);
-
-    // smoothstep with initial 5% offset so some extras appear on first frame
-    float fadeIn = smoothstep(0.0, 1.0, t) * 0.95 + 0.05;
-
-    // Use jittered world position for hash to avoid grid-aligned fade-in patterns
-    float fadeHash = hash2D(worldPos + vec2(123.0, 456.0));
-
-    // Drop if blade hasn't "appeared" yet based on its hash threshold
-    return fadeHash > fadeIn;
-}
-
 // Hash functions - use instancing_common.glsl versions
-// Local aliases for compatibility with existing code
 #define hash(p) hash2D(p)
 #define hash2(p) hash2D_alt(p)
 #define hash2v(p) hash2D_vec2(p)
+
+// Continuous stochastic culling based on distance
+// Returns true if blade should be dropped (culled)
+// Uses smooth probability falloff with power curve for natural density transition
+bool shouldCullByDistance(vec2 worldPos, float distToCamera) {
+    // Full density within start distance
+    if (distToCamera <= GRASS_CULL_START_DISTANCE) {
+        return false;
+    }
+
+    // No grass beyond end distance (hard cutoff for performance)
+    if (distToCamera >= GRASS_CULL_END_DISTANCE) {
+        return true;
+    }
+
+    // Calculate survival probability with power curve
+    // t goes from 0 at start to 1 at end
+    float t = (distToCamera - GRASS_CULL_START_DISTANCE) /
+              (GRASS_CULL_END_DISTANCE - GRASS_CULL_START_DISTANCE);
+
+    // Apply power curve - higher power = faster falloff initially, slower at edges
+    float cullProbability = pow(t, 1.0 / GRASS_CULL_POWER);
+
+    // Use position-based hash for temporally stable culling
+    // The hash ensures the same blade is consistently shown/hidden
+    float bladeHash = hash(worldPos + vec2(7919.0, 7927.0));
+
+    // Cull if blade's hash falls in the cull probability range
+    return bladeHash < cullProbability;
+}
 
 // Calculate terrain normal from heightmap gradient with tile cache support
 vec3 calculateTerrainNormal(vec2 uv, vec2 worldXZ) {
@@ -248,7 +132,6 @@ vec2 worldPosToDispUV(vec2 worldPos) {
 }
 
 // Sample displacement from the displacement buffer texture
-// Returns: xy = displacement direction in XZ plane
 vec2 sampleDisplacement(vec2 worldPos) {
     vec2 uv = worldPosToDispUV(worldPos);
 
@@ -262,9 +145,7 @@ vec2 sampleDisplacement(vec2 worldPos) {
 }
 
 // Voronoi-based clump calculation
-// Returns clumpId (0-1), clumpDistance, and clumpCenter
 void calculateClump(vec2 worldPos, out float clumpId, out float clumpDist, out vec2 clumpCenter) {
-    // Scale position to clump space using unified constant
     vec2 scaledPos = worldPos / GRASS_CLUMP_SCALE;
     vec2 cellId = floor(scaledPos);
 
@@ -272,12 +153,10 @@ void calculateClump(vec2 worldPos, out float clumpId, out float clumpDist, out v
     vec2 nearestPoint = vec2(0.0);
     float nearestId = 0.0;
 
-    // Check 3x3 neighborhood (9 potential clump centers)
+    // Check 3x3 neighborhood
     for (int y = -1; y <= 1; y++) {
         for (int x = -1; x <= 1; x++) {
             vec2 neighborCell = cellId + vec2(float(x), float(y));
-
-            // Each cell's clump point is jittered according to hash
             vec2 jitter = hash2v(neighborCell) * 0.8 + 0.1;
             vec2 clumpPoint = (neighborCell + jitter) * GRASS_CLUMP_SCALE;
 
@@ -285,7 +164,7 @@ void calculateClump(vec2 worldPos, out float clumpId, out float clumpDist, out v
             if (dist < minDist) {
                 minDist = dist;
                 nearestPoint = clumpPoint;
-                nearestId = hash(neighborCell);  // Unique ID per clump (0-1)
+                nearestId = hash(neighborCell);
             }
         }
     }
@@ -296,7 +175,6 @@ void calculateClump(vec2 worldPos, out float clumpId, out float clumpDist, out v
 }
 
 void main() {
-    // 2D dispatch: use xy directly instead of computing from flattened index
     uint gridX = gl_GlobalInvocationID.x;
     uint gridZ = gl_GlobalInvocationID.y;
 
@@ -305,41 +183,23 @@ void main() {
         drawCmd.vertexCount = GRASS_VERTICES_PER_BLADE;
     }
 
-    // Generate grass positions in a grid pattern per tile
-    if (gridX >= EFFECTIVE_GRID_SIZE || gridZ >= EFFECTIVE_GRID_SIZE) return;
+    // Bounds check - use tile grid size
+    if (gridX >= GRASS_TILE_GRID_SIZE || gridZ >= GRASS_TILE_GRID_SIZE) return;
 
-    // Calculate effective spacing based on LOD level
-    // Higher LOD levels have larger spacing -> lower grass density
-    float effectiveSpacing = GRASS_SPACING * push.spacingMult;
+    // Calculate world position relative to tile origin
+    float x = push.tileOriginX + float(gridX) * push.spacing;
+    float z = push.tileOriginZ + float(gridZ) * push.spacing;
 
-    // Map to world space - position relative to tile origin
-    float x = push.tileOriginX + float(gridX) * effectiveSpacing;
-    float z = push.tileOriginZ + float(gridZ) * effectiveSpacing;
-
-    // Add some randomness to position (jitter)
-    // IMPORTANT: Use BASE spacing for cell calculation to ensure consistent hashing
-    // across LOD levels. This way, a blade at world position (64, 0) gets the same
-    // hash whether generated by a LOD 0 or LOD 1 tile.
-    // Round to nearest base grid cell to avoid floating point instability
+    // Calculate cell for consistent hashing
     vec2 worldCell = round(vec2(x, z) / GRASS_SPACING);
     vec2 cell = worldCell;
 
-    // Use independent hash values for X and Z jitter to break grid correlation
-    // Using hash2D_vec2 gives us two uncorrelated values in one call
+    // Add jitter for natural distribution
     vec2 jitterHash = hash2v(cell);
-    float jitterX = jitterHash.x;
-    float jitterZ = jitterHash.y;
+    x += (jitterHash.x - 0.5) * push.spacing * GRASS_JITTER_FACTOR;
+    z += (jitterHash.y - 0.5) * push.spacing * GRASS_JITTER_FACTOR;
 
-    // Scale jitter with effective spacing to maintain visual randomness at all LOD levels
-    // At LOD 0: jitter = 0.16m (80% of 0.2m spacing)
-    // At LOD 1: jitter = 0.32m (80% of 0.4m spacing)
-    // At LOD 2: jitter = 0.64m (80% of 0.8m spacing)
-    // This prevents lower LODs from appearing too uniform/grid-like
-    // The position difference at transition distances (43m+, 86m+) is imperceptible
-    x += (jitterX - 0.5) * effectiveSpacing * GRASS_JITTER_FACTOR;
-    z += (jitterZ - 0.5) * effectiveSpacing * GRASS_JITTER_FACTOR;
-
-    // Sample terrain heightmap to get Y position
+    // Sample terrain heightmap
     vec2 terrainUV = vec2(x, z) / grassParams.terrainSize + 0.5;
 
     // Check if grass is within terrain bounds
@@ -354,22 +214,16 @@ void main() {
     // Calculate terrain normal for tangent-aligned grass placement
     vec3 terrainNormal = calculateTerrainNormal(terrainUV, vec2(x, z));
 
-    // Distance culling
+    // Distance culling (hard cutoff)
     float distToCamera = getDistanceToCamera(worldPos, culling.cameraPosition.xyz);
     if (distToCamera > culling.maxDrawDistance) return;
 
     // Frustum culling
     if (!isInFrustum(culling.frustumPlanes, worldPos, GRASS_FRUSTUM_MARGIN)) return;
 
-    // LOD transition blade dropping (Ghost of Tsushima style)
-    // Drop blades at LOD level boundaries for smooth transitions
-    // Uses worldCell to determine if blade survives at next LOD level
-    if (shouldDropForLodTransition(cell, distToCamera, push.lodLevel)) return;
-
-    // Tile fade-in: stochastically drop blades for newly loaded tiles
-    // Blades that would exist at the previous LOD appear immediately (density matches)
-    // "Extra" blades fade in over time to prevent density popping at LOD transitions
-    if (shouldDropForTileFadeIn(vec2(x, z), cell, push.lodLevel)) return;
+    // Continuous stochastic distance-based culling
+    // This provides smooth density falloff instead of discrete LOD popping
+    if (shouldCullByDistance(vec2(x, z), distToCamera)) return;
 
     // Use subgroup operations to batch atomic updates
     uvec4 activeMask = subgroupBallot(true);
@@ -383,12 +237,10 @@ void main() {
     baseSlot = subgroupBroadcastFirst(baseSlot);
     uint slot = baseSlot + laneOffset;
 
-    // Clamp to max instances - prevent buffer overflow
-    if (slot >= EFFECTIVE_MAX_INSTANCES) {
-        // Cap the instance count to prevent draw from reading garbage
-        // This is a race but worst case we draw slightly fewer instances
+    // Clamp to max instances
+    if (slot >= GRASS_MAX_INSTANCES) {
         if (subgroupElect()) {
-            atomicMin(drawCmd.instanceCount, EFFECTIVE_MAX_INSTANCES);
+            atomicMin(drawCmd.instanceCount, GRASS_MAX_INSTANCES);
         }
         return;
     }
@@ -398,12 +250,10 @@ void main() {
     vec2 clumpCenter;
     calculateClump(vec2(x, z), clumpId, clumpDist, clumpCenter);
 
-    // Generate blade properties using FINAL world position (after jitter)
-    // This decouples blade appearance from grid alignment, preventing visible rows
-    // Using the jittered position ensures independent variation per blade
+    // Generate blade properties using final world position
     vec2 bladePos = vec2(x, z);
-    vec2 bladeProps1 = hash2v(bladePos);                    // facing, height
-    vec2 bladeProps2 = hash2v(bladePos + vec2(73.0, 91.0)); // bladeHash, tilt
+    vec2 bladeProps1 = hash2v(bladePos);
+    vec2 bladeProps2 = hash2v(bladePos + vec2(73.0, 91.0));
 
     float randomFacing = bladeProps1.x * GRASS_TWO_PI;
     float baseHeight = GRASS_HEIGHT_MIN + bladeProps1.y * GRASS_HEIGHT_RANGE;

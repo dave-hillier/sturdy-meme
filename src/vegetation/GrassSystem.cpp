@@ -16,6 +16,7 @@
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <cstring>
+#include <cmath>
 #include <array>
 
 // Forward declare UniformBufferObject size (needed for descriptor set update)
@@ -645,13 +646,16 @@ void GrassSystem::updateDescriptorSets(vk::Device dev, const std::vector<vk::Buf
 
 void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos, const glm::mat4& viewProj,
                                   float terrainSize, float terrainHeightScale, float time) {
+    // Store camera position for compute dispatch
+    lastCameraPos_ = cameraPos;
+
     // Fill CullingUniforms (shared culling parameters) using unified constants
     CullingUniforms culling{};
     culling.cameraPosition = glm::vec4(cameraPos, 1.0f);
     extractFrustumPlanes(viewProj, culling.frustumPlanes);
     culling.maxDrawDistance = GrassConstants::MAX_DRAW_DISTANCE;
-    // Disable legacy LOD dropping - now handled by tile-based LOD system
-    culling.lodTransitionStart = -1.0f;  // Sentinel: disabled
+    // Legacy fields - not used with continuous stochastic culling
+    culling.lodTransitionStart = -1.0f;
     culling.lodTransitionEnd = -1.0f;
     culling.maxLodDropRate = 0.0f;
     memcpy(uniformBuffers.mappedPointers[frameIndex], &culling, sizeof(CullingUniforms));
@@ -674,12 +678,6 @@ void GrassSystem::updateUniforms(uint32_t frameIndex, const glm::vec3& cameraPos
     params.terrainSize = terrainSize;
     params.terrainHeightScale = terrainHeightScale;
     memcpy(paramsBuffers.mappedPointers[frameIndex], &params, sizeof(GrassParams));
-
-    // Update active tiles in tiled mode based on camera position
-    if (tiledModeEnabled_ && tileManager_) {
-        frameCounter_++;
-        tileManager_->updateActiveTiles(cameraPos, frameCounter_, time);
-    }
 }
 
 void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameIndex, float time) {
@@ -693,33 +691,18 @@ void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameInd
     cmd.pipelineBarrier(vk::PipelineStageFlagBits::eHost, vk::PipelineStageFlagBits::eComputeShader,
                         {}, hostBarrier, {}, {});
 
-    // Use tiled mode if enabled and tile manager is available
-    if (tiledModeEnabled_ && tileManager_) {
-        // Set the correct buffer set for shared buffers before compute
-        tileManager_->setSharedBuffers(
-            instanceBuffers.buffers[writeSet],
-            indirectBuffers.buffers[writeSet]
-        );
-
-        // Tiled mode: dispatch compute for each active tile
-        tileManager_->recordCompute(cmd, frameIndex, time, writeSet);
-        return;
-    }
-
-    // Legacy non-tiled mode (fallback)
-    // Update compute descriptor set with per-frame buffers only
-    // Note: Static images (bindings 3, 4, 5) are already bound in updateDescriptorSets()
+    // Update compute descriptor set with per-frame buffers
     DescriptorManager::SetWriter writer(getDevice(), getComputeDescriptorSet(writeSet));
     writer.writeBuffer(2, uniformBuffers.buffers[frameIndex], 0, sizeof(CullingUniforms));
     writer.writeBuffer(7, paramsBuffers.buffers[frameIndex], 0, sizeof(GrassParams));
 
-    // Update tile info buffer to the correct frame's buffer (triple-buffered to avoid CPU-GPU sync)
+    // Update tile info buffer for terrain tile cache
     if (!tileInfoBuffers_.empty() && tileInfoBuffers_.at(frameIndex)) {
         writer.writeBuffer(6, tileInfoBuffers_.at(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
     }
     writer.update();
 
-    // Reset indirect buffer before compute dispatch to prevent accumulation
+    // Reset indirect buffer before compute dispatch
     cmd.fillBuffer(indirectBuffers.buffers[writeSet], 0, sizeof(VkDrawIndirectCommand), 0);
     auto clearBarrier = vk::MemoryBarrier{}
         .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
@@ -727,35 +710,53 @@ void GrassSystem::recordResetAndCompute(vk::CommandBuffer cmd, uint32_t frameInd
     cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eComputeShader,
                         {}, clearBarrier, {}, {});
 
-    // Dispatch grass compute shader using the compute buffer set
-    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, getComputePipelineHandles().pipeline);
+    // Bind the tiled compute pipeline
+    vk::Pipeline computePipeline = tiledComputePipeline_ ? **tiledComputePipeline_ : getComputePipelineHandles().pipeline;
+    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, computePipeline);
     VkDescriptorSet computeSet = getComputeDescriptorSet(writeSet);
     cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute,
                            getComputePipelineHandles().pipelineLayout, 0,
                            vk::DescriptorSet(computeSet), {});
 
-    // Use extended push constants even in legacy mode (with zero tile origin)
-    TiledGrassPushConstants grassPush{};
-    grassPush.time = time;
-    grassPush.tileOriginX = 0.0f;
-    grassPush.tileOriginZ = 0.0f;
-    grassPush.tileSize = GrassConstants::TILE_SIZE_LOD0;
-    grassPush.spacingMult = 1.0f;
-    grassPush.lodLevel = 0;
-    grassPush.tileLoadTime = 0.0f;  // Legacy mode: no fade-in needed
-    grassPush.padding = 0.0f;
-    cmd.pushConstants<TiledGrassPushConstants>(
-        getComputePipelineHandles().pipelineLayout,
-        vk::ShaderStageFlagBits::eCompute,
-        0, grassPush);
+    // Dispatch tiles around camera for coarse-grain culling
+    // Tiles provide frustum culling, while continuous stochastic culling handles density
+    constexpr int TILES_PER_AXIS = 3;  // 3x3 grid of tiles around camera
+    float tileSize = GrassConstants::TILE_SIZE;
 
-    // Dispatch using derived constant: DISPATCH_SIZE = ceil(GRID_SIZE / WORKGROUP_SIZE)
-    // Grid: GRID_SIZE x GRID_SIZE blades, Workgroup: WORKGROUP_SIZE x WORKGROUP_SIZE threads
-    cmd.dispatch(GrassConstants::DISPATCH_SIZE, GrassConstants::DISPATCH_SIZE, 1);
+    // Calculate center tile based on camera position
+    int centerTileX = static_cast<int>(std::floor(lastCameraPos_.x / tileSize));
+    int centerTileZ = static_cast<int>(std::floor(lastCameraPos_.z / tileSize));
 
-    // Memory barrier: compute write -> vertex shader read (storage buffer) and indirect read
-    // Note: This barrier ensures the compute results are visible when we draw from this buffer
-    // in the NEXT frame (after advanceBufferSet swaps the sets)
+    uint32_t tileIndex = 0;
+    for (int tz = -TILES_PER_AXIS / 2; tz <= TILES_PER_AXIS / 2; ++tz) {
+        for (int tx = -TILES_PER_AXIS / 2; tx <= TILES_PER_AXIS / 2; ++tx) {
+            int tileX = centerTileX + tx;
+            int tileZ = centerTileZ + tz;
+
+            float tileOriginX = static_cast<float>(tileX) * tileSize;
+            float tileOriginZ = static_cast<float>(tileZ) * tileSize;
+
+            // Push constants for this tile
+            TiledGrassPushConstants grassPush{};
+            grassPush.time = time;
+            grassPush.tileOriginX = tileOriginX;
+            grassPush.tileOriginZ = tileOriginZ;
+            grassPush.tileSize = tileSize;
+            grassPush.spacing = GrassConstants::SPACING;
+            grassPush.tileIndex = tileIndex++;
+            grassPush.unused1 = 0.0f;
+            grassPush.unused2 = 0.0f;
+            cmd.pushConstants<TiledGrassPushConstants>(
+                getComputePipelineHandles().pipelineLayout,
+                vk::ShaderStageFlagBits::eCompute,
+                0, grassPush);
+
+            // Dispatch compute shader for this tile
+            cmd.dispatch(GrassConstants::TILE_DISPATCH_SIZE, GrassConstants::TILE_DISPATCH_SIZE, 1);
+        }
+    }
+
+    // Memory barrier: compute write -> vertex shader read and indirect read
     auto computeBarrier = vk::MemoryBarrier{}
         .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
         .setDstAccessMask(vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eIndirectCommandRead);
@@ -784,19 +785,6 @@ void GrassSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float t
         .setExtent(ext);
     cmd.setScissor(0, scissor);
 
-    // Use tiled mode if enabled and tile manager is available
-    if (tiledModeEnabled_ && tileManager_) {
-        VkDescriptorSet graphicsSet = getGraphicsDescriptorSet(readSet);
-        tileManager_->recordDraw(cmd, frameIndex, time, readSet,
-                                  getGraphicsPipelineHandles().pipeline,
-                                  getGraphicsPipelineHandles().pipelineLayout,
-                                  graphicsSet,
-                                  indirectBuffers.buffers[readSet],
-                                  dynamicRendererUBO_);
-        return;
-    }
-
-    // Legacy non-tiled mode
     cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, getGraphicsPipelineHandles().pipeline);
 
     VkDescriptorSet graphicsSet = getGraphicsDescriptorSet(readSet);
@@ -813,15 +801,16 @@ void GrassSystem::recordDraw(vk::CommandBuffer cmd, uint32_t frameIndex, float t
                                vk::DescriptorSet(graphicsSet), {});
     }
 
+    // Push constants (not fully used by vertex shader but kept for layout compatibility)
     TiledGrassPushConstants grassPush{};
     grassPush.time = time;
     grassPush.tileOriginX = 0.0f;
     grassPush.tileOriginZ = 0.0f;
-    grassPush.tileSize = GrassConstants::TILE_SIZE_LOD0;
-    grassPush.spacingMult = 1.0f;
-    grassPush.lodLevel = 0;
-    grassPush.tileLoadTime = 0.0f;  // Not used in graphics pass
-    grassPush.padding = 0.0f;
+    grassPush.tileSize = GrassConstants::TILE_SIZE;
+    grassPush.spacing = GrassConstants::SPACING;
+    grassPush.tileIndex = 0;
+    grassPush.unused1 = 0.0f;
+    grassPush.unused2 = 0.0f;
     cmd.pushConstants<TiledGrassPushConstants>(
         getGraphicsPipelineHandles().pipelineLayout,
         vk::ShaderStageFlagBits::eVertex,

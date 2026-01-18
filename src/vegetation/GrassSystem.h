@@ -32,16 +32,17 @@ struct GrassPushConstants {
     int cascadeIndex;  // For shadow pass: which cascade we're rendering
 };
 
-// Extended push constants for tiled grass mode with multi-LOD support
+// Push constants for tiled grass with continuous stochastic culling
+// Tiles provide coarse culling, continuous distance-based culling handles density
 struct TiledGrassPushConstants {
     float time;
     float tileOriginX;   // World X origin of this tile
     float tileOriginZ;   // World Z origin of this tile
-    float tileSize;      // Tile size in world units (varies by LOD: 64, 128, 256)
-    float spacingMult;   // Spacing multiplier for this LOD (1.0, 2.0, 4.0)
-    uint32_t lodLevel;   // LOD level (0 = high detail, 1 = medium, 2 = low)
-    float tileLoadTime;  // Time when this tile was first loaded (for fade-in)
-    float padding;       // Padding to align to 16 bytes
+    float tileSize;      // Tile size in world units
+    float spacing;       // Blade spacing (always base spacing, no LOD multiplier)
+    uint32_t tileIndex;  // Tile index for debugging
+    float unused1;       // Padding
+    float unused2;       // Padding
 };
 
 struct GrassInstance {
@@ -284,4 +285,7 @@ private:
 
     // Frame counter for tile unloading (ensures GPU isn't using tile before freeing)
     uint64_t frameCounter_ = 0;
+
+    // Camera position for camera-centered dispatch
+    glm::vec3 lastCameraPos_{0.0f};
 };
