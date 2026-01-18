@@ -8,6 +8,8 @@
 #include "ShaderLoader.h"
 #include "OctahedralMapping.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/RenderPassBuilder.h"
+#include "core/vulkan/DescriptorSetLayoutBuilder.h"
 
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -15,96 +17,46 @@
 #include <vulkan/vulkan.hpp>
 
 bool TreeImpostorAtlas::createRenderPass() {
-    // Two color attachments: albedo+alpha and normal+depth+AO
-    std::array<vk::AttachmentDescription, 3> attachments = {
-        vk::AttachmentDescription{}
-            .setFormat(vk::Format::eR8G8B8A8Unorm)
-            .setSamples(vk::SampleCountFlagBits::e1)
-            .setLoadOp(vk::AttachmentLoadOp::eClear)
-            .setStoreOp(vk::AttachmentStoreOp::eStore)
-            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
-            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
-            .setInitialLayout(vk::ImageLayout::eColorAttachmentOptimal)
-            .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal),
-        vk::AttachmentDescription{}
-            .setFormat(vk::Format::eR8G8B8A8Unorm)
-            .setSamples(vk::SampleCountFlagBits::e1)
-            .setLoadOp(vk::AttachmentLoadOp::eClear)
-            .setStoreOp(vk::AttachmentStoreOp::eStore)
-            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
-            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
-            .setInitialLayout(vk::ImageLayout::eColorAttachmentOptimal)
-            .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal),
-        vk::AttachmentDescription{}
-            .setFormat(vk::Format::eD32Sfloat)
-            .setSamples(vk::SampleCountFlagBits::e1)
-            .setLoadOp(vk::AttachmentLoadOp::eClear)
-            .setStoreOp(vk::AttachmentStoreOp::eDontCare)
-            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
-            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
-            .setInitialLayout(vk::ImageLayout::eUndefined)
-            .setFinalLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal)
-    };
+    // Two color attachments (albedo+alpha, normal+depth+AO) + transient depth
+    // Using RenderPassBuilder with stereotypes for cleaner code
+    auto renderPassOpt = RenderPassBuilder::twoColorDepth(
+            vk::Format::eR8G8B8A8Unorm,  // albedo + alpha
+            vk::Format::eR8G8B8A8Unorm,  // normal + depth + AO
+            vk::Format::eD32Sfloat)
+        .build(*raiiDevice_);
 
-    std::array<vk::AttachmentReference, 2> colorRefs = {
-        vk::AttachmentReference{}.setAttachment(0).setLayout(vk::ImageLayout::eColorAttachmentOptimal),
-        vk::AttachmentReference{}.setAttachment(1).setLayout(vk::ImageLayout::eColorAttachmentOptimal)
-    };
-
-    auto depthRef = vk::AttachmentReference{}
-        .setAttachment(2)
-        .setLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
-
-    auto subpass = vk::SubpassDescription{}
-        .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
-        .setColorAttachments(colorRefs)
-        .setPDepthStencilAttachment(&depthRef);
-
-    auto dependency = vk::SubpassDependency{}
-        .setSrcSubpass(VK_SUBPASS_EXTERNAL)
-        .setDstSubpass(0)
-        .setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests)
-        .setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests)
-        .setSrcAccessMask(vk::AccessFlags{})
-        .setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite);
-
-    auto renderPassInfo = vk::RenderPassCreateInfo{}
-        .setAttachments(attachments)
-        .setSubpasses(subpass)
-        .setDependencies(dependency);
-
-    captureRenderPass_.emplace(*raiiDevice_, renderPassInfo);
+    if (!renderPassOpt) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create capture render pass");
+        return false;
+    }
+    captureRenderPass_ = std::move(renderPassOpt);
     return true;
 }
 
 bool TreeImpostorAtlas::createCapturePipeline() {
-    std::array<vk::DescriptorSetLayoutBinding, 2> bindings = {
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(0)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eFragment),
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(1)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eFragment)
-    };
+    // Two texture samplers for albedo and normal maps
+    auto layoutOpt = DescriptorSetLayoutBuilder()
+        .addCombinedImageSampler(vk::ShaderStageFlagBits::eFragment)  // binding 0: albedo
+        .addCombinedImageSampler(vk::ShaderStageFlagBits::eFragment)  // binding 1: normal
+        .build(*raiiDevice_);
 
-    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}.setBindings(bindings);
-    captureDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
+    if (!layoutOpt) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create capture descriptor set layout");
+        return false;
+    }
+    captureDescriptorSetLayout_ = std::move(layoutOpt);
 
-    auto layoutOpt = PipelineLayoutBuilder(*raiiDevice_)
+    auto pipelineLayoutOpt = PipelineLayoutBuilder(*raiiDevice_)
         .addDescriptorSetLayout(**captureDescriptorSetLayout_)
         .addPushConstantRange(
             vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
             sizeof(glm::mat4) * 2 + sizeof(glm::vec4))
         .build();
-    if (!layoutOpt) {
+    if (!pipelineLayoutOpt) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create capture pipeline layout");
         return false;
     }
-    capturePipelineLayout_ = std::move(layoutOpt);
+    capturePipelineLayout_ = std::move(pipelineLayoutOpt);
 
     std::string shaderPath = resourcePath_ + "/shaders/";
     auto vertModule = ShaderLoader::loadShaderModule(device_, shaderPath + "tree_impostor_capture.vert.spv");
@@ -206,38 +158,30 @@ bool TreeImpostorAtlas::createCapturePipeline() {
 }
 
 bool TreeImpostorAtlas::createLeafCapturePipeline() {
-    std::array<vk::DescriptorSetLayoutBinding, 3> bindings = {
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(0)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eFragment),
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(1)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eFragment),
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(2)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eVertex)
-    };
+    // Two texture samplers + storage buffer for leaf instance data
+    auto leafLayoutOpt = DescriptorSetLayoutBuilder()
+        .addCombinedImageSampler(vk::ShaderStageFlagBits::eFragment)  // binding 0: albedo
+        .addCombinedImageSampler(vk::ShaderStageFlagBits::eFragment)  // binding 1: normal
+        .addStorageBuffer(vk::ShaderStageFlagBits::eVertex)           // binding 2: leaf instances
+        .build(*raiiDevice_);
 
-    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}.setBindings(bindings);
-    leafCaptureDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
+    if (!leafLayoutOpt) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create leaf capture descriptor set layout");
+        return false;
+    }
+    leafCaptureDescriptorSetLayout_ = std::move(leafLayoutOpt);
 
-    auto leafLayoutOpt = PipelineLayoutBuilder(*raiiDevice_)
+    auto leafPipelineLayoutOpt = PipelineLayoutBuilder(*raiiDevice_)
         .addDescriptorSetLayout(**leafCaptureDescriptorSetLayout_)
         .addPushConstantRange(
             vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
             sizeof(glm::mat4) * 2 + sizeof(glm::vec4) + sizeof(int32_t))
         .build();
-    if (!leafLayoutOpt) {
+    if (!leafPipelineLayoutOpt) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create leaf capture pipeline layout");
         return false;
     }
-    leafCapturePipelineLayout_ = std::move(leafLayoutOpt);
+    leafCapturePipelineLayout_ = std::move(leafPipelineLayoutOpt);
 
     std::string shaderPath = resourcePath_ + "/shaders/";
     auto vertModule = ShaderLoader::loadShaderModule(device_, shaderPath + "tree_impostor_capture_leaf.vert.spv");
