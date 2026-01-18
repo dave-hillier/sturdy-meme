@@ -5,6 +5,7 @@
 #include "Bindings.h"
 #include "UBOs.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/ComputeShaderCommon.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <algorithm>
@@ -959,7 +960,7 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
         vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **cellCullPipelineLayout_,
                                  0, vk::DescriptorSet(cellCullDescriptorSets_[frameIndex]), {});
 
-        uint32_t cellWorkgroups = (cellParams.numCells + 255) / 256;
+        uint32_t cellWorkgroups = ComputeConstants::getDispatchCount1D(cellParams.numCells);
         vkCmd.dispatch(cellWorkgroups, 1, 1);
 
         // Tree Filtering (Two-Phase Culling)
@@ -1030,7 +1031,7 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, **cullPipelineLayout_,
                              0, vk::DescriptorSet(cullDescriptorSets_[frameIndex]), {});
 
-    uint32_t workgroupCount = (totalLeafInstances + 255) / 256;
+    uint32_t workgroupCount = ComputeConstants::getDispatchCount1D(totalLeafInstances);
     vkCmd.dispatch(workgroupCount, 1, 1);
 
     barrier.setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
