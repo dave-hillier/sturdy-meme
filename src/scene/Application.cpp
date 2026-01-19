@@ -579,6 +579,8 @@ void Application::run() {
 
         // Sync settings from GUI
         renderer_->getSystems().scene().getSceneBuilder().setCapeEnabled(gui_->getPlayerSettings().capeEnabled);
+        renderer_->getSystems().scene().getSceneBuilder().setShowSword(gui_->getPlayerSettings().showSword);
+        renderer_->getSystems().scene().getSceneBuilder().setShowShield(gui_->getPlayerSettings().showShield);
         renderer_->getSystems().scene().getSceneBuilder().setShowWeaponAxes(gui_->getPlayerSettings().showWeaponAxes);
 
         renderer_->getSystems().scene().getSceneBuilder().updateAnimatedCharacter(

@@ -34,8 +34,18 @@ void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& setting
 
     // Weapons section
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.8f, 0.9f, 1.0f));
-    ImGui::Text("WEAPONS DEBUG");
+    ImGui::Text("WEAPONS");
     ImGui::PopStyleColor();
+
+    ImGui::Checkbox("Show Sword", &settings.showSword);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Toggle sword visibility in right hand");
+    }
+
+    ImGui::Checkbox("Show Shield", &settings.showShield);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Toggle shield visibility on left arm");
+    }
 
     ImGui::Checkbox("Show Hand Axes", &settings.showWeaponAxes);
     if (ImGui::IsItemHovered()) {

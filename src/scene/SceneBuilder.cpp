@@ -803,28 +803,38 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     std::vector<glm::mat4> globalTransforms;
     skeleton.computeGlobalTransforms(globalTransforms);
 
-    // Using finger bones now, so less offset needed
+    // Hide transform (scale to zero)
+    glm::mat4 hideTransform = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
+
     // Update sword transform (attached to right hand)
-    if (rightHandBoneIndex >= 0 && swordIndex < sceneObjects.size()) {
-        glm::mat4 boneWorld = worldTransform * globalTransforms[rightHandBoneIndex];
+    if (swordIndex < sceneObjects.size()) {
+        if (showSword_ && rightHandBoneIndex >= 0) {
+            glm::mat4 boneWorld = worldTransform * globalTransforms[rightHandBoneIndex];
 
-        // Cylinder has height along Y. We want it to point along bone's -X axis.
-        // Rotate 90° around Z to tip Y toward -X, then offset along sword length
-        glm::mat4 swordOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        swordOffset = glm::translate(swordOffset, glm::vec3(0.0f, 0.4f, 0.0f));  // Offset along sword length only
+            // Cylinder has height along Y. We want it to point along bone's -X axis.
+            // Rotate 90° around Z to tip Y toward -X, then offset along sword length
+            glm::mat4 swordOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+            swordOffset = glm::translate(swordOffset, glm::vec3(0.0f, 0.4f, 0.0f));  // Offset along sword length only
 
-        sceneObjects[swordIndex].transform = boneWorld * swordOffset;
+            sceneObjects[swordIndex].transform = boneWorld * swordOffset;
+        } else {
+            sceneObjects[swordIndex].transform = hideTransform;
+        }
     }
 
     // Update shield transform (attached to left hand)
-    if (leftHandBoneIndex >= 0 && shieldIndex < sceneObjects.size()) {
-        glm::mat4 boneWorld = worldTransform * globalTransforms[leftHandBoneIndex];
+    if (shieldIndex < sceneObjects.size()) {
+        if (showShield_ && leftHandBoneIndex >= 0) {
+            glm::mat4 boneWorld = worldTransform * globalTransforms[leftHandBoneIndex];
 
-        // Shield flat face (cylinder Y axis) should point outward along -Z (blue axis)
-        // Rotate -90° around X to make Y point toward -Z
-        glm::mat4 shieldOffset = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+            // Shield flat face (cylinder Y axis) should point outward along -Z (blue axis)
+            // Rotate -90° around X to make Y point toward -Z
+            glm::mat4 shieldOffset = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
 
-        sceneObjects[shieldIndex].transform = boneWorld * shieldOffset;
+            sceneObjects[shieldIndex].transform = boneWorld * shieldOffset;
+        } else {
+            sceneObjects[shieldIndex].transform = hideTransform;
+        }
     }
 
     // Debug axis indicators for right hand - cylinder points along Y, so rotate to each axis

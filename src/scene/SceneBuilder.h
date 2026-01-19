@@ -94,6 +94,12 @@ public:
     bool hasCape() const { return hasCapeEnabled; }
     void setCapeEnabled(bool enabled) { hasCapeEnabled = enabled; }
 
+    // Weapon visibility
+    void setShowSword(bool show) { showSword_ = show; }
+    bool getShowSword() const { return showSword_; }
+    void setShowShield(bool show) { showShield_ = show; }
+    bool getShowShield() const { return showShield_; }
+
     // Weapon debug axes
     void setShowWeaponAxes(bool show) { showWeaponAxes_ = show; }
     bool getShowWeaponAxes() const { return showWeaponAxes_; }
@@ -180,7 +186,9 @@ private:
     PlayerCape playerCape;
     bool hasCapeEnabled = false;
 
-    // Weapon debug visualization
+    // Weapon visibility and debug visualization
+    bool showSword_ = true;
+    bool showShield_ = true;
     bool showWeaponAxes_ = false;
 
     // Textures (managed via AssetRegistry with shared_ptr)
