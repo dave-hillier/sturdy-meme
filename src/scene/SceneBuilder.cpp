@@ -820,9 +820,9 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     if (leftHandBoneIndex >= 0 && shieldIndex < sceneObjects.size()) {
         glm::mat4 boneWorld = worldTransform * globalTransforms[leftHandBoneIndex];
 
-        // Shield flat face (cylinder Y axis) should point outward along +Z (blue axis)
-        // Rotate 90° around X to make Y point toward +Z
-        glm::mat4 shieldOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        // Shield flat face (cylinder Y axis) should point outward along -Z (blue axis)
+        // Rotate -90° around X to make Y point toward -Z
+        glm::mat4 shieldOffset = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
 
         sceneObjects[shieldIndex].transform = boneWorld * shieldOffset;
     }
