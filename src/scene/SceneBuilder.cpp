@@ -803,10 +803,7 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     std::vector<glm::mat4> globalTransforms;
     skeleton.computeGlobalTransforms(globalTransforms);
 
-    // Hand bone is at the wrist - need to offset to palm position
-    // Based on debug axes: sword needs to point along -X
-    const float wristToPalmOffset = 0.08f;  // ~8cm from wrist to palm center
-
+    // Using finger bones now, so less offset needed
     // Update sword transform (attached to right hand)
     if (rightHandBoneIndex >= 0 && swordIndex < sceneObjects.size()) {
         glm::mat4 boneWorld = worldTransform * globalTransforms[rightHandBoneIndex];
@@ -814,7 +811,7 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
         // Cylinder has height along Y. We want it to point along bone's -X axis.
         // Rotate 90° around Z to tip Y toward -X, then offset along sword length
         glm::mat4 swordOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        swordOffset = glm::translate(swordOffset, glm::vec3(0.0f, wristToPalmOffset + 0.4f, 0.0f));  // Along sword (now -X dir)
+        swordOffset = glm::translate(swordOffset, glm::vec3(0.0f, 0.4f, 0.0f));  // Offset along sword length only
 
         sceneObjects[swordIndex].transform = boneWorld * swordOffset;
     }
@@ -823,10 +820,9 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     if (leftHandBoneIndex >= 0 && shieldIndex < sceneObjects.size()) {
         glm::mat4 boneWorld = worldTransform * globalTransforms[leftHandBoneIndex];
 
-        // Shield flat face (cylinder Y axis) should point outward along +X (red axis)
-        // Rotate -90° around Z to make Y point toward +X
-        glm::mat4 shieldOffset = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        shieldOffset = glm::translate(shieldOffset, glm::vec3(0.0f, wristToPalmOffset, 0.0f));
+        // Shield flat face (cylinder Y axis) should point outward along +Z (blue axis)
+        // Rotate 90° around X to make Y point toward +Z
+        glm::mat4 shieldOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
 
         sceneObjects[shieldIndex].transform = boneWorld * shieldOffset;
     }
