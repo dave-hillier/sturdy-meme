@@ -1,64 +1,50 @@
 #pragma once
 
 #include <fruit/fruit.h>
-#include <functional>
 #include <memory>
-#include <string>
 #include <vulkan/vulkan.h>
+#include <string>
 
-// Forward declarations only - no heavy includes
-class VulkanContext;
-class RendererSystems;
-class DescriptorManager;
-struct InitContext;
+// Forward declarations
+class PostProcessSystem;
+class ShadowSystem;
+class TerrainSystem;
+class GlobalBufferManager;
 
 /**
- * Minimal Fruit DI Components for core rendering infrastructure.
+ * Fruit DI with system lifecycle ownership.
  *
- * Provides injection for:
- * - InitContext factory (runtime parameters)
- * - RendererSystems (subsystem container)
+ * Systems are non-movable (GPU resources), so Fruit manages unique_ptrs.
+ * The injector owns system lifetimes.
  *
  * Usage:
- *   fruit::Injector<IRendererSystems> injector(getRendererSystemsComponent);
- *   auto& systems = injector.get<IRendererSystems&>().get();
+ *   fruit::Injector<...> injector(getRenderingComponent(params));
+ *   ShadowSystem& shadow = *injector.get<std::unique_ptr<ShadowSystem>&>();
  */
 
-// ============================================================================
-// InitContext Factory
-// ============================================================================
-
-/**
- * Factory for creating InitContext with runtime parameters.
- */
-using InitContextFactory = std::function<InitContext(
-    const VulkanContext& vulkanContext,
-    VkCommandPool commandPool,
-    void* descriptorPool,  // DescriptorManager::Pool*
-    const std::string& resourcePath,
-    uint32_t framesInFlight
-)>;
-
-fruit::Component<InitContextFactory> getInitContextFactoryComponent();
-
-// ============================================================================
-// RendererSystems Interface
-// ============================================================================
-
-/**
- * Interface for RendererSystems injection.
- */
-class IRendererSystems {
-public:
-    virtual ~IRendererSystems() = default;
-    virtual RendererSystems& get() = 0;
-    virtual const RendererSystems& get() const = 0;
+// Runtime parameters needed for system creation
+struct VulkanParams {
+    VkDevice device;
+    VkPhysicalDevice physicalDevice;
+    VmaAllocator allocator;
+    VkQueue graphicsQueue;
+    VkCommandPool commandPool;
+    VkDescriptorSetLayout mainDescriptorSetLayout;
+    uint32_t framesInFlight;
+    VkExtent2D extent;
+    std::string shaderPath;
+    std::string resourcePath;
 };
 
-fruit::Component<IRendererSystems> getRendererSystemsComponent();
+// Unique_ptr aliases for Fruit injection
+using ShadowSystemPtr = std::unique_ptr<ShadowSystem>;
+using PostProcessSystemPtr = std::unique_ptr<PostProcessSystem>;
+using TerrainSystemPtr = std::unique_ptr<TerrainSystem>;
+using GlobalBufferManagerPtr = std::unique_ptr<GlobalBufferManager>;
 
-// ============================================================================
-// Combined Component
-// ============================================================================
-
-fruit::Component<IRendererSystems, InitContextFactory> getRenderingComponent();
+/**
+ * Combined component installing core systems.
+ * Fruit manages construction order based on dependencies.
+ */
+fruit::Component<ShadowSystemPtr, PostProcessSystemPtr, TerrainSystemPtr, GlobalBufferManagerPtr>
+getRenderingComponent(VulkanParams params);

@@ -1,62 +1,82 @@
-// FruitComponents.cpp - Minimal Fruit DI components
+// FruitComponents.cpp - Fruit DI with system lifecycle ownership
 #include "FruitComponents.h"
-#include "InitContext.h"
-#include "RendererSystems.h"
-#include "DescriptorManager.h"
+#include "GlobalBufferManager.h"
+#include "ShadowSystem.h"
+#include "PostProcessSystem.h"
+#include "TerrainSystem.h"
 
-#include <SDL3/SDL_log.h>
+namespace {
 
-// ============================================================================
-// RendererSystems Implementation (internal)
-// ============================================================================
-
-class RendererSystemsImpl : public IRendererSystems {
-public:
-    INJECT(RendererSystemsImpl())
-        : systems_(std::make_unique<RendererSystems>())
-    {
-        SDL_Log("RendererSystemsImpl: Created via Fruit DI");
-    }
-
-    ~RendererSystemsImpl() override = default;
-
-    RendererSystems& get() override { return *systems_; }
-    const RendererSystems& get() const override { return *systems_; }
-
-private:
-    std::unique_ptr<RendererSystems> systems_;
-};
-
-// ============================================================================
-// Component Implementations
-// ============================================================================
-
-fruit::Component<InitContextFactory> getInitContextFactoryComponent() {
+fruit::Component<VulkanParams> getVulkanParamsComponent(VulkanParams params) {
     return fruit::createComponent()
-        .registerProvider([]() -> InitContextFactory {
-            return [](const VulkanContext& vulkanContext,
-                     VkCommandPool commandPool,
-                     void* descriptorPool,
-                     const std::string& resourcePath,
-                     uint32_t framesInFlight) -> InitContext {
-                return InitContext::build(
-                    vulkanContext,
-                    commandPool,
-                    static_cast<DescriptorManager::Pool*>(descriptorPool),
-                    resourcePath,
-                    framesInFlight
-                );
-            };
+        .registerProvider([=]() { return params; });
+}
+
+fruit::Component<GlobalBufferManagerPtr> getGlobalBufferManagerComponent() {
+    return fruit::createComponent()
+        .registerProvider([](VulkanParams params) -> GlobalBufferManagerPtr {
+            return GlobalBufferManager::create(
+                params.allocator,
+                params.physicalDevice,
+                params.framesInFlight
+            );
         });
 }
 
-fruit::Component<IRendererSystems> getRendererSystemsComponent() {
+fruit::Component<ShadowSystemPtr> getShadowSystemComponent() {
     return fruit::createComponent()
-        .bind<IRendererSystems, RendererSystemsImpl>();
+        .registerProvider([](VulkanParams params) -> ShadowSystemPtr {
+            ShadowSystem::InitInfo info{};
+            info.device = params.device;
+            info.physicalDevice = params.physicalDevice;
+            info.allocator = params.allocator;
+            info.mainDescriptorSetLayout = params.mainDescriptorSetLayout;
+            info.shaderPath = params.shaderPath;
+            info.framesInFlight = params.framesInFlight;
+            return ShadowSystem::create(info);
+        });
 }
 
-fruit::Component<IRendererSystems, InitContextFactory> getRenderingComponent() {
+fruit::Component<PostProcessSystemPtr> getPostProcessSystemComponent() {
     return fruit::createComponent()
-        .install(getRendererSystemsComponent)
-        .install(getInitContextFactoryComponent);
+        .registerProvider([](VulkanParams params) -> PostProcessSystemPtr {
+            PostProcessSystem::InitInfo info{};
+            info.device = params.device;
+            info.physicalDevice = params.physicalDevice;
+            info.allocator = params.allocator;
+            info.shaderPath = params.shaderPath;
+            info.framesInFlight = params.framesInFlight;
+            info.extent = params.extent;
+            return PostProcessSystem::create(info);
+        });
+}
+
+fruit::Component<TerrainSystemPtr> getTerrainSystemComponent() {
+    return fruit::createComponent()
+        .registerProvider([](VulkanParams params,
+                            ShadowSystemPtr& shadow,
+                            GlobalBufferManagerPtr& globalBuffers) -> TerrainSystemPtr {
+            TerrainSystem::InitInfo info{};
+            info.device = params.device;
+            info.physicalDevice = params.physicalDevice;
+            info.allocator = params.allocator;
+            info.shaderPath = params.shaderPath;
+            info.resourcePath = params.resourcePath;
+            info.framesInFlight = params.framesInFlight;
+            info.shadowResources = &shadow->getResources();
+            info.globalBufferManager = globalBuffers.get();
+            return TerrainSystem::create(info);
+        });
+}
+
+} // anonymous namespace
+
+fruit::Component<ShadowSystemPtr, PostProcessSystemPtr, TerrainSystemPtr, GlobalBufferManagerPtr>
+getRenderingComponent(VulkanParams params) {
+    return fruit::createComponent()
+        .install(getVulkanParamsComponent, params)
+        .install(getGlobalBufferManagerComponent)
+        .install(getShadowSystemComponent)
+        .install(getPostProcessSystemComponent)
+        .install(getTerrainSystemComponent);
 }
