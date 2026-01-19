@@ -297,59 +297,28 @@ bool BilateralGridSystem::createDescriptorSets() {
         // X blur: grid[0] -> grid[1]
         // Y blur: grid[1] -> grid[0]
         // Z blur: grid[0] -> grid[1] (final output in grid[1], but we'll copy back)
-        auto srcInfo = vk::DescriptorImageInfo{}
-            .setImageLayout(vk::ImageLayout::eGeneral);
-        auto dstInfo = vk::DescriptorImageInfo{}
-            .setImageLayout(vk::ImageLayout::eGeneral);
+        auto bufferInfo = makeBufferInfo(blurUniformBuffers.buffers[i], sizeof(BilateralBlurUniforms));
 
         // X: 0 -> 1
-        srcInfo.setImageView(gridViews[0]);
-        dstInfo.setImageView(gridViews[1]);
-
-        auto bufferInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(blurUniformBuffers.buffers[i])
-            .setOffset(0)
-            .setRange(sizeof(BilateralBlurUniforms));
-
-        std::array<vk::WriteDescriptorSet, 3> writes{};
-        writes[0] = vk::WriteDescriptorSet{}
-            .setDstSet(blurDescriptorSetsX[i])
-            .setDstBinding(0)
-            .setDescriptorCount(1)
-            .setDescriptorType(vk::DescriptorType::eStorageImage)
-            .setPImageInfo(&srcInfo);
-
-        writes[1] = vk::WriteDescriptorSet{}
-            .setDstSet(blurDescriptorSetsX[i])
-            .setDstBinding(1)
-            .setDescriptorCount(1)
-            .setDescriptorType(vk::DescriptorType::eStorageImage)
-            .setPImageInfo(&dstInfo);
-
-        writes[2] = vk::WriteDescriptorSet{}
-            .setDstSet(blurDescriptorSetsX[i])
-            .setDstBinding(2)
-            .setDescriptorCount(1)
-            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-            .setPBufferInfo(&bufferInfo);
-
-        vk::Device(device).updateDescriptorSets(writes, {});
+        DescriptorWriter()
+            .add(WriteBuilder::storageImage(0, makeStorageImageInfo(gridViews[0])))
+            .add(WriteBuilder::storageImage(1, makeStorageImageInfo(gridViews[1])))
+            .add(WriteBuilder::uniformBuffer(2, bufferInfo))
+            .update(device, blurDescriptorSetsX[i]);
 
         // Y: 1 -> 0
-        srcInfo.setImageView(gridViews[1]);
-        dstInfo.setImageView(gridViews[0]);
-        writes[0].setDstSet(blurDescriptorSetsY[i]);
-        writes[1].setDstSet(blurDescriptorSetsY[i]);
-        writes[2].setDstSet(blurDescriptorSetsY[i]);
-        vk::Device(device).updateDescriptorSets(writes, {});
+        DescriptorWriter()
+            .add(WriteBuilder::storageImage(0, makeStorageImageInfo(gridViews[1])))
+            .add(WriteBuilder::storageImage(1, makeStorageImageInfo(gridViews[0])))
+            .add(WriteBuilder::uniformBuffer(2, bufferInfo))
+            .update(device, blurDescriptorSetsY[i]);
 
-        // Z: 0 -> 1 (or skip Z blur for simplicity like GOT sometimes did)
-        srcInfo.setImageView(gridViews[0]);
-        dstInfo.setImageView(gridViews[1]);
-        writes[0].setDstSet(blurDescriptorSetsZ[i]);
-        writes[1].setDstSet(blurDescriptorSetsZ[i]);
-        writes[2].setDstSet(blurDescriptorSetsZ[i]);
-        vk::Device(device).updateDescriptorSets(writes, {});
+        // Z: 0 -> 1
+        DescriptorWriter()
+            .add(WriteBuilder::storageImage(0, makeStorageImageInfo(gridViews[0])))
+            .add(WriteBuilder::storageImage(1, makeStorageImageInfo(gridViews[1])))
+            .add(WriteBuilder::uniformBuffer(2, bufferInfo))
+            .update(device, blurDescriptorSetsZ[i]);
     }
 
     return true;

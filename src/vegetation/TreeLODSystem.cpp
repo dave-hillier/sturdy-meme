@@ -267,36 +267,23 @@ bool TreeLODSystem::createPipeline() {
             .setPName("main")
     }};
 
-    // Vertex input: billboard vertex + instance data
-    std::array<vk::VertexInputBindingDescription, 2> bindingDescriptions = {{
-        vk::VertexInputBindingDescription{}
-            .setBinding(0)
-            .setStride(sizeof(glm::vec3) + sizeof(glm::vec2))  // position + texcoord
-            .setInputRate(vk::VertexInputRate::eVertex),
-        vk::VertexInputBindingDescription{}
-            .setBinding(1)
-            .setStride(sizeof(ImpostorInstanceGPU))
-            .setInputRate(vk::VertexInputRate::eInstance)
-    }};
-
-    std::array<vk::VertexInputAttributeDescription, 10> attributeDescriptions = {{
-        // Per-vertex attributes
-        vk::VertexInputAttributeDescription{}.setLocation(0).setBinding(0).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(0),  // position
-        vk::VertexInputAttributeDescription{}.setLocation(1).setBinding(0).setFormat(vk::Format::eR32G32Sfloat).setOffset(sizeof(glm::vec3)),  // texcoord
-        // Per-instance attributes
-        vk::VertexInputAttributeDescription{}.setLocation(2).setBinding(1).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, position)),
-        vk::VertexInputAttributeDescription{}.setLocation(3).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, scale)),
-        vk::VertexInputAttributeDescription{}.setLocation(4).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, rotation)),
-        vk::VertexInputAttributeDescription{}.setLocation(5).setBinding(1).setFormat(vk::Format::eR32Uint).setOffset(offsetof(ImpostorInstanceGPU, archetypeIndex)),
-        vk::VertexInputAttributeDescription{}.setLocation(6).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, blendFactor)),
-        vk::VertexInputAttributeDescription{}.setLocation(7).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, hSize)),
-        vk::VertexInputAttributeDescription{}.setLocation(8).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, vSize)),
-        vk::VertexInputAttributeDescription{}.setLocation(9).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, baseOffset))
-    }};
-
-    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
-        .setVertexBindingDescriptions(bindingDescriptions)
-        .setVertexAttributeDescriptions(attributeDescriptions);
+    // Vertex input: billboard vertex (binding 0) + instance data (binding 1)
+    auto vertexInput = VertexInputBuilder()
+        // Binding 0: per-vertex (position + texcoord)
+        .addBinding(VertexBindingBuilder(0, sizeof(glm::vec3) + sizeof(glm::vec2)))
+        .addAttribute(AttributeBuilder::vec3(0, 0, 0))                      // position
+        .addAttribute(AttributeBuilder::vec2(1, 0, sizeof(glm::vec3)))      // texcoord
+        // Binding 1: per-instance
+        .addBinding(VertexBindingBuilder::perInstance<ImpostorInstanceGPU>(1))
+        .addAttribute(AttributeBuilder::vec3(2, 1, offsetof(ImpostorInstanceGPU, position)))
+        .addAttribute(AttributeBuilder::float1(3, 1, offsetof(ImpostorInstanceGPU, scale)))
+        .addAttribute(AttributeBuilder::float1(4, 1, offsetof(ImpostorInstanceGPU, rotation)))
+        .addAttribute(AttributeBuilder::uint1(5, 1, offsetof(ImpostorInstanceGPU, archetypeIndex)))
+        .addAttribute(AttributeBuilder::float1(6, 1, offsetof(ImpostorInstanceGPU, blendFactor)))
+        .addAttribute(AttributeBuilder::float1(7, 1, offsetof(ImpostorInstanceGPU, hSize)))
+        .addAttribute(AttributeBuilder::float1(8, 1, offsetof(ImpostorInstanceGPU, vSize)))
+        .addAttribute(AttributeBuilder::float1(9, 1, offsetof(ImpostorInstanceGPU, baseOffset)));
+    auto vertexInputInfo = vertexInput.build();
 
     auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
         .setTopology(vk::PrimitiveTopology::eTriangleList);
