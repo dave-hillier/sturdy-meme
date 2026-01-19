@@ -606,6 +606,50 @@ void SceneBuilder::createRenderables() {
         SDL_Log("SceneBuilder: Added debug axis indicators for right hand");
     }
 
+    // Debug axis indicators for left hand (R=X, G=Y, B=Z)
+    if (hasAnimatedCharacter && leftHandBoneIndex >= 0) {
+        // X axis - Red
+        leftHandAxisX = sceneObjects.size();
+        sceneObjects.push_back(RenderableBuilder()
+            .withTransform(glm::mat4(1.0f))
+            .withMesh(axisLineMesh.get())
+            .withTexture(whiteTex)
+            .withMaterialId(whiteMaterialId)
+            .withRoughness(1.0f)
+            .withMetallic(0.0f)
+            .withEmissiveColor(glm::vec3(1.0f, 0.0f, 0.0f))
+            .withEmissiveIntensity(5.0f)
+            .withCastsShadow(false)
+            .build());
+        // Y axis - Green
+        leftHandAxisY = sceneObjects.size();
+        sceneObjects.push_back(RenderableBuilder()
+            .withTransform(glm::mat4(1.0f))
+            .withMesh(axisLineMesh.get())
+            .withTexture(whiteTex)
+            .withMaterialId(whiteMaterialId)
+            .withRoughness(1.0f)
+            .withMetallic(0.0f)
+            .withEmissiveColor(glm::vec3(0.0f, 1.0f, 0.0f))
+            .withEmissiveIntensity(5.0f)
+            .withCastsShadow(false)
+            .build());
+        // Z axis - Blue
+        leftHandAxisZ = sceneObjects.size();
+        sceneObjects.push_back(RenderableBuilder()
+            .withTransform(glm::mat4(1.0f))
+            .withMesh(axisLineMesh.get())
+            .withTexture(whiteTex)
+            .withMaterialId(whiteMaterialId)
+            .withRoughness(1.0f)
+            .withMetallic(0.0f)
+            .withEmissiveColor(glm::vec3(0.0f, 0.0f, 1.0f))
+            .withEmissiveIntensity(5.0f)
+            .withCastsShadow(false)
+            .build());
+        SDL_Log("SceneBuilder: Added debug axis indicators for left hand");
+    }
+
     // Flag pole - 3m pole, center at 1.5m above ground
     auto [flagPoleX, flagPoleZ] = worldPos(5.0f, 0.0f);
     flagPoleIndex = sceneObjects.size();
@@ -754,17 +798,17 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     skeleton.computeGlobalTransforms(globalTransforms);
 
     // Hand bone is at the wrist - need to offset to palm position
-    // In Mixamo rigs: X = thumb direction, Y = up arm toward elbow, Z = finger direction
+    // Based on debug axes: sword needs to point along -X
     const float wristToPalmOffset = 0.08f;  // ~8cm from wrist to palm center
 
     // Update sword transform (attached to right hand)
     if (rightHandBoneIndex >= 0 && swordIndex < sceneObjects.size()) {
         glm::mat4 boneWorld = worldTransform * globalTransforms[rightHandBoneIndex];
 
-        // Cylinder has height along Y. We want it to point along bone's Z (finger direction).
-        // Rotate 90° around X to tip Y toward Z, then offset along sword length and to palm
-        glm::mat4 swordOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        swordOffset = glm::translate(swordOffset, glm::vec3(0.0f, wristToPalmOffset + 0.4f, 0.0f));  // Along sword (now Z dir)
+        // Cylinder has height along Y. We want it to point along bone's -X axis.
+        // Rotate 90° around Z to tip Y toward -X, then offset along sword length
+        glm::mat4 swordOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        swordOffset = glm::translate(swordOffset, glm::vec3(0.0f, wristToPalmOffset + 0.4f, 0.0f));  // Along sword (now -X dir)
 
         sceneObjects[swordIndex].transform = boneWorld * swordOffset;
     }
@@ -773,10 +817,10 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     if (leftHandBoneIndex >= 0 && shieldIndex < sceneObjects.size()) {
         glm::mat4 boneWorld = worldTransform * globalTransforms[leftHandBoneIndex];
 
-        // Shield flat face (cylinder Y axis) should point outward from arm (along bone's Z)
-        // Rotate 90° around X to make Y point toward Z
-        glm::mat4 shieldOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        shieldOffset = glm::translate(shieldOffset, glm::vec3(0.0f, wristToPalmOffset, 0.0f));  // Offset to forearm
+        // Shield flat face (cylinder Y axis) should point outward along -X
+        // Rotate 90° around Z to make Y point toward -X
+        glm::mat4 shieldOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        shieldOffset = glm::translate(shieldOffset, glm::vec3(0.0f, wristToPalmOffset, 0.0f));
 
         sceneObjects[shieldIndex].transform = boneWorld * shieldOffset;
     }
@@ -817,6 +861,41 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
                 sceneObjects[rightHandAxisZ].transform = boneWorld * zOffset;
             } else {
                 sceneObjects[rightHandAxisZ].transform = hideTransform;
+            }
+        }
+    }
+
+    // Debug axis indicators for left hand
+    if (leftHandBoneIndex >= 0) {
+        glm::mat4 boneWorld = worldTransform * globalTransforms[leftHandBoneIndex];
+        glm::mat4 hideTransform = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
+
+        if (leftHandAxisX < sceneObjects.size()) {
+            if (showWeaponAxes_) {
+                glm::mat4 xOffset = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+                xOffset = glm::translate(xOffset, glm::vec3(0.0f, 0.075f, 0.0f));
+                sceneObjects[leftHandAxisX].transform = boneWorld * xOffset;
+            } else {
+                sceneObjects[leftHandAxisX].transform = hideTransform;
+            }
+        }
+
+        if (leftHandAxisY < sceneObjects.size()) {
+            if (showWeaponAxes_) {
+                glm::mat4 yOffset = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.075f, 0.0f));
+                sceneObjects[leftHandAxisY].transform = boneWorld * yOffset;
+            } else {
+                sceneObjects[leftHandAxisY].transform = hideTransform;
+            }
+        }
+
+        if (leftHandAxisZ < sceneObjects.size()) {
+            if (showWeaponAxes_) {
+                glm::mat4 zOffset = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+                zOffset = glm::translate(zOffset, glm::vec3(0.0f, 0.075f, 0.0f));
+                sceneObjects[leftHandAxisZ].transform = boneWorld * zOffset;
+            } else {
+                sceneObjects[leftHandAxisZ].transform = hideTransform;
             }
         }
     }

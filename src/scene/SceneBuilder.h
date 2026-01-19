@@ -203,10 +203,13 @@ private:
     size_t emissiveOrbIndex = 0;  // Glowing orb that has a corresponding light
     size_t swordIndex = 0;        // Player sword renderable index
     size_t shieldIndex = 0;       // Player shield renderable index
-    // Debug axis indicators (R=X, G=Y, B=Z) for right hand
+    // Debug axis indicators (R=X, G=Y, B=Z) for hands
     size_t rightHandAxisX = 0;
     size_t rightHandAxisY = 0;
     size_t rightHandAxisZ = 0;
+    size_t leftHandAxisX = 0;
+    size_t leftHandAxisY = 0;
+    size_t leftHandAxisZ = 0;
     int32_t rightHandBoneIndex = -1;  // Bone index for sword attachment
     int32_t leftHandBoneIndex = -1;   // Bone index for shield attachment
 
