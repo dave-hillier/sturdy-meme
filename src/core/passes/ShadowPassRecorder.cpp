@@ -1,5 +1,4 @@
 #include "ShadowPassRecorder.h"
-#include "../RendererSystems.h"
 #include "../PerformanceToggles.h"
 #include "ShadowSystem.h"
 #include "TerrainSystem.h"
@@ -20,11 +19,6 @@
 
 ShadowPassRecorder::ShadowPassRecorder(const ShadowPassResources& resources)
     : resources_(resources)
-{
-}
-
-ShadowPassRecorder::ShadowPassRecorder(RendererSystems& systems)
-    : resources_(ShadowPassResources::collect(systems))
 {
 }
 

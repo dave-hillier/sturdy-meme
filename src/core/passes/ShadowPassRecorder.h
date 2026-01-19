@@ -17,7 +17,6 @@
 
 #include "ShadowPassResources.h"
 
-class RendererSystems;
 struct PerformanceToggles;
 struct Renderable;
 
@@ -29,11 +28,8 @@ public:
         PerformanceToggles* perfToggles = nullptr;
     };
 
-    // Construct with focused resources (preferred - reduced coupling)
+    // Construct with focused resources (explicit dependencies)
     explicit ShadowPassRecorder(const ShadowPassResources& resources);
-
-    // Construct with RendererSystems (convenience, collects resources internally)
-    explicit ShadowPassRecorder(RendererSystems& systems);
 
     // Set configuration (can be updated per-frame if needed)
     void setConfig(const Config& config) { config_ = config; }

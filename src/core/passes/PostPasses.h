@@ -3,7 +3,7 @@
 #include "FrameGraph.h"
 #include <vulkan/vulkan_raii.hpp>
 
-class RendererSystems;
+struct PostPassResources;
 struct PerformanceToggles;
 
 /**
@@ -26,6 +26,6 @@ struct PassIds {
     FrameGraph::PassId postProcess = FrameGraph::INVALID_PASS;
 };
 
-PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& config);
+PassIds addPasses(FrameGraph& graph, const PostPassResources& resources, const Config& config);
 
 } // namespace PostPasses

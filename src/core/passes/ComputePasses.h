@@ -2,7 +2,7 @@
 
 #include "FrameGraph.h"
 
-class RendererSystems;
+struct ComputePassResources;
 struct PerformanceToggles;
 
 /**
@@ -22,6 +22,6 @@ struct PassIds {
     FrameGraph::PassId froxel = FrameGraph::INVALID_PASS;
 };
 
-PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& config);
+PassIds addPasses(FrameGraph& graph, const ComputePassResources& resources, const Config& config);
 
 } // namespace ComputePasses

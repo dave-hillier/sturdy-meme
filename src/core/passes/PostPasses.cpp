@@ -1,5 +1,5 @@
 #include "PostPasses.h"
-#include "RendererSystems.h"
+#include "PostPassResources.h"
 #include "RenderContext.h"
 #include "PerformanceToggles.h"
 #include "Profiler.h"
@@ -10,22 +10,25 @@
 
 namespace PostPasses {
 
-PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& config) {
+PassIds addPasses(FrameGraph& graph, const PostPassResources& resources, const Config& config) {
     PassIds ids;
     auto* guiCallback = config.guiRenderCallback;
     auto* framebuffers = config.framebuffers;
     auto* perfToggles = config.perfToggles;
 
+    // Capture resources by value (struct of pointers)
+    auto res = resources;
+
     // Hi-Z pass - hierarchical Z-buffer generation
     ids.hiZ = graph.addPass({
         .name = "HiZ",
-        .execute = [&systems, perfToggles](FrameGraph::RenderContext& ctx) {
+        .execute = [res, perfToggles](FrameGraph::RenderContext& ctx) {
             if (!perfToggles->hiZPyramid) return;
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
             if (!renderCtx) return;
-            systems.profiler().beginGpuZone(ctx.commandBuffer, "HiZPyramid");
-            systems.hiZ().recordPyramidGeneration(ctx.commandBuffer, ctx.frameIndex);
-            systems.profiler().endGpuZone(ctx.commandBuffer, "HiZPyramid");
+            res.profiler->beginGpuZone(ctx.commandBuffer, "HiZPyramid");
+            res.hiZ->recordPyramidGeneration(ctx.commandBuffer, ctx.frameIndex);
+            res.profiler->endGpuZone(ctx.commandBuffer, "HiZPyramid");
         },
         .canUseSecondary = false,
         .mainThreadOnly = true,
@@ -35,14 +38,14 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& con
     // Bloom pass - multi-pass bloom effect
     ids.bloom = graph.addPass({
         .name = "Bloom",
-        .execute = [&systems, perfToggles](FrameGraph::RenderContext& ctx) {
-            if (!perfToggles->bloom || !systems.postProcess().isBloomEnabled()) return;
+        .execute = [res, perfToggles](FrameGraph::RenderContext& ctx) {
+            if (!perfToggles->bloom || !res.postProcess->isBloomEnabled()) return;
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
             if (!renderCtx) return;
-            systems.profiler().beginGpuZone(ctx.commandBuffer, "Bloom");
-            systems.bloom().setThreshold(systems.postProcess().getBloomThreshold());
-            systems.bloom().recordBloomPass(ctx.commandBuffer, systems.postProcess().getHDRColorView());
-            systems.profiler().endGpuZone(ctx.commandBuffer, "Bloom");
+            res.profiler->beginGpuZone(ctx.commandBuffer, "Bloom");
+            res.bloom->setThreshold(res.postProcess->getBloomThreshold());
+            res.bloom->recordBloomPass(ctx.commandBuffer, res.postProcess->getHDRColorView());
+            res.profiler->endGpuZone(ctx.commandBuffer, "Bloom");
         },
         .canUseSecondary = false,
         .mainThreadOnly = true,
@@ -52,12 +55,12 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& con
     // Bilateral grid pass - local tone mapping
     ids.bilateralGrid = graph.addPass({
         .name = "BilateralGrid",
-        .execute = [&systems](FrameGraph::RenderContext& ctx) {
-            if (systems.postProcess().isLocalToneMapEnabled()) {
-                systems.profiler().beginGpuZone(ctx.commandBuffer, "BilateralGrid");
-                systems.bilateralGrid().recordBilateralGrid(ctx.commandBuffer, ctx.frameIndex,
-                                                           systems.postProcess().getHDRColorView());
-                systems.profiler().endGpuZone(ctx.commandBuffer, "BilateralGrid");
+        .execute = [res](FrameGraph::RenderContext& ctx) {
+            if (res.postProcess->isLocalToneMapEnabled()) {
+                res.profiler->beginGpuZone(ctx.commandBuffer, "BilateralGrid");
+                res.bilateralGrid->recordBilateralGrid(ctx.commandBuffer, ctx.frameIndex,
+                                                       res.postProcess->getHDRColorView());
+                res.profiler->endGpuZone(ctx.commandBuffer, "BilateralGrid");
             }
         },
         .canUseSecondary = false,
@@ -68,14 +71,14 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& con
     // Post-process pass - final composite with tone mapping and GUI
     ids.postProcess = graph.addPass({
         .name = "PostProcess",
-        .execute = [&systems, framebuffers, guiCallback](FrameGraph::RenderContext& ctx) {
+        .execute = [res, framebuffers, guiCallback](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
             if (!renderCtx) return;
-            systems.profiler().beginGpuZone(ctx.commandBuffer, "PostProcess");
-            systems.postProcess().recordPostProcess(ctx.commandBuffer, ctx.frameIndex,
+            res.profiler->beginGpuZone(ctx.commandBuffer, "PostProcess");
+            res.postProcess->recordPostProcess(ctx.commandBuffer, ctx.frameIndex,
                 *(*framebuffers)[ctx.imageIndex], renderCtx->frame.deltaTime,
                 guiCallback ? *guiCallback : std::function<void(VkCommandBuffer)>{});
-            systems.profiler().endGpuZone(ctx.commandBuffer, "PostProcess");
+            res.profiler->endGpuZone(ctx.commandBuffer, "PostProcess");
         },
         .canUseSecondary = false,
         .mainThreadOnly = true,

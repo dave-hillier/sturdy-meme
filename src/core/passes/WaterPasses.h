@@ -1,8 +1,8 @@
 #pragma once
 
 #include "FrameGraph.h"
+#include "WaterPassResources.h"
 
-class RendererSystems;
 struct PerformanceToggles;
 
 /**
@@ -23,6 +23,6 @@ struct PassIds {
     FrameGraph::PassId waterTileCull = FrameGraph::INVALID_PASS;
 };
 
-PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& config);
+PassIds addPasses(FrameGraph& graph, const WaterPassResources& resources, const Config& config);
 
 } // namespace WaterPasses

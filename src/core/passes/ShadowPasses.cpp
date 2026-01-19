@@ -1,28 +1,30 @@
 #include "ShadowPasses.h"
-#include "RendererSystems.h"
 #include "RenderContext.h"
 #include "Profiler.h"
 #include "PerformanceToggles.h"
 
 namespace ShadowPasses {
 
-FrameGraph::PassId addShadowPass(FrameGraph& graph, RendererSystems& systems, const Config& config) {
+FrameGraph::PassId addShadowPass(FrameGraph& graph, Profiler& profiler, const Config& config) {
     float* lastSunIntensity = config.lastSunIntensity;
     PerformanceToggles* perfToggles = config.perfToggles;
     auto recordFn = config.recordShadowPass;
 
+    // Capture profiler pointer for lambda
+    Profiler* prof = &profiler;
+
     return graph.addPass({
         .name = "Shadow",
-        .execute = [&systems, lastSunIntensity, perfToggles, recordFn](FrameGraph::RenderContext& ctx) {
+        .execute = [prof, lastSunIntensity, perfToggles, recordFn](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
             if (!renderCtx) return;
             if (*lastSunIntensity > 0.001f && perfToggles->shadowPass) {
-                systems.profiler().beginCpuZone("ShadowRecord");
-                systems.profiler().beginGpuZone(ctx.commandBuffer, "ShadowPass");
+                prof->beginCpuZone("ShadowRecord");
+                prof->beginGpuZone(ctx.commandBuffer, "ShadowPass");
                 recordFn(ctx.commandBuffer, ctx.frameIndex,
                          renderCtx->frame.time, renderCtx->frame.cameraPosition);
-                systems.profiler().endGpuZone(ctx.commandBuffer, "ShadowPass");
-                systems.profiler().endCpuZone("ShadowRecord");
+                prof->endGpuZone(ctx.commandBuffer, "ShadowPass");
+                prof->endCpuZone("ShadowRecord");
             }
         },
         .canUseSecondary = false,

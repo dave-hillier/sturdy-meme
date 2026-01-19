@@ -176,13 +176,13 @@ bool Renderer::initInternal(const InitInfo& info) {
     // Initialize pass recorders (must be after systems_ is set up)
     {
         INIT_PROFILE_PHASE("PassRecorders");
-        shadowPassRecorder_ = std::make_unique<ShadowPassRecorder>(*systems_);
+        shadowPassRecorder_ = std::make_unique<ShadowPassRecorder>(ShadowPassResources::collect(*systems_));
         ShadowPassRecorder::Config shadowConfig;
         shadowConfig.terrainEnabled = terrainEnabled;
         shadowConfig.perfToggles = &perfToggles;
         shadowPassRecorder_->setConfig(shadowConfig);
 
-        hdrPassRecorder_ = std::make_unique<HDRPassRecorder>(*systems_);
+        hdrPassRecorder_ = std::make_unique<HDRPassRecorder>(HDRPassResources::collect(*systems_));
         HDRPassRecorder::Config hdrConfig;
         hdrConfig.terrainEnabled = terrainEnabled;
         hdrConfig.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();

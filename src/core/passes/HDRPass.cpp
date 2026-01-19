@@ -1,23 +1,25 @@
 #include "HDRPass.h"
-#include "RendererSystems.h"
 #include "RenderContext.h"
 #include "Profiler.h"
 
 namespace HDRPass {
 
-FrameGraph::PassId addPass(FrameGraph& graph, RendererSystems& systems, const Config& config) {
+FrameGraph::PassId addPass(FrameGraph& graph, Profiler& profiler, const Config& config) {
     bool* hdrPassEnabled = config.hdrPassEnabled;
     auto recordHDR = config.recordHDRPass;
     auto recordHDRSecondaries = config.recordHDRPassWithSecondaries;
     auto recordHDRSlot = config.recordHDRPassSecondarySlot;
 
+    // Capture profiler pointer for lambda
+    Profiler* prof = &profiler;
+
     return graph.addPass({
         .name = "HDR",
-        .execute = [&systems, hdrPassEnabled, recordHDR, recordHDRSecondaries](FrameGraph::RenderContext& ctx) {
+        .execute = [prof, hdrPassEnabled, recordHDR, recordHDRSecondaries](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
             if (!renderCtx) return;
             if (*hdrPassEnabled) {
-                systems.profiler().beginCpuZone("RenderPassRecord");
+                prof->beginCpuZone("RenderPassRecord");
                 if (ctx.secondaryBuffers && !ctx.secondaryBuffers->empty()) {
                     // Execute with pre-recorded secondary buffers (parallel path)
                     recordHDRSecondaries(ctx.commandBuffer, ctx.frameIndex,
@@ -26,7 +28,7 @@ FrameGraph::PassId addPass(FrameGraph& graph, RendererSystems& systems, const Co
                     // Fallback to sequential recording
                     recordHDR(ctx.commandBuffer, ctx.frameIndex, renderCtx->frame.time);
                 }
-                systems.profiler().endCpuZone("RenderPassRecord");
+                prof->endCpuZone("RenderPassRecord");
             }
         },
         .canUseSecondary = true,

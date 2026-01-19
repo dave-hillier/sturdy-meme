@@ -1,5 +1,4 @@
 #include "HDRPassRecorder.h"
-#include "../RendererSystems.h"
 #include "UBOs.h"  // For PushConstants (generated from shaders)
 
 // Subsystem includes
@@ -34,11 +33,6 @@
 
 HDRPassRecorder::HDRPassRecorder(const HDRPassResources& resources)
     : resources_(resources)
-{
-}
-
-HDRPassRecorder::HDRPassRecorder(RendererSystems& systems)
-    : resources_(HDRPassResources::collect(systems))
 {
 }
 

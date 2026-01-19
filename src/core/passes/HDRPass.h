@@ -2,7 +2,7 @@
 
 #include "FrameGraph.h"
 
-class RendererSystems;
+class Profiler;
 
 /**
  * HDRPass - Main scene HDR rendering pass
@@ -23,6 +23,6 @@ struct Config {
     HDRSlotRecordFn recordHDRPassSecondarySlot;
 };
 
-FrameGraph::PassId addPass(FrameGraph& graph, RendererSystems& systems, const Config& config);
+FrameGraph::PassId addPass(FrameGraph& graph, Profiler& profiler, const Config& config);
 
 } // namespace HDRPass

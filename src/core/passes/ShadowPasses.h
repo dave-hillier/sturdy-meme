@@ -3,7 +3,7 @@
 #include "FrameGraph.h"
 #include <glm/glm.hpp>
 
-class RendererSystems;
+class Profiler;
 struct PerformanceToggles;
 
 /**
@@ -19,6 +19,6 @@ struct Config {
     ShadowRecordFn recordShadowPass;
 };
 
-FrameGraph::PassId addShadowPass(FrameGraph& graph, RendererSystems& systems, const Config& config);
+FrameGraph::PassId addShadowPass(FrameGraph& graph, Profiler& profiler, const Config& config);
 
 } // namespace ShadowPasses

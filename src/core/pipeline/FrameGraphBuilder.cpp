@@ -3,10 +3,13 @@
 
 // Domain-specific pass modules
 #include "passes/ComputePasses.h"
+#include "passes/ComputePassResources.h"
 #include "passes/ShadowPasses.h"
 #include "passes/WaterPasses.h"
+#include "passes/WaterPassResources.h"
 #include "passes/HDRPass.h"
 #include "passes/PostPasses.h"
+#include "passes/PostPassResources.h"
 
 #include <SDL3/SDL.h>
 
@@ -21,23 +24,25 @@ bool FrameGraphBuilder::build(
     // ===== ADD PASSES FROM DOMAIN MODULES =====
 
     // Compute passes (compute stage + froxel)
+    auto computeResources = ComputePassResources::collect(systems);
     ComputePasses::Config computeConfig;
     computeConfig.perfToggles = state.perfToggles;
     computeConfig.terrainEnabled = state.terrainEnabled;
-    auto computeIds = ComputePasses::addPasses(frameGraph, systems, computeConfig);
+    auto computeIds = ComputePasses::addPasses(frameGraph, computeResources, computeConfig);
 
     // Shadow pass
     ShadowPasses::Config shadowConfig;
     shadowConfig.lastSunIntensity = state.lastSunIntensity;
     shadowConfig.perfToggles = state.perfToggles;
     shadowConfig.recordShadowPass = callbacks.recordShadowPass;
-    auto shadow = ShadowPasses::addShadowPass(frameGraph, systems, shadowConfig);
+    auto shadow = ShadowPasses::addShadowPass(frameGraph, systems.profiler(), shadowConfig);
 
     // Water passes (GBuffer, SSR, tile cull)
+    auto waterResources = WaterPassResources::collect(systems);
     WaterPasses::Config waterConfig;
     waterConfig.hdrPassEnabled = state.hdrPassEnabled;
     waterConfig.perfToggles = state.perfToggles;
-    auto waterIds = WaterPasses::addPasses(frameGraph, systems, waterConfig);
+    auto waterIds = WaterPasses::addPasses(frameGraph, waterResources, waterConfig);
 
     // HDR pass (main scene rendering)
     HDRPass::Config hdrConfig;
@@ -45,14 +50,15 @@ bool FrameGraphBuilder::build(
     hdrConfig.recordHDRPass = callbacks.recordHDRPass;
     hdrConfig.recordHDRPassWithSecondaries = callbacks.recordHDRPassWithSecondaries;
     hdrConfig.recordHDRPassSecondarySlot = callbacks.recordHDRPassSecondarySlot;
-    auto hdr = HDRPass::addPass(frameGraph, systems, hdrConfig);
+    auto hdr = HDRPass::addPass(frameGraph, systems.profiler(), hdrConfig);
 
     // Post passes (HiZ, bloom, bilateral grid, final composite)
+    auto postResources = PostPassResources::collect(systems);
     PostPasses::Config postConfig;
     postConfig.guiRenderCallback = callbacks.guiRenderCallback;
     postConfig.framebuffers = state.framebuffers;
     postConfig.perfToggles = state.perfToggles;
-    auto postIds = PostPasses::addPasses(frameGraph, systems, postConfig);
+    auto postIds = PostPasses::addPasses(frameGraph, postResources, postConfig);
 
     // ===== WIRE DEPENDENCIES =====
     // Shadow and Froxel depend on Compute

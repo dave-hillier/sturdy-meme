@@ -17,8 +17,6 @@
 
 #include "HDRPassResources.h"
 
-class RendererSystems;
-
 class HDRPassRecorder {
 public:
     // Configuration for HDR recording
@@ -30,11 +28,8 @@ public:
         glm::mat4* lastViewProj = nullptr;                        // For debug line rendering
     };
 
-    // Construct with focused resources (preferred - reduced coupling)
+    // Construct with focused resources (explicit dependencies)
     explicit HDRPassRecorder(const HDRPassResources& resources);
-
-    // Construct with RendererSystems (convenience, collects resources internally)
-    explicit HDRPassRecorder(RendererSystems& systems);
 
     // Set configuration (must be called before recording)
     void setConfig(const Config& config) { config_ = config; }
