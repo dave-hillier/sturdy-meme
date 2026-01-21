@@ -2,6 +2,7 @@
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
 #include <vector>
@@ -9,6 +10,7 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include <optional>
 
 #include "Camera.h"
 #include "InitContext.h"
@@ -178,7 +180,8 @@ private:
     // CSM shadow map resources
     static constexpr uint32_t SHADOW_MAP_SIZE = 2048;
     DepthArrayResources csmResources;
-    VkRenderPass shadowRenderPass = VK_NULL_HANDLE;
+    std::optional<vk::raii::RenderPass> shadowRenderPass_;
+    VkRenderPass shadowRenderPass = VK_NULL_HANDLE;  // Raw handle for compatibility
     std::vector<VkFramebuffer> cascadeFramebuffers;
     VkPipeline shadowPipeline = VK_NULL_HANDLE;
     VkPipelineLayout shadowPipelineLayout = VK_NULL_HANDLE;

@@ -109,7 +109,8 @@ bool ShadowSystem::createShadowRenderPass() {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow render pass");
         return false;
     }
-    shadowRenderPass = **renderPassOpt;
+    shadowRenderPass_ = std::move(*renderPassOpt);
+    shadowRenderPass = **shadowRenderPass_;
     return true;
 }
 
