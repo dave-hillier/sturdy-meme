@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 class IPlayerControl;
 
 // Player settings for GUI control
@@ -14,6 +16,11 @@ struct PlayerSettings {
 
     // Weapons debug
     bool showWeaponAxes = false;  // Show RGB axis indicators on hand bones
+
+    // LOD debug
+    bool showLODOverlay = false;  // Show LOD level as screen text
+    bool forceLODLevel = false;   // Override automatic LOD selection
+    uint32_t forcedLOD = 0;       // Forced LOD level when override is enabled
 };
 
 namespace GuiPlayerTab {
