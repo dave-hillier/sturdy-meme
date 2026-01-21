@@ -103,23 +103,26 @@ void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& setting
             int forcedLOD = static_cast<int>(settings.forcedLOD);
             if (ImGui::SliderInt("Forced LOD", &forcedLOD, 0, 3, lodNames[forcedLOD])) {
                 settings.forcedLOD = static_cast<uint32_t>(forcedLOD);
-                character.setLODLevel(settings.forcedLOD);
             }
+            character.setLODLevel(settings.forcedLOD);
+
+            // LOD2+ skips animation updates (every 2-4 frames in real system)
+            // For testing, we skip entirely at LOD2+ to make the effect visible
+            bool shouldSkip = (settings.forcedLOD >= 2);
+            character.setSkipAnimationUpdate(shouldSkip);
+
+            ImGui::SameLine();
+            if (shouldSkip) {
+                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "(anim frozen)");
+            }
+        } else {
+            // When not forcing, ensure animation runs normally
+            character.setSkipAnimationUpdate(false);
         }
 
-        ImGui::Checkbox("Show LOD Overlay", &settings.showLODOverlay);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Display LOD level as text above character");
-        }
-
-        // Test animation skipping (LOD2+ would skip)
-        bool skipAnim = character.isAnimationUpdateSkipped();
-        if (ImGui::Checkbox("Skip Animation Updates", &skipAnim)) {
-            character.setSkipAnimationUpdate(skipAnim);
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Test animation LOD: skip updates and use cached bone matrices");
-        }
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
+            "Test: Move character then force LOD2/3 to see animation freeze");
     }
 
     ImGui::Spacing();
