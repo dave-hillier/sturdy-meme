@@ -432,21 +432,29 @@ void AnimatedCharacter::computeBoneMatrices(std::vector<glm::mat4>& outBoneMatri
     const bool useBoneLOD = boneLODMasksBuilt_ && lodLevel_ > 0;
     const BoneLODMask* lodMask = useBoneLOD ? &boneLODMasks_[lodLevel_] : nullptr;
 
+    // First pass: compute all active bones (parents should come before children in skeleton)
     for (size_t i = 0; i < skeleton.joints.size(); ++i) {
-        if (lodMask && i < MAX_LOD_BONES && !lodMask->isBoneActive(static_cast<uint32_t>(i))) {
-            // Inactive bone: use parent's transform (bone follows parent rigidly)
-            int32_t parentIdx = skeleton.joints[i].parentIndex;
-            if (parentIdx >= 0 && parentIdx < static_cast<int32_t>(globalTransforms.size())) {
-                // Use parent's global transform with this bone's inverse bind matrix
-                // This makes the bone appear to be "welded" to its parent
-                outBoneMatrices[i] = globalTransforms[parentIdx] * skeleton.joints[i].inverseBindMatrix;
-            } else {
-                // No parent, use identity
-                outBoneMatrices[i] = skeleton.joints[i].inverseBindMatrix;
-            }
-        } else {
+        bool isActive = !lodMask || i >= MAX_LOD_BONES || lodMask->isBoneActive(static_cast<uint32_t>(i));
+        if (isActive) {
             // Active bone: normal computation
             outBoneMatrices[i] = globalTransforms[i] * skeleton.joints[i].inverseBindMatrix;
+        }
+    }
+
+    // Second pass: inactive bones copy their parent's final matrix
+    // This ensures vertices weighted to this bone move with the parent
+    if (lodMask) {
+        for (size_t i = 0; i < skeleton.joints.size(); ++i) {
+            if (i < MAX_LOD_BONES && !lodMask->isBoneActive(static_cast<uint32_t>(i))) {
+                int32_t parentIdx = skeleton.joints[i].parentIndex;
+                if (parentIdx >= 0 && parentIdx < static_cast<int32_t>(outBoneMatrices.size())) {
+                    // Use parent's final bone matrix - this makes vertices follow the parent
+                    outBoneMatrices[i] = outBoneMatrices[parentIdx];
+                } else {
+                    // No parent, use identity transform
+                    outBoneMatrices[i] = glm::mat4(1.0f);
+                }
+            }
         }
     }
 
@@ -700,8 +708,20 @@ void AnimatedCharacter::buildBoneLODMasks() {
         }
     }
 
-    // Log bone LOD info
+    // Log bone LOD info with category breakdown
     SDL_Log("AnimatedCharacter: Built bone LOD masks for %zu bones", numBones);
+
+    const char* categoryNames[] = {"Core", "Limb", "Extremity", "Finger", "Face", "Secondary"};
+    uint32_t categoryCounts[6] = {0};
+    for (size_t i = 0; i < numBones; ++i) {
+        uint32_t cat = static_cast<uint32_t>(boneCategories_[i]);
+        if (cat < 6) categoryCounts[cat]++;
+    }
+
+    SDL_Log("  Bone categories: Core=%u, Limb=%u, Extremity=%u, Finger=%u, Face=%u, Secondary=%u",
+            categoryCounts[0], categoryCounts[1], categoryCounts[2],
+            categoryCounts[3], categoryCounts[4], categoryCounts[5]);
+
     for (uint32_t lod = 0; lod < CHARACTER_LOD_LEVELS; ++lod) {
         SDL_Log("  LOD%u: %u active bones", lod, boneLODMasks_[lod].activeBoneCount);
     }
