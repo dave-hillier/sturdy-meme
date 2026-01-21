@@ -11,6 +11,7 @@
 #include <optional>
 
 #include "SkinnedMesh.h"
+#include "CharacterLOD.h"
 #include "DescriptorManager.h"
 #include "MaterialDescriptorFactory.h"
 #include "RenderableBuilder.h"
@@ -95,6 +96,12 @@ public:
     // Record draw commands for skinned character
     void record(VkCommandBuffer cmd, uint32_t frameIndex,
                 const Renderable& playerObj, AnimatedCharacter& character);
+
+    // Record draw commands for skinned character with explicit LOD mesh
+    // Use this when CharacterLODSystem provides the mesh to render
+    void recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex,
+                       const Renderable& playerObj, AnimatedCharacter& character,
+                       const CharacterLODMesh& lodMesh);
 
     // Update extent for viewport (on window resize)
     void setExtent(VkExtent2D newExtent) { extent = newExtent; }

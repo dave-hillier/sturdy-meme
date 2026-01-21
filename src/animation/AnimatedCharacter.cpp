@@ -276,6 +276,21 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
                                 const glm::mat4& worldTransform) {
     if (!loaded) return;
 
+    // LOD optimization: skip full animation update if flagged
+    // When skipped, we use cached bone matrices from the last full update
+    if (skipAnimationUpdate_ && !cachedBoneMatrices_.empty()) {
+        // Still need to advance time for state machine continuity, but at reduced rate
+        // This prevents animation from "jumping" when we return to full updates
+        if (useLayerController) {
+            layerController.update(deltaTime * 0.1f);  // Minimal time advance
+        } else if (useStateMachine) {
+            stateMachine.update(deltaTime * 0.1f, movementSpeed, isGrounded, isJumping);
+        } else {
+            animationPlayer.update(deltaTime * 0.1f);
+        }
+        return;
+    }
+
     // Reset skeleton to bind pose before applying animation
     // This ensures joints not affected by the current animation keep their bind pose
     for (size_t i = 0; i < skeleton.joints.size(); ++i) {
@@ -395,6 +410,12 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
 }
 
 void AnimatedCharacter::computeBoneMatrices(std::vector<glm::mat4>& outBoneMatrices) const {
+    // If animation update was skipped and we have cached matrices, use those
+    if (skipAnimationUpdate_ && !cachedBoneMatrices_.empty()) {
+        outBoneMatrices = cachedBoneMatrices_;
+        return;
+    }
+
     // First compute global transforms
     std::vector<glm::mat4> globalTransforms;
     skeleton.computeGlobalTransforms(globalTransforms);
@@ -404,6 +425,9 @@ void AnimatedCharacter::computeBoneMatrices(std::vector<glm::mat4>& outBoneMatri
     for (size_t i = 0; i < skeleton.joints.size(); ++i) {
         outBoneMatrices[i] = globalTransforms[i] * skeleton.joints[i].inverseBindMatrix;
     }
+
+    // Cache the computed bone matrices for LOD animation skipping
+    cachedBoneMatrices_ = outBoneMatrices;
 }
 
 void AnimatedCharacter::setupDefaultIKChains() {

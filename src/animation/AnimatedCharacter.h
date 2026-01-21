@@ -108,6 +108,19 @@ public:
     // Get bone matrices for GPU skinning
     void computeBoneMatrices(std::vector<glm::mat4>& outBoneMatrices) const;
 
+    // LOD support - animation update control
+    // When skipAnimation is true, reuses cached bone matrices from last frame
+    void setSkipAnimationUpdate(bool skip) { skipAnimationUpdate_ = skip; }
+    bool isAnimationUpdateSkipped() const { return skipAnimationUpdate_; }
+
+    // Get cached bone matrices (used when animation update is skipped)
+    const std::vector<glm::mat4>& getCachedBoneMatrices() const { return cachedBoneMatrices_; }
+    bool hasCachedBoneMatrices() const { return !cachedBoneMatrices_.empty(); }
+
+    // Get current LOD level (for external use)
+    uint32_t getLODLevel() const { return lodLevel_; }
+    void setLODLevel(uint32_t level) { lodLevel_ = level; }
+
     // IK System access
     IKSystem& getIKSystem() { return ikSystem; }
     const IKSystem& getIKSystem() const { return ikSystem; }
@@ -197,4 +210,9 @@ private:
 
     bool loaded = false;
     bool needsUpload = false;
+
+    // LOD support
+    bool skipAnimationUpdate_ = false;
+    uint32_t lodLevel_ = 0;
+    mutable std::vector<glm::mat4> cachedBoneMatrices_;
 };

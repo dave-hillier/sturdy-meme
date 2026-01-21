@@ -1,6 +1,7 @@
 #include "SkinnedMeshRenderer.h"
 #include "GraphicsPipelineFactory.h"
 #include "AnimatedCharacter.h"
+#include "CharacterLOD.h"
 #include "Bindings.h"
 #include "UBOs.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
@@ -288,5 +289,65 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
     vkCmd.bindIndexBuffer(skinnedMesh.getIndexBuffer(), 0, vk::IndexType::eUint32);
 
     vkCmd.drawIndexed(skinnedMesh.getIndexCount(), 1, 0, 0, 0);
+    DIAG_RECORD_DRAW();
+}
+
+void SkinnedMeshRenderer::recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex,
+                                         const Renderable& playerObj, AnimatedCharacter& character,
+                                         const CharacterLODMesh& lodMesh) {
+    // Validate LOD mesh
+    if (!lodMesh.isValid()) {
+        // Fallback to normal record
+        record(cmd, frameIndex, playerObj, character);
+        return;
+    }
+
+    vk::CommandBuffer vkCmd(cmd);
+
+    // Bind skinned pipeline
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **pipeline_);
+
+    // Set dynamic viewport and scissor to handle window resize
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent.width))
+        .setHeight(static_cast<float>(extent.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
+
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent({extent.width, extent.height});
+    vkCmd.setScissor(0, scissor);
+
+    // Bind skinned descriptor set
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                             **pipelineLayout_, 0,
+                             vk::DescriptorSet(descriptorSets[frameIndex]), {});
+
+    // Push constants
+    PushConstants push{};
+    push.model = playerObj.transform;
+    push.roughness = playerObj.roughness;
+    push.metallic = playerObj.metallic;
+    push.emissiveIntensity = playerObj.emissiveIntensity;
+    push.opacity = playerObj.opacity;
+    push.emissiveColor = glm::vec4(playerObj.emissiveColor, 1.0f);
+    push.pbrFlags = playerObj.pbrFlags;
+
+    vkCmd.pushConstants<PushConstants>(
+        **pipelineLayout_,
+        vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+        0, push);
+
+    // Bind LOD mesh vertex and index buffers
+    VkBuffer vertexBuffers[] = {lodMesh.vertexBuffer};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+    vkCmd.bindIndexBuffer(lodMesh.indexBuffer, 0, vk::IndexType::eUint32);
+
+    vkCmd.drawIndexed(lodMesh.indexCount, 1, 0, 0, 0);
     DIAG_RECORD_DRAW();
 }
