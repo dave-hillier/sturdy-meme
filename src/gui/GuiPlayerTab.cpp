@@ -81,6 +81,16 @@ void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& setting
         ImGui::Text("%s", lodNames[currentLOD]);
         ImGui::PopStyleColor();
 
+        // Bone count (skeleton LOD)
+        uint32_t activeBones = character.getActiveBoneCount();
+        uint32_t totalBones = character.getTotalBoneCount();
+        ImGui::Text("Active Bones: %u / %u", activeBones, totalBones);
+        if (activeBones < totalBones) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "(-%u%%)",
+                100 - (activeBones * 100 / totalBones));
+        }
+
         // Animation skip status
         bool animSkipped = character.isAnimationUpdateSkipped();
         ImGui::Text("Animation Update:");

@@ -153,6 +153,10 @@ bool AnimatedCharacter::loadInternal(const InitInfo& info) {
     }
 
     loaded = true;
+
+    // Build bone LOD masks for skeleton simplification at distance
+    buildBoneLODMasks();
+
     return true;
 }
 
@@ -422,8 +426,28 @@ void AnimatedCharacter::computeBoneMatrices(std::vector<glm::mat4>& outBoneMatri
 
     // Then multiply by inverse bind matrices to get final bone matrices
     outBoneMatrices.resize(skeleton.joints.size());
+
+    // Apply bone LOD: inactive bones use their parent's final matrix
+    // This makes them rigidly follow the parent instead of animating independently
+    const bool useBoneLOD = boneLODMasksBuilt_ && lodLevel_ > 0;
+    const BoneLODMask* lodMask = useBoneLOD ? &boneLODMasks_[lodLevel_] : nullptr;
+
     for (size_t i = 0; i < skeleton.joints.size(); ++i) {
-        outBoneMatrices[i] = globalTransforms[i] * skeleton.joints[i].inverseBindMatrix;
+        if (lodMask && i < MAX_LOD_BONES && !lodMask->isBoneActive(static_cast<uint32_t>(i))) {
+            // Inactive bone: use parent's transform (bone follows parent rigidly)
+            int32_t parentIdx = skeleton.joints[i].parentIndex;
+            if (parentIdx >= 0 && parentIdx < static_cast<int32_t>(globalTransforms.size())) {
+                // Use parent's global transform with this bone's inverse bind matrix
+                // This makes the bone appear to be "welded" to its parent
+                outBoneMatrices[i] = globalTransforms[parentIdx] * skeleton.joints[i].inverseBindMatrix;
+            } else {
+                // No parent, use identity
+                outBoneMatrices[i] = skeleton.joints[i].inverseBindMatrix;
+            }
+        } else {
+            // Active bone: normal computation
+            outBoneMatrices[i] = globalTransforms[i] * skeleton.joints[i].inverseBindMatrix;
+        }
     }
 
     // Cache the computed bone matrices for LOD animation skipping
@@ -632,4 +656,70 @@ void AnimatedCharacter::setUseBlendSpace(bool use) {
     } else {
         SDL_Log("AnimatedCharacter: Blend space mode disabled, using discrete state transitions");
     }
+}
+
+void AnimatedCharacter::setLODLevel(uint32_t level) {
+    if (level >= CHARACTER_LOD_LEVELS) {
+        level = CHARACTER_LOD_LEVELS - 1;
+    }
+    lodLevel_ = level;
+
+    // Build bone LOD masks on first use
+    if (!boneLODMasksBuilt_) {
+        buildBoneLODMasks();
+    }
+}
+
+void AnimatedCharacter::buildBoneLODMasks() {
+    if (!loaded || skeleton.joints.empty()) {
+        return;
+    }
+
+    size_t numBones = skeleton.joints.size();
+
+    // Categorize each bone by name
+    boneCategories_.resize(numBones);
+    for (size_t i = 0; i < numBones; ++i) {
+        boneCategories_[i] = categorizeBone(skeleton.joints[i].name);
+    }
+
+    // Build LOD masks - each LOD includes bones up to its category threshold
+    for (uint32_t lod = 0; lod < CHARACTER_LOD_LEVELS; ++lod) {
+        boneLODMasks_[lod].activeBones.reset();
+        boneLODMasks_[lod].activeBoneCount = 0;
+
+        for (size_t i = 0; i < numBones && i < MAX_LOD_BONES; ++i) {
+            BoneCategory cat = boneCategories_[i];
+            uint32_t minLOD = getMinLODForCategory(cat);
+
+            // Bone is active if current LOD <= minLOD for its category
+            if (lod <= minLOD) {
+                boneLODMasks_[lod].activeBones.set(i);
+                boneLODMasks_[lod].activeBoneCount++;
+            }
+        }
+    }
+
+    // Log bone LOD info
+    SDL_Log("AnimatedCharacter: Built bone LOD masks for %zu bones", numBones);
+    for (uint32_t lod = 0; lod < CHARACTER_LOD_LEVELS; ++lod) {
+        SDL_Log("  LOD%u: %u active bones", lod, boneLODMasks_[lod].activeBoneCount);
+    }
+
+    boneLODMasksBuilt_ = true;
+}
+
+uint32_t AnimatedCharacter::getActiveBoneCount() const {
+    if (!boneLODMasksBuilt_ || lodLevel_ >= CHARACTER_LOD_LEVELS) {
+        return static_cast<uint32_t>(skeleton.joints.size());
+    }
+    return boneLODMasks_[lodLevel_].activeBoneCount;
+}
+
+const BoneLODMask& AnimatedCharacter::getBoneLODMask(uint32_t lod) const {
+    static BoneLODMask defaultMask;
+    if (lod >= CHARACTER_LOD_LEVELS) {
+        return defaultMask;
+    }
+    return boneLODMasks_[lod];
 }

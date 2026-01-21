@@ -5,12 +5,58 @@
 #include <glm/glm.hpp>
 #include <vector>
 #include <array>
+#include <bitset>
 #include <cstdint>
+#include <string>
 
 #include "SkinnedMesh.h"
 
 // Number of LOD levels for skinned characters
 constexpr uint32_t CHARACTER_LOD_LEVELS = 4;
+
+// Maximum bones supported for LOD mask
+constexpr uint32_t MAX_LOD_BONES = 128;
+
+// Bone categories for LOD culling
+enum class BoneCategory : uint8_t {
+    Core,        // Always active: hips, spine, head (LOD 0-3)
+    Limb,        // Arms, legs (LOD 0-3)
+    Extremity,   // Hands, feet (LOD 0-2)
+    Finger,      // Individual fingers (LOD 0-1)
+    Face,        // Facial bones (LOD 0 only)
+    Secondary    // Twist bones, helpers (LOD 0 only)
+};
+
+// Get minimum LOD level that includes this bone category
+inline uint32_t getMinLODForCategory(BoneCategory cat) {
+    switch (cat) {
+        case BoneCategory::Core:      return 3;  // Active at all LODs
+        case BoneCategory::Limb:      return 3;  // Active at all LODs
+        case BoneCategory::Extremity: return 2;  // Active at LOD 0-2
+        case BoneCategory::Finger:    return 1;  // Active at LOD 0-1
+        case BoneCategory::Face:      return 0;  // Active at LOD 0 only
+        case BoneCategory::Secondary: return 0;  // Active at LOD 0 only
+        default: return 3;
+    }
+}
+
+// Bone LOD configuration - which bones are active at each LOD level
+struct BoneLODMask {
+    std::bitset<MAX_LOD_BONES> activeBones;
+    uint32_t activeBoneCount = 0;
+
+    bool isBoneActive(uint32_t boneIndex) const {
+        return boneIndex < MAX_LOD_BONES && activeBones.test(boneIndex);
+    }
+
+    void setAllActive(uint32_t totalBones) {
+        activeBones.reset();
+        for (uint32_t i = 0; i < totalBones && i < MAX_LOD_BONES; ++i) {
+            activeBones.set(i);
+        }
+        activeBoneCount = totalBones;
+    }
+};
 
 // LOD configuration for skinned characters
 // Follows AAA game patterns for crowd rendering
@@ -126,4 +172,84 @@ inline uint32_t calculateLODFromScreenSize(float screenSize, const CharacterLODC
         }
     }
     return CHARACTER_LOD_LEVELS - 1;
+}
+
+// Categorize a bone by its name (common humanoid naming conventions)
+inline BoneCategory categorizeBone(const std::string& boneName) {
+    // Convert to lowercase for matching
+    std::string lower = boneName;
+    for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    // Finger bones (most specific, check first)
+    if (lower.find("thumb") != std::string::npos ||
+        lower.find("index") != std::string::npos ||
+        lower.find("middle") != std::string::npos ||
+        lower.find("ring") != std::string::npos ||
+        lower.find("pinky") != std::string::npos ||
+        lower.find("finger") != std::string::npos) {
+        return BoneCategory::Finger;
+    }
+
+    // Toe bones
+    if (lower.find("toe") != std::string::npos) {
+        return BoneCategory::Finger;  // Same LOD as fingers
+    }
+
+    // Face/head detail bones
+    if (lower.find("eye") != std::string::npos ||
+        lower.find("jaw") != std::string::npos ||
+        lower.find("brow") != std::string::npos ||
+        lower.find("lip") != std::string::npos ||
+        lower.find("tongue") != std::string::npos ||
+        lower.find("teeth") != std::string::npos ||
+        lower.find("ear") != std::string::npos ||
+        lower.find("nose") != std::string::npos ||
+        lower.find("cheek") != std::string::npos) {
+        return BoneCategory::Face;
+    }
+
+    // Secondary/twist bones
+    if (lower.find("twist") != std::string::npos ||
+        lower.find("roll") != std::string::npos ||
+        lower.find("helper") != std::string::npos ||
+        lower.find("auxiliary") != std::string::npos) {
+        return BoneCategory::Secondary;
+    }
+
+    // Extremities (hands, feet)
+    if (lower.find("hand") != std::string::npos ||
+        lower.find("foot") != std::string::npos ||
+        lower.find("wrist") != std::string::npos ||
+        lower.find("ankle") != std::string::npos) {
+        return BoneCategory::Extremity;
+    }
+
+    // Core bones
+    if (lower.find("hip") != std::string::npos ||
+        lower.find("pelvis") != std::string::npos ||
+        lower.find("spine") != std::string::npos ||
+        lower.find("chest") != std::string::npos ||
+        lower.find("neck") != std::string::npos ||
+        lower.find("head") != std::string::npos ||
+        lower.find("root") != std::string::npos) {
+        return BoneCategory::Core;
+    }
+
+    // Limbs (arms, legs)
+    if (lower.find("shoulder") != std::string::npos ||
+        lower.find("arm") != std::string::npos ||
+        lower.find("elbow") != std::string::npos ||
+        lower.find("forearm") != std::string::npos ||
+        lower.find("clavicle") != std::string::npos ||
+        lower.find("leg") != std::string::npos ||
+        lower.find("thigh") != std::string::npos ||
+        lower.find("knee") != std::string::npos ||
+        lower.find("shin") != std::string::npos ||
+        lower.find("calf") != std::string::npos ||
+        lower.find("upleg") != std::string::npos) {
+        return BoneCategory::Limb;
+    }
+
+    // Default to limb (safer to keep visible)
+    return BoneCategory::Limb;
 }
