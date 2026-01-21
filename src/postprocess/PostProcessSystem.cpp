@@ -222,7 +222,8 @@ bool PostProcessSystem::createHDRRenderPass() {
         SDL_Log("Failed to create HDR render pass");
         return false;
     }
-    hdrRenderPass = **renderPassOpt;
+    hdrRenderPass_ = std::move(*renderPassOpt);
+    hdrRenderPass = **hdrRenderPass_;
 
     return true;
 }

@@ -282,7 +282,8 @@ private:
 
     const vk::raii::Device* raiiDevice_ = nullptr;
     std::optional<vk::raii::Sampler> hdrSampler_;
-    VkRenderPass hdrRenderPass = VK_NULL_HANDLE;
+    std::optional<vk::raii::RenderPass> hdrRenderPass_;
+    VkRenderPass hdrRenderPass = VK_NULL_HANDLE;  // Raw handle for compatibility
     VkFramebuffer hdrFramebuffer = VK_NULL_HANDLE;
 
     // Final composite pipeline
