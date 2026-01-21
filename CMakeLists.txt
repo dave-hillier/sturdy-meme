@@ -247,6 +247,10 @@ set(SOURCES
     src/debug/CpuProfiler.cpp
     src/debug/DebugLineSystem.cpp
     src/debug/RoadRiverVisualization.cpp
+    # NPC
+    src/npc/NPCPerception.cpp
+    src/npc/NPCBehavior.cpp
+    src/npc/NPCManager.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -275,6 +279,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture
     ${CMAKE_CURRENT_SOURCE_DIR}/src/vegetation
     ${CMAKE_CURRENT_SOURCE_DIR}/src/water
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/npc
     ${CMAKE_CURRENT_SOURCE_DIR}/generated
     ${CMAKE_CURRENT_SOURCE_DIR}  # For shaders/bindings.h
     ${STB_INCLUDE_DIRS}

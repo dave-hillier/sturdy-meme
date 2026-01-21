@@ -15,6 +15,7 @@
 #include "GuiSystem.h"
 #include "InputSystem.h"
 #include "BreadcrumbTracker.h"
+#include "NPCManager.h"
 
 class Application {
 public:
@@ -37,6 +38,8 @@ private:
     void initFlag();
     void updateFlag(float deltaTime);
     void updateCameraOcclusion(float deltaTime);
+    void initNPCs();
+    void updateNPCs(float deltaTime);
 
     SDL_Window* window = nullptr;
     std::unique_ptr<Renderer> renderer_;
@@ -57,6 +60,9 @@ private:
     // Breadcrumb tracker for fast respawn (Ghost of Tsushima optimization)
     // Tracks safe player positions so respawns load most content from cache
     BreadcrumbTracker breadcrumbTracker;
+
+    // NPC manager for AI characters
+    NPCManager npcManager_;
 
     // Flag simulation
     ClothSimulation clothSim;

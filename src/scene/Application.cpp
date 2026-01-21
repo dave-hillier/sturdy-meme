@@ -403,6 +403,9 @@ bool Application::init(const std::string& title, int width, int height) {
     // Initialize flag simulation
     initFlag();
 
+    // Initialize NPCs with hostility system
+    initNPCs();
+
     // Initialize GUI system via factory
     {
         INIT_PROFILE_PHASE("GUI");
@@ -560,6 +563,9 @@ void Application::run() {
 
         // Update scene object transforms from physics
         renderer_->getSystems().scene().update(physics());
+
+        // Update NPCs with player position for behavior and hostility
+        updateNPCs(deltaTime);
 
         // Update player state in PlayerControlSubsystem for grass/snow/leaf interaction
         renderer_->getSystems().playerControl().setPlayerState(playerTransform.position, physicsVelocity, PlayerMovement::CAPSULE_RADIUS);
@@ -1216,4 +1222,172 @@ void Application::updateFlag(float deltaTime) {
     flagSceneBuilder.uploadFlagClothMesh(
         renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getVkDevice(),
         renderer_->getCommandPool(), renderer_->getVulkanContext().getVkGraphicsQueue());
+}
+
+void Application::initNPCs() {
+    // Get terrain reference for spawning at correct height
+    auto& terrain = renderer_->getSystems().terrain();
+
+    // Get player spawn position as reference point
+    // Scene is at Town 1: settlement coords (9200, 3000) -> world coords (1008, -5192)
+    const float halfTerrain = 8192.0f;
+    float sceneX = 9200.0f - halfTerrain;
+    float sceneZ = 3000.0f - halfTerrain;
+
+    // Spawn a few test NPCs with different hostility levels around the player spawn area
+
+    // Friendly NPC - won't attack, stays near spawn
+    {
+        NPCSpawnInfo info;
+        info.name = "Friendly Villager";
+        info.hostility = HostilityLevel::Friendly;
+        info.position = glm::vec3(sceneX + 10.0f, terrain.getHeightAt(sceneX + 10.0f, sceneZ + 5.0f), sceneZ + 5.0f);
+        info.baseSpeed = 2.0f;
+        info.config.sightRange = 15.0f;
+        npcManager_.spawn(info);
+    }
+
+    // Neutral NPC - will become hostile if approached too closely
+    {
+        NPCSpawnInfo info;
+        info.name = "Neutral Guard";
+        info.hostility = HostilityLevel::Neutral;
+        info.position = glm::vec3(sceneX - 15.0f, terrain.getHeightAt(sceneX - 15.0f, sceneZ), sceneZ);
+        info.baseSpeed = 3.0f;
+        info.config.personalSpace = 5.0f;  // Will become hostile within 5m
+        info.config.sightRange = 25.0f;
+        npcManager_.spawn(info);
+    }
+
+    // Hostile NPC - will chase and attack on sight
+    {
+        NPCSpawnInfo info;
+        info.name = "Hostile Bandit";
+        info.hostility = HostilityLevel::Hostile;
+        info.position = glm::vec3(sceneX + 20.0f, terrain.getHeightAt(sceneX + 20.0f, sceneZ - 20.0f), sceneZ - 20.0f);
+        info.baseSpeed = 3.5f;
+        info.config.sightRange = 30.0f;
+        info.config.attackRange = 2.5f;
+        info.config.chaseRange = 40.0f;
+        npcManager_.spawn(info);
+    }
+
+    // Afraid NPC - will flee when player approaches
+    {
+        NPCSpawnInfo info;
+        info.name = "Scared Deer";
+        info.hostility = HostilityLevel::Afraid;
+        info.position = glm::vec3(sceneX - 25.0f, terrain.getHeightAt(sceneX - 25.0f, sceneZ + 15.0f), sceneZ + 15.0f);
+        info.baseSpeed = 4.0f;
+        info.config.sightRange = 20.0f;
+        info.config.fleeDistance = 25.0f;
+        npcManager_.spawn(info);
+    }
+
+    // Patrolling neutral NPC with a patrol path
+    {
+        NPCSpawnInfo info;
+        info.name = "Patrolling Soldier";
+        info.hostility = HostilityLevel::Neutral;
+        float patrolY = terrain.getHeightAt(sceneX + 5.0f, sceneZ + 20.0f);
+        info.position = glm::vec3(sceneX + 5.0f, patrolY, sceneZ + 20.0f);
+        info.baseSpeed = 2.5f;
+        info.config.personalSpace = 3.0f;
+
+        // Create a square patrol path
+        info.patrolPath = {
+            {glm::vec3(sceneX + 5.0f, terrain.getHeightAt(sceneX + 5.0f, sceneZ + 20.0f), sceneZ + 20.0f), 2.0f},
+            {glm::vec3(sceneX + 15.0f, terrain.getHeightAt(sceneX + 15.0f, sceneZ + 20.0f), sceneZ + 20.0f), 1.0f},
+            {glm::vec3(sceneX + 15.0f, terrain.getHeightAt(sceneX + 15.0f, sceneZ + 30.0f), sceneZ + 30.0f), 2.0f},
+            {glm::vec3(sceneX + 5.0f, terrain.getHeightAt(sceneX + 5.0f, sceneZ + 30.0f), sceneZ + 30.0f), 1.0f}
+        };
+        npcManager_.spawn(info);
+    }
+
+    SDL_Log("NPCs initialized: %s", npcManager_.getDebugSummary().c_str());
+}
+
+void Application::updateNPCs(float deltaTime) {
+    // Update all NPCs with player position
+    glm::vec3 playerPos = player_.transform.position;
+    npcManager_.update(deltaTime, playerPos, &physics());
+
+    // Get terrain reference for height adjustment
+    auto& terrain = renderer_->getSystems().terrain();
+
+    // Get debug line system for visualization
+    auto& debugLines = renderer_->getSystems().debugControl().getDebugLineSystem();
+
+    // Update NPC Y positions to match terrain height and draw debug visualization
+    for (auto& npc : npcManager_.getNPCs()) {
+        if (!npc.isAlive()) continue;
+
+        float terrainY = terrain.getHeightAt(npc.transform.position.x, npc.transform.position.z);
+        npc.transform.position.y = terrainY;
+
+        // Debug visualization: draw sphere at NPC position colored by hostility
+        glm::vec4 hostilityColor;
+        switch (npc.hostility) {
+            case HostilityLevel::Friendly:
+                hostilityColor = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f);  // Green
+                break;
+            case HostilityLevel::Neutral:
+                hostilityColor = glm::vec4(1.0f, 1.0f, 0.0f, 1.0f);  // Yellow
+                break;
+            case HostilityLevel::Hostile:
+                hostilityColor = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);  // Red
+                break;
+            case HostilityLevel::Afraid:
+                hostilityColor = glm::vec4(0.5f, 0.5f, 1.0f, 1.0f);  // Light blue
+                break;
+        }
+
+        // Draw NPC marker sphere at head height
+        glm::vec3 markerPos = npc.transform.position + glm::vec3(0.0f, 1.8f, 0.0f);
+        debugLines.addSphere(markerPos, 0.3f, hostilityColor, 8);
+
+        // Draw facing direction cone
+        glm::vec3 forward = npc.transform.forward();
+        glm::vec3 coneBase = markerPos + forward * 0.4f;
+        glm::vec3 coneTip = markerPos + forward * 1.0f;
+        debugLines.addCone(coneBase, coneTip, 0.15f, hostilityColor, 6);
+
+        // Draw awareness indicator line to player when NPC is aware
+        if (npc.perception.awareness > npc.config.detectionThreshold) {
+            // Color intensity based on awareness level
+            float intensity = npc.perception.awareness;
+            glm::vec4 awarenessColor = hostilityColor * intensity;
+            awarenessColor.a = 1.0f;
+
+            // Draw line from NPC to last known player position
+            glm::vec3 targetPos = npc.perception.canSeePlayer ? playerPos : npc.perception.lastKnownPosition;
+            targetPos.y += 1.0f;  // Player center height
+            debugLines.addLine(markerPos, targetPos, awarenessColor);
+        }
+
+        // Draw behavior state indicator (small sphere above head)
+        glm::vec3 statePos = markerPos + glm::vec3(0.0f, 0.5f, 0.0f);
+        glm::vec4 stateColor;
+        switch (npc.behaviorState) {
+            case BehaviorState::Idle:
+                stateColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);  // Gray
+                break;
+            case BehaviorState::Patrol:
+                stateColor = glm::vec4(0.0f, 0.5f, 1.0f, 1.0f);  // Blue
+                break;
+            case BehaviorState::Chase:
+                stateColor = glm::vec4(1.0f, 0.5f, 0.0f, 1.0f);  // Orange
+                break;
+            case BehaviorState::Attack:
+                stateColor = glm::vec4(1.0f, 0.0f, 0.5f, 1.0f);  // Magenta
+                break;
+            case BehaviorState::Flee:
+                stateColor = glm::vec4(0.0f, 1.0f, 1.0f, 1.0f);  // Cyan
+                break;
+            case BehaviorState::Return:
+                stateColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);  // White
+                break;
+        }
+        debugLines.addSphere(statePos, 0.15f, stateColor, 6);
+    }
 }
