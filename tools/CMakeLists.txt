@@ -372,3 +372,26 @@ target_link_libraries(terrain_patch_test_data PRIVATE
 )
 
 target_compile_features(terrain_patch_test_data PRIVATE cxx_std_17)
+
+# Skinned mesh LOD generator (mesh simplification for skinned characters)
+find_package(meshoptimizer CONFIG REQUIRED)
+find_package(fastgltf CONFIG REQUIRED)
+
+add_executable(skinned_mesh_lod
+    skinned_mesh_lod/main.cpp
+    skinned_mesh_lod/MeshSimplifier.cpp
+)
+
+target_include_directories(skinned_mesh_lod PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/skinned_mesh_lod
+)
+
+target_link_libraries(skinned_mesh_lod PRIVATE
+    SDL3::SDL3
+    glm::glm
+    meshoptimizer::meshoptimizer
+    fastgltf::fastgltf
+    nlohmann_json::nlohmann_json
+)
+
+target_compile_features(skinned_mesh_lod PRIVATE cxx_std_17)
