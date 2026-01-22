@@ -76,54 +76,42 @@ bool LeafSystem::createBuffers() {
 
     // Use framesInFlight for buffer set count to ensure proper triple buffering
     uint32_t bufferSetCount = getFramesInFlight();
+    const auto doubleBufferedConfig = BufferUtils::DoubleBufferedBufferConfig(getAllocator(), bufferSetCount);
+    const auto perFrameConfig = BufferUtils::PerFrameBufferConfig(getAllocator(), getFramesInFlight());
 
-    BufferUtils::DoubleBufferedBufferBuilder particleBuilder;
-    if (!particleBuilder.setAllocator(getAllocator())
-             .setSetCount(bufferSetCount)
-             .setSize(particleBufferSize)
-             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+    if (!BufferUtils::DoubleBufferedBufferBuilder::fromConfig(doubleBufferedConfig)
+             .withSize(particleBufferSize)
+             .withUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
              .build(particleBuffers)) {
         SDL_Log("Failed to create leaf particle buffers");
         return false;
     }
 
-    BufferUtils::DoubleBufferedBufferBuilder indirectBuilder;
-    if (!indirectBuilder.setAllocator(getAllocator())
-             .setSetCount(bufferSetCount)
-             .setSize(indirectBufferSize)
-             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+    if (!BufferUtils::DoubleBufferedBufferBuilder::fromConfig(doubleBufferedConfig)
+             .withSize(indirectBufferSize)
+             .withUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
              .build(indirectBuffers)) {
         SDL_Log("Failed to create leaf indirect buffers");
         return false;
     }
 
-    BufferUtils::PerFrameBufferBuilder uniformBuilder;
-    if (!uniformBuilder.setAllocator(getAllocator())
-             .setFrameCount(getFramesInFlight())
-             .setSize(cullingUniformSize)
+    if (!BufferUtils::PerFrameBufferBuilder::fromConfig(perFrameConfig)
+             .withSize(cullingUniformSize)
              .build(uniformBuffers)) {
         SDL_Log("Failed to create leaf culling uniform buffers");
         return false;
     }
 
-    BufferUtils::PerFrameBufferBuilder paramsBuilder;
-    if (!paramsBuilder.setAllocator(getAllocator())
-             .setFrameCount(getFramesInFlight())
-             .setSize(leafPhysicsParamsSize)
+    if (!BufferUtils::PerFrameBufferBuilder::fromConfig(perFrameConfig)
+             .withSize(leafPhysicsParamsSize)
              .build(paramsBuffers)) {
         SDL_Log("Failed to create leaf physics params buffers");
         return false;
     }
 
     // Create displacement region uniform buffers (per-frame)
-    if (!BufferUtils::PerFrameBufferBuilder()
-            .setAllocator(getAllocator())
-            .setFrameCount(getFramesInFlight())
-            .setSize(sizeof(glm::vec4))  // regionCenterAndSize
-            .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
-            .setMemoryUsage(VMA_MEMORY_USAGE_AUTO)
-            .setAllocationFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                               VMA_ALLOCATION_CREATE_MAPPED_BIT)
+    if (!BufferUtils::PerFrameBufferBuilder::fromConfig(perFrameConfig)
+            .withSize(sizeof(glm::vec4))  // regionCenterAndSize
             .build(displacementRegionBuffers)) {
         SDL_Log("Failed to create leaf displacement region buffers");
         return false;

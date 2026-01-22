@@ -18,6 +18,67 @@ void destroyCreatedBuffers(VmaAllocator allocator,
 
 }  // namespace
 
+PerFrameBufferConfig::PerFrameBufferConfig(
+    VmaAllocator allocator,
+    uint32_t frameCount,
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VmaMemoryUsage memoryUsage,
+    VmaAllocationCreateFlags allocationFlags)
+    : allocator(allocator),
+      frameCount(frameCount),
+      size(size),
+      usage(usage),
+      memoryUsage(memoryUsage),
+      allocationFlags(allocationFlags) {}
+
+PerFrameBufferBuilder PerFrameBufferBuilder::fromConfig(const PerFrameBufferConfig& config) {
+    PerFrameBufferBuilder builder;
+    builder.allocator_ = config.allocator;
+    builder.frameCount_ = config.frameCount;
+    builder.bufferSize_ = config.size;
+    builder.usage_ = config.usage;
+    builder.memoryUsage_ = config.memoryUsage;
+    builder.allocationFlags_ = config.allocationFlags;
+    return builder;
+}
+
+PerFrameBufferBuilder PerFrameBufferBuilder::withAllocator(VmaAllocator allocator) const {
+    auto builder = *this;
+    builder.allocator_ = allocator;
+    return builder;
+}
+
+PerFrameBufferBuilder PerFrameBufferBuilder::withFrameCount(uint32_t count) const {
+    auto builder = *this;
+    builder.frameCount_ = count;
+    return builder;
+}
+
+PerFrameBufferBuilder PerFrameBufferBuilder::withSize(VkDeviceSize size) const {
+    auto builder = *this;
+    builder.bufferSize_ = size;
+    return builder;
+}
+
+PerFrameBufferBuilder PerFrameBufferBuilder::withUsage(VkBufferUsageFlags usage) const {
+    auto builder = *this;
+    builder.usage_ = usage;
+    return builder;
+}
+
+PerFrameBufferBuilder PerFrameBufferBuilder::withMemoryUsage(VmaMemoryUsage usage) const {
+    auto builder = *this;
+    builder.memoryUsage_ = usage;
+    return builder;
+}
+
+PerFrameBufferBuilder PerFrameBufferBuilder::withAllocationFlags(VmaAllocationCreateFlags flags) const {
+    auto builder = *this;
+    builder.allocationFlags_ = flags;
+    return builder;
+}
+
 PerFrameBufferBuilder& PerFrameBufferBuilder::setAllocator(VmaAllocator newAllocator) {
     allocator_ = newAllocator;
     return *this;
@@ -82,6 +143,12 @@ bool PerFrameBufferBuilder::build(PerFrameBufferSet& outBuffers) const {
 
     outBuffers = std::move(result);
     return true;
+}
+
+bool makePerFrameUniformBuffers(const PerFrameBufferConfig& config, PerFrameBufferSet& outBuffers) {
+    return PerFrameBufferBuilder::fromConfig(config)
+        .withUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+        .build(outBuffers);
 }
 
 void destroyBuffers(VmaAllocator allocator, const PerFrameBufferSet& buffers) {
