@@ -46,6 +46,7 @@
     "tinyexr",
     "miniz",
     "libarchive",
-    "doctest"
+    "doctest",
+    "fruit"
   ]
 }
