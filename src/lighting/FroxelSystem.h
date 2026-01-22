@@ -24,7 +24,7 @@ class FroxelSystem : public IFogControl {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
-    explicit FroxelSystem(ConstructToken) {}
+    FroxelSystem(ConstructToken, const InitInfo& info);
 
     struct InitInfo {
         VkDevice device;
@@ -145,18 +145,8 @@ private:
                (std::pow(DEPTH_DISTRIBUTION, FROXEL_DEPTH) - 1.0f);
     }
 
-    VkDevice device = VK_NULL_HANDLE;
-    VmaAllocator allocator = VK_NULL_HANDLE;
-    DescriptorManager::Pool* descriptorPool = nullptr;
-    VkExtent2D extent = {0, 0};
-    std::string shaderPath;
-    uint32_t framesInFlight = 0;
-    const vk::raii::Device* raiiDevice_ = nullptr;
-
-    // External resources (not owned)
-    VkImageView shadowMapView = VK_NULL_HANDLE;
-    VkSampler shadowSampler = VK_NULL_HANDLE;
-    std::vector<VkBuffer> lightBuffers;  // Per-frame light buffers
+    const InitInfo initInfo_;
+    VkExtent2D extent_ = {0, 0};
 
     // Double-buffered scattering volumes for temporal reprojection (ping-pong) - RAII-managed
     // Format: RGBA16F - stores in-scattered light / opacity
@@ -211,7 +201,5 @@ private:
     float underwaterColorMult = 1.5f;     // Color intensity multiplier
 
     bool enabled = true;
-
-    bool initInternal(const InitInfo& info);
-    void cleanup();
+    bool initialized_ = false;
 };
