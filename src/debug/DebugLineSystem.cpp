@@ -113,17 +113,15 @@ void DebugLineSystem::cleanup() {
 
 bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string& shaderPath) {
     // Load shaders
-    auto vertShader = ShaderLoader::loadShaderModule(device, shaderPath + "/debug_line.vert.spv");
-    auto fragShader = ShaderLoader::loadShaderModule(device, shaderPath + "/debug_line.frag.spv");
-
-    vk::Device vkDevice(device);
+    auto vertShader = ShaderLoader::loadShaderModule(device, shaderPath + "/debug_line.vert.spv", ShaderLoader::RaiiTag{});
+    auto fragShader = ShaderLoader::loadShaderModule(device, shaderPath + "/debug_line.frag.spv", ShaderLoader::RaiiTag{});
 
     if (!vertShader || !fragShader) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to load shaders");
-        if (vertShader) vkDevice.destroyShaderModule(*vertShader);
-        if (fragShader) vkDevice.destroyShaderModule(*fragShader);
         return false;
     }
+
+    vk::Device vkDevice(device);
 
     // Push constant for view-projection matrix
     auto pushConstantRange = vk::PushConstantRange{}
@@ -138,8 +136,6 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
         pipelineLayout = vkDevice.createPipelineLayout(layoutInfo);
     } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create pipeline layout: %s", e.what());
-        vkDevice.destroyShaderModule(*vertShader);
-        vkDevice.destroyShaderModule(*fragShader);
         return false;
     }
 
@@ -147,11 +143,11 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
     std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages = {{
         vk::PipelineShaderStageCreateInfo{}
             .setStage(vk::ShaderStageFlagBits::eVertex)
-            .setModule(*vertShader)
+            .setModule(vertShader->get())
             .setPName("main"),
         vk::PipelineShaderStageCreateInfo{}
             .setStage(vk::ShaderStageFlagBits::eFragment)
-            .setModule(*fragShader)
+            .setModule(fragShader->get())
             .setPName("main")
     }};
 
@@ -259,8 +255,6 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
     auto lineResult = vkDevice.createGraphicsPipeline(nullptr, pipelineInfo);
     if (lineResult.result != vk::Result::eSuccess) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create line pipeline");
-        vkDevice.destroyShaderModule(*vertShader);
-        vkDevice.destroyShaderModule(*fragShader);
         return false;
     }
     linePipeline = lineResult.value;
@@ -272,14 +266,9 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "DebugLineSystem: Failed to create triangle pipeline");
         vkDevice.destroyPipeline(linePipeline);
         linePipeline = VK_NULL_HANDLE;
-        vkDevice.destroyShaderModule(*vertShader);
-        vkDevice.destroyShaderModule(*fragShader);
         return false;
     }
     trianglePipeline = triangleResult.value;
-
-    vkDevice.destroyShaderModule(*vertShader);
-    vkDevice.destroyShaderModule(*fragShader);
 
     return true;
 }

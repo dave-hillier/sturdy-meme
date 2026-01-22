@@ -10,8 +10,6 @@
 #include <array>
 #include <vulkan/vulkan.hpp>
 
-using ShaderLoader::loadShaderModule;
-
 std::unique_ptr<TerrainPipelines> TerrainPipelines::create(const InitInfo& info) {
     auto pipelines = std::make_unique<TerrainPipelines>(ConstructToken{});
     if (!pipelines->initInternal(info)) {
@@ -328,14 +326,10 @@ bool TerrainPipelines::createShadowCullPipelines() {
         return false;
     }
 
-    vk::Device vkDevice(device);
-
     // Create shadow culled graphics pipeline (non-meshlet)
-    auto shadowCulledVertModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow_culled.vert.spv");
-    auto shadowFragModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow.frag.spv");
+    auto shadowCulledVertModule = ShaderLoader::loadShaderModule(*raiiDevice_, shaderPath + "/terrain/terrain_shadow_culled.vert.spv");
+    auto shadowFragModule = ShaderLoader::loadShaderModule(*raiiDevice_, shaderPath + "/terrain/terrain_shadow.frag.spv");
     if (!shadowCulledVertModule || !shadowFragModule) {
-        if (shadowCulledVertModule) vkDevice.destroyShaderModule(*shadowCulledVertModule);
-        if (shadowFragModule) vkDevice.destroyShaderModule(*shadowFragModule);
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load shadow culled shaders");
         return false;
     }
@@ -401,9 +395,8 @@ bool TerrainPipelines::createShadowCullPipelines() {
         .setRenderPass(shadowRenderPass)
         .setSubpass(0);
 
+    vk::Device vkDevice(device);
     auto createResult = vkDevice.createGraphicsPipeline(nullptr, gfxPipelineInfo);
-    vkDevice.destroyShaderModule(*shadowCulledVertModule);
-    vkDevice.destroyShaderModule(*shadowFragModule);
 
     if (createResult.result != vk::Result::eSuccess) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow culled graphics pipeline");
@@ -413,11 +406,10 @@ bool TerrainPipelines::createShadowCullPipelines() {
 
     // Create meshlet shadow culled pipeline (if meshlets enabled)
     if (useMeshlets) {
-        auto meshletShadowCulledVertModule = loadShaderModule(device, shaderPath + "/terrain/terrain_meshlet_shadow_culled.vert.spv");
-        auto meshletShadowFragModule = loadShaderModule(device, shaderPath + "/terrain/terrain_shadow.frag.spv");
+        auto meshletShadowCulledVertModule =
+            ShaderLoader::loadShaderModule(*raiiDevice_, shaderPath + "/terrain/terrain_meshlet_shadow_culled.vert.spv");
+        auto meshletShadowFragModule = ShaderLoader::loadShaderModule(*raiiDevice_, shaderPath + "/terrain/terrain_shadow.frag.spv");
         if (!meshletShadowCulledVertModule || !meshletShadowFragModule) {
-            if (meshletShadowCulledVertModule) vkDevice.destroyShaderModule(*meshletShadowCulledVertModule);
-            if (meshletShadowFragModule) vkDevice.destroyShaderModule(*meshletShadowFragModule);
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load meshlet shadow culled shaders");
             return false;
         }
@@ -444,8 +436,6 @@ bool TerrainPipelines::createShadowCullPipelines() {
         gfxPipelineInfo.setStages(shaderStages);
 
         auto meshletCreateResult = vkDevice.createGraphicsPipeline(nullptr, gfxPipelineInfo);
-        vkDevice.destroyShaderModule(*meshletShadowCulledVertModule);
-        vkDevice.destroyShaderModule(*meshletShadowFragModule);
 
         if (meshletCreateResult.result != vk::Result::eSuccess) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create meshlet shadow culled graphics pipeline");
