@@ -51,6 +51,11 @@ void SceneBuilder::createRenderablesDeferred() {
     SDL_Log("SceneBuilder: Creating deferred renderables now");
     createRenderables();
     renderablesCreated_ = true;
+
+    // Notify listeners (e.g., SceneManager for physics initialization)
+    if (onRenderablesCreated_) {
+        onRenderablesCreated_();
+    }
 }
 
 void SceneBuilder::registerMaterials() {

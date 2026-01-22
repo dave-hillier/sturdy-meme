@@ -87,6 +87,9 @@ private:
     // Physics body tracking (mapped to scene object indices)
     std::vector<PhysicsBodyID> scenePhysicsBodies;
 
+    // Stored physics world pointer for deferred initialization callback
+    PhysicsWorld* storedPhysics_ = nullptr;
+
     // Orb light position (follows emissive orb physics object)
     glm::vec3 orbLightPosition = glm::vec3(2.0f, 1.3f, 0.0f);
 };

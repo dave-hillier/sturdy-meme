@@ -30,6 +30,9 @@ public:
     // Function type for querying terrain height at world position (x, z)
     using HeightQueryFunc = std::function<float(float, float)>;
 
+    // Callback fired when renderables are created (for deferred creation mode)
+    using OnRenderablesCreatedCallback = std::function<void()>;
+
     struct InitInfo {
         VmaAllocator allocator;
         VkDevice device;
@@ -70,6 +73,12 @@ public:
     // Create renderables now (for deferred creation mode)
     // Call this when terrain is ready if deferRenderables was true during init
     void createRenderablesDeferred();
+
+    // Register callback to be notified when renderables are created
+    // Used by SceneManager to initialize physics after deferred creation
+    void setOnRenderablesCreated(OnRenderablesCreatedCallback callback) {
+        onRenderablesCreated_ = std::move(callback);
+    }
 
     // Get indices of objects that need physics bodies
     // SceneManager uses this instead of hardcoded indices
@@ -242,6 +251,9 @@ private:
 
     // Track whether renderables have been created (for deferred mode)
     bool renderablesCreated_ = false;
+
+    // Callback fired when renderables are created (for physics initialization)
+    OnRenderablesCreatedCallback onRenderablesCreated_;
 
     // Material registry for data-driven material management
     MaterialRegistry materialRegistry;

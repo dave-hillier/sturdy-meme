@@ -46,7 +46,21 @@ float SceneManager::getTerrainHeight(float x, float z) const {
 }
 
 void SceneManager::initPhysics(PhysicsWorld& physics) {
-    initializeScenePhysics(physics);
+    // Store physics pointer for deferred initialization callback
+    storedPhysics_ = &physics;
+
+    // Register callback for when deferred renderables are created
+    sceneBuilder->setOnRenderablesCreated([this]() {
+        if (storedPhysics_ && scenePhysicsBodies.empty()) {
+            SDL_Log("SceneManager: Deferred renderables created, initializing physics bodies...");
+            initializeScenePhysics(*storedPhysics_);
+        }
+    });
+
+    // Initialize immediately if renderables already exist
+    if (sceneBuilder->hasRenderables()) {
+        initializeScenePhysics(physics);
+    }
 }
 
 void SceneManager::initTerrainPhysics(PhysicsWorld& physics, const float* heightSamples,
