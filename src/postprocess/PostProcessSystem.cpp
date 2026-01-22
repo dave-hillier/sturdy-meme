@@ -3,6 +3,7 @@
 #include "BilateralGridSystem.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
+#include "core/InitInfoBuilder.h"
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include "SamplerFactory.h"
 #include "VmaBuffer.h"
@@ -22,16 +23,9 @@ std::unique_ptr<PostProcessSystem> PostProcessSystem::create(const InitInfo& inf
 }
 
 std::unique_ptr<PostProcessSystem> PostProcessSystem::create(const InitContext& ctx, VkRenderPass outputRenderPass, VkFormat swapchainFormat) {
-    InitInfo info{};
-    info.device = ctx.device;
-    info.allocator = ctx.allocator;
+    InitInfo info = InitInfoBuilder::fromContext<InitInfo>(ctx);
     info.outputRenderPass = outputRenderPass;
-    info.descriptorPool = ctx.descriptorPool;
-    info.extent = ctx.extent;
     info.swapchainFormat = swapchainFormat;
-    info.shaderPath = ctx.shaderPath;
-    info.framesInFlight = ctx.framesInFlight;
-    info.raiiDevice = ctx.raiiDevice;
     return create(info);
 }
 

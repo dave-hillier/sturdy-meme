@@ -2,6 +2,7 @@
 #include "SamplerFactory.h"
 #include "DescriptorManager.h"
 #include "core/ImageBuilder.h"
+#include "core/InitInfoBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "ShaderLoader.h"
@@ -20,13 +21,7 @@ std::unique_ptr<ComputeBloomSystem> ComputeBloomSystem::create(const InitInfo& i
 }
 
 std::unique_ptr<ComputeBloomSystem> ComputeBloomSystem::create(const InitContext& ctx) {
-    InitInfo info;
-    info.device = ctx.device;
-    info.allocator = ctx.allocator;
-    info.descriptorPool = ctx.descriptorPool;
-    info.extent = ctx.extent;
-    info.shaderPath = ctx.shaderPath;
-    info.raiiDevice = ctx.raiiDevice;
+    InitInfo info = InitInfoBuilder::fromContext<InitInfo>(ctx);
     return create(info);
 }
 
