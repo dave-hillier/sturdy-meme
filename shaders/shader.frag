@@ -126,7 +126,8 @@ void main() {
     vec3 N = perturbNormal(geometricN, fragTangent, normalMap, fragTexCoord);
 
     // Multiply texture color with vertex color (for glTF material baseColorFactor)
-    vec3 albedo = texColor.rgb * fragColor.rgb;
+    // Also apply tint color for NPC hostility visualization
+    vec3 albedo = texColor.rgb * fragColor.rgb * material.tintColor.rgb;
 
     // === PBR MATERIAL PROPERTIES ===
     // Sample optional PBR texture maps, falling back to push constant values

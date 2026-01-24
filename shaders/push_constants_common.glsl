@@ -21,6 +21,7 @@ layout(push_constant) uniform PushConstants {
     float alphaTestThreshold;  // Alpha test threshold (0 = disabled, >0 = discard if alpha < threshold)
     float _padding2;
     float _padding3;
+    vec4 tintColor;  // RGB tint multiplier (default 1,1,1,1 = no tint). Used for NPC hostility colors.
 } material;
 
 #endif // PUSH_CONSTANTS_COMMON_GLSL

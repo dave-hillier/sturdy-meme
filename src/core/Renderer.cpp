@@ -42,6 +42,7 @@
 // Animation and debug
 #include "SkinnedMeshRenderer.h"
 #include "DebugLineSystem.h"
+#include "NPCManager.h"
 #include "HiZSystem.h"
 #include "interfaces/IDebugControl.h"
 #include "controls/DebugControlSubsystem.h"
@@ -766,6 +767,14 @@ void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
 
     // Delegate to the recorder
     hdrPassRecorder_->recordSecondarySlot(cmd, frameIndex, grassTime, slot);
+}
+
+// ===== NPC Manager Integration =====
+
+void Renderer::setNPCManager(NPCManager* npcManager) {
+    if (hdrPassRecorder_) {
+        hdrPassRecorder_->setNPCManager(npcManager);
+    }
 }
 
 // ===== GPU Skinning Implementation =====

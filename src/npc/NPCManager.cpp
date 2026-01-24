@@ -2,6 +2,10 @@
 #include "BehaviorTree.h"
 #include "NPCBehaviorTrees.h"
 #include "physics/PhysicsSystem.h"
+#include "animation/AnimatedCharacter.h"
+#include "animation/SkinnedMeshRenderer.h"
+#include "animation/Animation.h"
+#include "animation/GLTFLoader.h"
 #include <SDL3/SDL_log.h>
 #include <algorithm>
 #include <sstream>
@@ -229,5 +233,161 @@ int NPCManager::findNPCIndex(NPCID id) const {
 void NPCManager::fireEvent(NPCID id, const std::string& event) {
     if (eventCallback_) {
         eventCallback_(id, event);
+    }
+}
+
+void NPCManager::updateAnimations(float deltaTime, SkinnedMeshRenderer& renderer, uint32_t frameIndex) {
+    if (!sharedCharacter_) {
+        return;  // No shared character set, can't animate NPCs
+    }
+
+    // Assign bone slots and update animation for each NPC
+    // Slot 0 is reserved for the player
+    uint32_t nextSlot = 1;
+
+    for (auto& npc : npcs_) {
+        if (!npc.isAlive()) {
+            continue;
+        }
+
+        // Skip if we've run out of slots
+        if (nextSlot >= MAX_SKINNED_CHARACTERS) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Too many NPCs for skinned rendering");
+            break;
+        }
+
+        // Assign slot to NPC
+        npc.boneSlot = nextSlot++;
+
+        // Update animation time based on movement speed
+        float speed = glm::length(npc.velocity);
+        float animSpeed = 1.0f;
+
+        // Choose animation based on behavior state
+        const auto& animations = sharedCharacter_->getAnimations();
+        size_t targetAnim = 0;  // Default to first animation (usually idle)
+
+        // Find appropriate animation by name
+        for (size_t i = 0; i < animations.size(); i++) {
+            const std::string& animName = animations[i].name;
+
+            if (npc.behaviorState == BehaviorState::Idle && animName.find("Idle") != std::string::npos) {
+                targetAnim = i;
+                animSpeed = 1.0f;
+                break;
+            } else if ((npc.behaviorState == BehaviorState::Patrol ||
+                        npc.behaviorState == BehaviorState::Return) &&
+                       animName.find("Walk") != std::string::npos) {
+                targetAnim = i;
+                animSpeed = speed / 1.5f;  // Adjust for walk speed
+                break;
+            } else if ((npc.behaviorState == BehaviorState::Chase ||
+                        npc.behaviorState == BehaviorState::Flee) &&
+                       animName.find("Run") != std::string::npos) {
+                targetAnim = i;
+                animSpeed = speed / 4.0f;  // Adjust for run speed
+                break;
+            } else if (npc.behaviorState == BehaviorState::Attack &&
+                       animName.find("Attack") != std::string::npos) {
+                targetAnim = i;
+                animSpeed = 1.0f;
+                break;
+            }
+        }
+
+        npc.currentAnimation = targetAnim;
+
+        // Update animation time
+        if (targetAnim < animations.size()) {
+            const auto& clip = animations[targetAnim];
+            npc.animationTime += deltaTime * animSpeed;
+
+            // Loop animation
+            if (clip.duration > 0.0f) {
+                while (npc.animationTime >= clip.duration) {
+                    npc.animationTime -= clip.duration;
+                }
+            }
+        }
+
+        // Compute bone matrices for this NPC
+        std::vector<glm::mat4> boneMatrices;
+        computeNPCBoneMatrices(npc, boneMatrices);
+
+        // Update renderer with this NPC's bones
+        renderer.updateBoneMatricesForSlot(frameIndex, npc.boneSlot, boneMatrices);
+    }
+}
+
+void NPCManager::computeNPCBoneMatrices(NPC& npc, std::vector<glm::mat4>& outBoneMatrices) {
+    if (!sharedCharacter_) {
+        return;
+    }
+
+    // Get skeleton from shared character
+    Skeleton& skeleton = sharedCharacter_->getSkeleton();
+    const auto& animations = sharedCharacter_->getAnimations();
+
+    if (npc.currentAnimation >= animations.size()) {
+        // Just use bind pose if no valid animation
+        sharedCharacter_->computeBoneMatrices(outBoneMatrices);
+        return;
+    }
+
+    // Sample animation at NPC's current time
+    const AnimationClip& clip = animations[npc.currentAnimation];
+
+    // We need to temporarily modify the skeleton's local transforms
+    // Store original transforms
+    std::vector<glm::mat4> originalTransforms;
+    originalTransforms.reserve(skeleton.joints.size());
+    for (const auto& joint : skeleton.joints) {
+        originalTransforms.push_back(joint.localTransform);
+    }
+
+    // Apply animation to skeleton
+    clip.sample(npc.animationTime, skeleton, true);
+
+    // Compute bone matrices
+    std::vector<glm::mat4> globalTransforms;
+    skeleton.computeGlobalTransforms(globalTransforms);
+
+    outBoneMatrices.resize(skeleton.joints.size());
+    for (size_t i = 0; i < skeleton.joints.size(); ++i) {
+        outBoneMatrices[i] = globalTransforms[i] * skeleton.joints[i].inverseBindMatrix;
+    }
+
+    // Restore original transforms
+    for (size_t i = 0; i < skeleton.joints.size(); ++i) {
+        skeleton.joints[i].localTransform = originalTransforms[i];
+    }
+}
+
+void NPCManager::render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRenderer& renderer) {
+    if (!sharedCharacter_) {
+        return;  // No shared character, can't render
+    }
+
+    for (const auto& npc : npcs_) {
+        if (!npc.isAlive()) {
+            continue;
+        }
+
+        if (npc.boneSlot == 0) {
+            continue;  // Slot 0 reserved for player, skip unassigned NPCs
+        }
+
+        // Build model matrix for NPC
+        // Scale down slightly and offset Y for proper ground placement
+        glm::mat4 modelMatrix = npc.transform.toMatrix();
+
+        // Apply same scale as player (0.01 for Mixamo characters)
+        modelMatrix = modelMatrix * glm::scale(glm::mat4(1.0f), glm::vec3(0.01f));
+
+        // Get tint color based on hostility
+        glm::vec4 tintColor = npc.getTintColor();
+
+        // Render NPC
+        renderer.recordNPC(cmd, frameIndex, npc.boneSlot, modelMatrix, tintColor, *sharedCharacter_);
     }
 }

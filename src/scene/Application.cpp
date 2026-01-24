@@ -29,6 +29,8 @@
 #include "core/interfaces/ITerrainControl.h"
 #include "core/interfaces/IPlayerControl.h"
 #include "DebugLineSystem.h"
+#include "SkinnedMeshRenderer.h"
+#include "SceneBuilder.h"
 
 #ifdef JPH_DEBUG_RENDERER
 #include "PhysicsDebugRenderer.h"
@@ -1304,6 +1306,16 @@ void Application::initNPCs() {
         npcManager_.spawn(info);
     }
 
+    // Set up shared character for skinned NPC rendering
+    SceneBuilder& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
+    if (sceneBuilder.hasCharacter()) {
+        npcManager_.setSharedCharacter(&sceneBuilder.getAnimatedCharacter());
+        SDL_Log("NPCs using shared skinned character for rendering");
+    }
+
+    // Connect NPCManager to renderer for NPC drawing
+    renderer_->setNPCManager(&npcManager_);
+
     SDL_Log("NPCs initialized: %s", npcManager_.getDebugSummary().c_str());
 }
 
@@ -1311,6 +1323,10 @@ void Application::updateNPCs(float deltaTime) {
     // Update all NPCs with player position
     glm::vec3 playerPos = player_.transform.position;
     npcManager_.update(deltaTime, playerPos, &physics());
+
+    // Update NPC animations and bone matrices for skinned rendering
+    uint32_t frameIndex = renderer_->getCurrentFrameIndex();
+    npcManager_.updateAnimations(deltaTime, renderer_->getSystems().skinnedMesh(), frameIndex);
 
     // Get terrain reference for height adjustment
     auto& terrain = renderer_->getSystems().terrain();

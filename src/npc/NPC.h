@@ -116,11 +116,32 @@ struct NPC {
     float alertLevel = 0.0f;        // 0 = calm, 1 = fully alert (for visual indicators)
     bool isAttacking = false;       // Currently in attack animation
 
+    // Animation state for skinned rendering
+    float animationTime = 0.0f;     // Current animation time
+    size_t currentAnimation = 0;    // Current animation clip index
+    uint32_t boneSlot = 0;          // Slot index for bone matrices in renderer
+
     // Check if NPC is alive
     bool isAlive() const { return health > 0.0f; }
 
     // Check if NPC can attack (cooldown elapsed)
     bool canAttack() const { return attackCooldownTimer <= 0.0f; }
+
+    // Get tint color based on hostility for visual distinction
+    glm::vec4 getTintColor() const {
+        switch (hostility) {
+            case HostilityLevel::Friendly:
+                return glm::vec4(0.7f, 1.0f, 0.7f, 1.0f);  // Light green tint
+            case HostilityLevel::Neutral:
+                return glm::vec4(0.9f, 0.9f, 0.7f, 1.0f);  // Light yellow tint
+            case HostilityLevel::Hostile:
+                return glm::vec4(1.0f, 0.6f, 0.6f, 1.0f);  // Light red tint
+            case HostilityLevel::Afraid:
+                return glm::vec4(0.7f, 0.7f, 1.0f, 1.0f);  // Light blue tint
+            default:
+                return glm::vec4(1.0f);  // No tint
+        }
+    }
 
     // Get current speed multiplier based on behavior
     float getSpeedMultiplier() const {

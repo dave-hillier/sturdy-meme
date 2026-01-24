@@ -61,11 +61,11 @@ void SkinnedMeshRenderer::cleanup() {
 
 bool SkinnedMeshRenderer::createDescriptorSetLayout() {
     // Skinned descriptor set layout:
-    // Same as main layout but with additional binding 12 for bone matrices UBO
+    // Same as main layout but with additional binding 12 for bone matrices UBO (dynamic for multi-character)
     DescriptorManager::LayoutBuilder builder(device);
     addCommonBindings(builder);
-    // Add skinned-specific binding
-    builder.addBinding(Bindings::BONE_MATRICES, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT);
+    // Add skinned-specific binding as dynamic UBO for multi-character support
+    builder.addBinding(Bindings::BONE_MATRICES, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_VERTEX_BIT);
 
     VkDescriptorSetLayout rawLayout = builder.build();
     if (rawLayout == VK_NULL_HANDLE) {
@@ -121,10 +121,30 @@ bool SkinnedMeshRenderer::createPipeline() {
 }
 
 bool SkinnedMeshRenderer::createBoneMatricesBuffers() {
+    // Query device properties for minimum uniform buffer offset alignment
+    VkPhysicalDeviceProperties props;
+    VkPhysicalDevice physDevice = VK_NULL_HANDLE;
+    vmaGetAllocatorInfo(allocator, nullptr);
+
+    // Get physical device from VMA allocator info
+    VmaAllocatorInfo allocatorInfo;
+    vmaGetAllocatorInfo(allocator, &allocatorInfo);
+    physDevice = allocatorInfo.physicalDevice;
+
+    vkGetPhysicalDeviceProperties(physDevice, &props);
+    boneBufferAlignment_ = static_cast<uint32_t>(props.limits.minUniformBufferOffsetAlignment);
+
+    // Calculate aligned size for each character's bone matrices
+    uint32_t uboSize = sizeof(BoneMatricesUBO);
+    alignedBoneBufferSize_ = (uboSize + boneBufferAlignment_ - 1) & ~(boneBufferAlignment_ - 1);
+
+    // Total buffer size for all characters
+    VkDeviceSize totalSize = static_cast<VkDeviceSize>(alignedBoneBufferSize_) * MAX_SKINNED_CHARACTERS;
+
     if (!BufferUtils::PerFrameBufferBuilder()
             .setAllocator(allocator)
             .setFrameCount(framesInFlight)
-            .setSize(sizeof(BoneMatricesUBO))
+            .setSize(totalSize)
             .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
             .setMemoryUsage(VMA_MEMORY_USAGE_AUTO)
             .setAllocationFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
@@ -134,15 +154,19 @@ bool SkinnedMeshRenderer::createBoneMatricesBuffers() {
         return false;
     }
 
-    // Initialize with identity matrices
-    for (size_t i = 0; i < framesInFlight; i++) {
-        BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(boneMatricesBuffers.mappedPointers[i]);
-        for (uint32_t j = 0; j < MAX_BONES; j++) {
-            ubo->bones[j] = glm::mat4(1.0f);
+    // Initialize all character slots with identity matrices
+    for (size_t frameIdx = 0; frameIdx < framesInFlight; frameIdx++) {
+        uint8_t* basePtr = static_cast<uint8_t*>(boneMatricesBuffers.mappedPointers[frameIdx]);
+        for (uint32_t slot = 0; slot < MAX_SKINNED_CHARACTERS; slot++) {
+            BoneMatricesUBO* ubo = reinterpret_cast<BoneMatricesUBO*>(basePtr + slot * alignedBoneBufferSize_);
+            for (uint32_t j = 0; j < MAX_BONES; j++) {
+                ubo->bones[j] = glm::mat4(1.0f);
+            }
         }
     }
 
-    SDL_Log("Created bone matrices buffers for GPU skinning");
+    SDL_Log("Created bone matrices buffers for GPU skinning (%u characters, %u bytes each, alignment %u)",
+            MAX_SKINNED_CHARACTERS, alignedBoneBufferSize_, boneBufferAlignment_);
     return true;
 }
 
@@ -183,9 +207,10 @@ bool SkinnedMeshRenderer::createDescriptorSets(const DescriptorResources& resour
         common.snowUboBufferSize = sizeof(SnowUBO);
         common.cloudShadowUboBuffer = gbm.cloudShadowBuffers.buffers[i];
         common.cloudShadowUboBufferSize = sizeof(CloudShadowUBO);
-        // Bone matrices
+        // Bone matrices - size is per-character slice (for dynamic offset range check)
         common.boneMatricesBuffer = boneMatricesBuffers.buffers[i];
         common.boneMatricesBufferSize = sizeof(BoneMatricesUBO);
+        common.boneMatricesDynamic = true;  // Signal dynamic UBO usage
         // Placeholder texture for unused PBR bindings
         common.placeholderTextureView = resources.whiteTextureView;
         common.placeholderTextureSampler = resources.whiteTextureSampler;
@@ -200,7 +225,7 @@ bool SkinnedMeshRenderer::createDescriptorSets(const DescriptorResources& resour
         factory.writeSkinnedDescriptorSet(descriptorSets[i], common, mat);
     }
 
-    SDL_Log("Created skinned descriptor sets for GPU skinning");
+    SDL_Log("Created skinned descriptor sets for GPU skinning (dynamic UBO for multi-character)");
     return true;
 }
 
@@ -259,12 +284,14 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
         .setExtent({extent.width, extent.height});
     vkCmd.setScissor(0, scissor);
 
-    // Bind skinned descriptor set
+    // Bind skinned descriptor set with dynamic offset for slot 0 (player)
+    uint32_t dynamicOffset = 0;  // Slot 0 for player
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                              **pipelineLayout_, 0,
-                             vk::DescriptorSet(descriptorSets[frameIndex]), {});
+                             vk::DescriptorSet(descriptorSets[frameIndex]),
+                             dynamicOffset);
 
-    // Push constants
+    // Push constants with default tint (no tint = white)
     PushConstants push{};
     push.model = playerObj.transform;
     push.roughness = playerObj.roughness;
@@ -273,6 +300,7 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
     push.opacity = playerObj.opacity;
     push.emissiveColor = glm::vec4(playerObj.emissiveColor, 1.0f);
     push.pbrFlags = playerObj.pbrFlags;
+    push.tintColor = glm::vec4(1.0f);  // No tint for player
 
     vkCmd.pushConstants<PushConstants>(
         **pipelineLayout_,
@@ -289,4 +317,95 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
 
     vkCmd.drawIndexed(skinnedMesh.getIndexCount(), 1, 0, 0, 0);
     DIAG_RECORD_DRAW();
+}
+
+int SkinnedMeshRenderer::updateBoneMatricesForSlot(uint32_t frameIndex, uint32_t slot,
+                                                    const std::vector<glm::mat4>& boneMatrices) {
+    if (slot >= MAX_SKINNED_CHARACTERS) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Invalid bone matrices slot %u (max %u)", slot, MAX_SKINNED_CHARACTERS);
+        return -1;
+    }
+
+    uint8_t* basePtr = static_cast<uint8_t*>(boneMatricesBuffers.mappedPointers[frameIndex]);
+    BoneMatricesUBO* ubo = reinterpret_cast<BoneMatricesUBO*>(basePtr + slot * alignedBoneBufferSize_);
+
+    // Copy bone matrices
+    size_t numBones = std::min(boneMatrices.size(), static_cast<size_t>(MAX_BONES));
+    for (size_t i = 0; i < numBones; i++) {
+        ubo->bones[i] = boneMatrices[i];
+    }
+    // Fill remaining slots with identity
+    for (size_t i = numBones; i < MAX_BONES; i++) {
+        ubo->bones[i] = glm::mat4(1.0f);
+    }
+
+    return static_cast<int>(slot);
+}
+
+void SkinnedMeshRenderer::recordNPC(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slot,
+                                     const glm::mat4& transform, const glm::vec4& tintColor,
+                                     AnimatedCharacter& character) {
+    if (slot >= MAX_SKINNED_CHARACTERS) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Invalid NPC slot %u", slot);
+        return;
+    }
+
+    vk::CommandBuffer vkCmd(cmd);
+
+    // Bind skinned pipeline (may already be bound, but safe to call)
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **pipeline_);
+
+    // Set dynamic viewport and scissor
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent.width))
+        .setHeight(static_cast<float>(extent.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
+
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent({extent.width, extent.height});
+    vkCmd.setScissor(0, scissor);
+
+    // Bind skinned descriptor set with dynamic offset for this NPC's slot
+    uint32_t dynamicOffset = slot * alignedBoneBufferSize_;
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                             **pipelineLayout_, 0,
+                             vk::DescriptorSet(descriptorSets[frameIndex]),
+                             dynamicOffset);
+
+    // Push constants with NPC tint color
+    PushConstants push{};
+    push.model = transform;
+    push.roughness = 0.7f;  // Default NPC material properties
+    push.metallic = 0.0f;
+    push.emissiveIntensity = 0.0f;
+    push.opacity = 1.0f;
+    push.emissiveColor = glm::vec4(1.0f);
+    push.pbrFlags = 0;
+    push.tintColor = tintColor;  // Apply hostility tint color
+
+    vkCmd.pushConstants<PushConstants>(
+        **pipelineLayout_,
+        vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+        0, push);
+
+    // Bind skinned mesh vertex and index buffers (same mesh as player)
+    SkinnedMesh& skinnedMesh = character.getSkinnedMesh();
+
+    VkBuffer vertexBuffers[] = {skinnedMesh.getVertexBuffer()};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+    vkCmd.bindIndexBuffer(skinnedMesh.getIndexBuffer(), 0, vk::IndexType::eUint32);
+
+    vkCmd.drawIndexed(skinnedMesh.getIndexCount(), 1, 0, 0, 0);
+    DIAG_RECORD_DRAW();
+}
+
+void SkinnedMeshRenderer::resetCharacterSlots(uint32_t frameIndex) {
+    // No-op for now - slots are reused each frame
+    // Could be used for slot tracking if needed
 }

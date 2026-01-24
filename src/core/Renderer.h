@@ -140,6 +140,13 @@ public:
     std::string getShaderPath() const { return resourcePath + "/shaders"; }
     const std::string& getResourcePath() const { return resourcePath; }
 
+    // Frame synchronization info
+    uint32_t getCurrentFrameIndex() const { return frameSync_.currentIndex(); }
+    uint32_t getFrameCount() const { return frameSync_.frameCount(); }
+
+    // Set NPCManager for skinned NPC rendering (called from Application after NPC init)
+    void setNPCManager(class NPCManager* npcManager);
+
     // Multi-threading infrastructure (delegated to RenderingInfrastructure)
     AsyncTransferManager& getAsyncTransferManager() { return renderingInfra_.asyncTransferManager(); }
     const AsyncTransferManager& getAsyncTransferManager() const { return renderingInfra_.asyncTransferManager(); }

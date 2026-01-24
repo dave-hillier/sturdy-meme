@@ -19,6 +19,10 @@
 
 class AnimatedCharacter;
 
+// Maximum number of skinned characters that can be rendered per frame
+// Slot 0 is reserved for the player character
+constexpr uint32_t MAX_SKINNED_CHARACTERS = 32;
+
 // Skinned mesh renderer - handles GPU skinning pipeline and bone matrices
 class SkinnedMeshRenderer {
 public:
@@ -89,12 +93,30 @@ public:
     // Update cloud shadow binding after cloud shadow system is initialized
     void updateCloudShadowBinding(VkImageView cloudShadowView, VkSampler cloudShadowSampler);
 
-    // Update bone matrices from animated character
+    // Update bone matrices from animated character (slot 0 = player)
     void updateBoneMatrices(uint32_t frameIndex, AnimatedCharacter* character);
 
-    // Record draw commands for skinned character
+    // Update bone matrices for a specific character slot (for NPCs)
+    // Returns the slot index used, or -1 if no slots available
+    int updateBoneMatricesForSlot(uint32_t frameIndex, uint32_t slot,
+                                   const std::vector<glm::mat4>& boneMatrices);
+
+    // Record draw commands for skinned character (player - slot 0)
     void record(VkCommandBuffer cmd, uint32_t frameIndex,
                 const Renderable& playerObj, AnimatedCharacter& character);
+
+    // Record draw commands for NPC with custom tint color
+    // slot: the bone matrices slot (must call updateBoneMatricesForSlot first)
+    // tintColor: RGB tint multiplier for hostility visualization
+    void recordNPC(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slot,
+                   const glm::mat4& transform, const glm::vec4& tintColor,
+                   AnimatedCharacter& character);
+
+    // Reset character slot allocation for new frame
+    void resetCharacterSlots(uint32_t frameIndex);
+
+    // Get the dynamic offset alignment requirement
+    uint32_t getBoneBufferAlignment() const { return boneBufferAlignment_; }
 
     // Update extent for viewport (on window resize)
     void setExtent(VkExtent2D newExtent) { extent = newExtent; }
@@ -130,4 +152,8 @@ private:
 
     std::vector<VkDescriptorSet> descriptorSets;
     BufferUtils::PerFrameBufferSet boneMatricesBuffers;
+
+    // Dynamic uniform buffer support for multiple characters
+    uint32_t boneBufferAlignment_ = 256;  // Minimum UBO alignment (queried from device)
+    uint32_t alignedBoneBufferSize_ = 0;  // sizeof(BoneMatricesUBO) rounded up to alignment
 };

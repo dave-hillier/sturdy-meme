@@ -25,6 +25,7 @@ class WaterSystem;
 class WaterTileCull;
 class WindSystem;
 class DebugLineSystem;
+class NPCManager;
 
 class RendererSystems;
 
@@ -67,6 +68,9 @@ struct HDRPassResources {
 
     // Debug visualization
     DebugLineSystem* debugLine = nullptr;
+
+    // NPC rendering (optional - may be null if no NPCs)
+    NPCManager* npcManager = nullptr;
 
     /**
      * Factory: Collect resources from RendererSystems.

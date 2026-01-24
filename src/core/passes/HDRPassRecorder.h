@@ -39,6 +39,9 @@ public:
     // Set configuration (must be called before recording)
     void setConfig(const Config& config) { config_ = config; }
 
+    // Set NPCManager for skinned NPC rendering (optional - can be nullptr)
+    void setNPCManager(class NPCManager* npcManager) { resources_.npcManager = npcManager; }
+
     // Record the complete HDR pass (sequential path)
     void record(VkCommandBuffer cmd, uint32_t frameIndex, float time);
 

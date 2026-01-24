@@ -97,8 +97,12 @@ void MaterialDescriptorFactory::writeSkinnedDescriptorSet(
         .writeImage(3, material.normalView, material.normalSampler);
 
     // Binding 12: Bone matrices (required for skinned meshes)
+    // Use dynamic UBO type when multi-character support is enabled
     if (common.boneMatricesBuffer != VK_NULL_HANDLE) {
-        writer.writeBuffer(12, common.boneMatricesBuffer, 0, common.boneMatricesBufferSize);
+        VkDescriptorType boneDescType = common.boneMatricesDynamic
+            ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+            : VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writer.writeBuffer(12, common.boneMatricesBuffer, 0, common.boneMatricesBufferSize, boneDescType);
     }
 
     // PBR texture bindings (13-16) - always write, using placeholder if no texture provided

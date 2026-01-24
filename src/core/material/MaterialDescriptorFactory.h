@@ -49,6 +49,7 @@ public:
         // Optional: bone matrices for skinned meshes
         VkBuffer boneMatricesBuffer = VK_NULL_HANDLE;
         VkDeviceSize boneMatricesBufferSize = 0;
+        bool boneMatricesDynamic = false;  // Use dynamic UBO for multi-character support
 
         // Placeholder texture for unused PBR bindings (bindings 13-16 must always be written)
         VkImageView placeholderTextureView = VK_NULL_HANDLE;

@@ -27,6 +27,7 @@
 #include "Profiler.h"
 #include "AnimatedCharacter.h"
 #include "Mesh.h"
+#include "NPCManager.h"
 
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -102,6 +103,13 @@ void HDRPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float tim
         }
     }
     resources_.profiler->endGpuZone(cmd, "HDR:SkinnedChar");
+
+    // Draw NPCs with skinned mesh (shares mesh with player, different bone matrices)
+    if (resources_.npcManager) {
+        resources_.profiler->beginGpuZone(cmd, "HDR:NPCs");
+        resources_.npcManager->render(cmd, frameIndex, *resources_.skinnedMesh);
+        resources_.profiler->endGpuZone(cmd, "HDR:NPCs");
+    }
 
     // Draw grass
     resources_.profiler->beginGpuZone(cmd, "HDR:Grass");

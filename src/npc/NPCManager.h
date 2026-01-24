@@ -6,6 +6,8 @@
 #include <functional>
 
 class PhysicsWorld;
+class AnimatedCharacter;
+class SkinnedMeshRenderer;
 
 // Callback for NPC events
 using NPCEventCallback = std::function<void(NPCID npcId, const std::string& event)>;
@@ -66,14 +68,30 @@ public:
     // Debug: Get summary string
     std::string getDebugSummary() const;
 
+    // Animation/Rendering support
+    // Set the shared character reference (uses player's AnimatedCharacter for mesh/skeleton)
+    void setSharedCharacter(AnimatedCharacter* character) { sharedCharacter_ = character; }
+    AnimatedCharacter* getSharedCharacter() const { return sharedCharacter_; }
+
+    // Update animation and compute bone matrices for all NPCs
+    // Call this after behavior update, before rendering
+    void updateAnimations(float deltaTime, SkinnedMeshRenderer& renderer, uint32_t frameIndex);
+
+    // Render all NPCs using the skinned mesh renderer
+    void render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRenderer& renderer);
+
 private:
     std::vector<NPC> npcs_;
     NPCID nextId_ = 1;
     NPCEventCallback eventCallback_;
+    AnimatedCharacter* sharedCharacter_ = nullptr;  // Shared mesh/skeleton from player
 
     // Find NPC index by ID (returns -1 if not found)
     int findNPCIndex(NPCID id) const;
 
     // Fire an event
     void fireEvent(NPCID id, const std::string& event);
+
+    // Compute bone matrices for a single NPC based on its animation state
+    void computeNPCBoneMatrices(NPC& npc, std::vector<glm::mat4>& outBoneMatrices);
 };
