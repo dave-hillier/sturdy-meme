@@ -19,6 +19,27 @@ This document outlines the comprehensive plan for integrating the MFCG-based cit
 - Procedural vegetation (grass, trees, scatter)
 - glTF/FBX/OBJ mesh loading
 - Build-time procedural content generation
+- **Virtual Texture System** - 65536×65536 megatexture with 128×128 tiles, streaming
+- **RoadNetworkLoader** - Already loads GeoJSON roads (but doesn't render them)
+- **MaterialLayerStack** - Composable terrain material blending (height/slope/distance modes)
+
+---
+
+## Recommended Implementation Order
+
+The plan is structured to provide **incremental visual progress**:
+
+| Phase | Deliverable | Visual Result |
+|-------|-------------|---------------|
+| 1 | GeoJSON Export | Data viewable in GIS tools |
+| 2 | **Virtual Texture Streets** | Streets visible on terrain from any distance |
+| 3 | **Ward Ground Materials** | Colored ward areas on terrain |
+| 4 | Basic 3D Buildings | White box buildings |
+| 5 | Building Detail | Doors, windows, roofs |
+| 6 | Walls & Infrastructure | Fortifications, bridges |
+| 7 | LOD & Polish | Performance, decorations |
+
+**Start with Phase 2 (Virtual Textures)** for fastest visual payoff with existing infrastructure.
 
 ---
 
@@ -76,7 +97,261 @@ generated/city/
 
 ---
 
-## Phase 2: Partial/Progressive Generation
+## Phase 2: Virtual Texture Integration (Priority)
+
+### Goal
+Bake city streets, plazas, and ward ground materials into the terrain virtual texture system for immediate visual results at all distances.
+
+### Why First?
+- **Existing infrastructure**: VirtualTextureSystem and RoadNetworkLoader already exist
+- **Immediate payoff**: Streets visible from world map to close-up without new 3D systems
+- **Natural LOD**: VT mip levels provide automatic distance-based detail reduction
+- **Foundation**: Ground materials establish city footprint before adding 3D buildings
+
+### Architecture
+
+```
+City Generator → GeoJSON → CityTextureBaker → VT Tiles → Runtime Streaming
+     ↓
+  streets.geojson
+  wards.geojson
+  buildings.geojson (footprints only)
+```
+
+### New Tool: `city_texture_baker`
+
+Renders city 2D layout to virtual texture tiles at build time.
+
+```cpp
+// tools/city_texture_baker/main.cpp
+class CityTextureBaker {
+public:
+    void loadCity(const std::string& cityDir);
+    void bakeTiles(const std::string& outputDir, int tileSize = 128);
+
+private:
+    // Rasterize vector data to tiles
+    void rasterizeStreets(TileBuffer& tile, const glm::ivec2& tileCoord);
+    void rasterizeWards(TileBuffer& tile, const glm::ivec2& tileCoord);
+    void rasterizeBuildingFootprints(TileBuffer& tile, const glm::ivec2& tileCoord);
+
+    // Material assignment
+    uint32_t getStreetMaterialId(StreetType type);
+    uint32_t getWardMaterialId(WardType type);
+};
+```
+
+### Tile Output Format
+
+Match existing VT tile format (128×128 with 4-pixel border = 136×136):
+
+```cpp
+struct CityTileData {
+    // Material ID per pixel (indexes into terrain material palette)
+    uint8_t materialId[136][136];
+
+    // Optional: blend weight for soft edges
+    uint8_t blendWeight[136][136];
+};
+```
+
+### Material Palette Extension
+
+Add city materials to terrain material system:
+
+```cpp
+// Extend existing terrain materials
+enum TerrainMaterialId {
+    // Existing
+    GRASS = 0,
+    ROCK = 1,
+    DIRT = 2,
+    SAND = 3,
+
+    // City materials (new)
+    COBBLESTONE = 10,
+    DIRT_ROAD = 11,
+    PLAZA_STONE = 12,
+    MARKET_GROUND = 13,
+    CASTLE_COURTYARD = 14,
+    HARBOUR_WOOD = 15,
+
+    // Ward ground colors
+    WARD_RESIDENTIAL = 20,
+    WARD_COMMERCIAL = 21,
+    WARD_INDUSTRIAL = 22,
+};
+```
+
+### Street Rasterization
+
+```cpp
+void CityTextureBaker::rasterizeStreets(TileBuffer& tile, const glm::ivec2& tileCoord) {
+    AABB tileBounds = getTileBounds(tileCoord);
+
+    for (const auto& street : streets) {
+        if (!street.intersects(tileBounds)) continue;
+
+        // Clip street segment to tile
+        auto clipped = clipToTile(street.path, tileBounds);
+
+        // Rasterize as thick line
+        float width = street.isArtery ? 6.0f : 3.0f;
+        uint8_t material = getStreetMaterialId(street.type);
+
+        for (const auto& segment : clipped) {
+            rasterizeThickLine(tile, segment.start, segment.end, width, material);
+        }
+    }
+}
+
+void rasterizeThickLine(TileBuffer& tile, glm::vec2 p0, glm::vec2 p1,
+                        float width, uint8_t material) {
+    // Bresenham with perpendicular expansion
+    // Or: SDF-based for anti-aliased edges
+
+    glm::vec2 dir = glm::normalize(p1 - p0);
+    glm::vec2 perp = glm::vec2(-dir.y, dir.x) * (width * 0.5f);
+
+    // Quad vertices
+    std::array<glm::vec2, 4> quad = {
+        p0 - perp, p0 + perp, p1 + perp, p1 - perp
+    };
+
+    // Rasterize quad to tile pixels
+    rasterizeConvexPolygon(tile, quad, material);
+}
+```
+
+### Ward Ground Rasterization
+
+```cpp
+void CityTextureBaker::rasterizeWards(TileBuffer& tile, const glm::ivec2& tileCoord) {
+    AABB tileBounds = getTileBounds(tileCoord);
+
+    for (const auto& ward : wards) {
+        if (!ward.boundary.intersects(tileBounds)) continue;
+
+        uint8_t material = getWardMaterialId(ward.type);
+
+        // Rasterize ward polygon (may be complex/concave)
+        rasterizePolygon(tile, ward.boundary, material);
+    }
+}
+```
+
+### Building Footprint Shadows
+
+For distant LOD, building footprints can appear as darker patches:
+
+```cpp
+void CityTextureBaker::rasterizeBuildingFootprints(TileBuffer& tile,
+                                                    const glm::ivec2& tileCoord) {
+    // Only for coarser mip levels (distant view)
+    if (currentMipLevel < 4) return;
+
+    for (const auto& building : buildings) {
+        // Darken building footprint area slightly
+        // Creates visual density without 3D geometry
+        rasterizePolygon(tile, building.footprint, BUILDING_SHADOW_TINT);
+    }
+}
+```
+
+### CMake Integration
+
+```cmake
+# tools/city_texture_baker/CMakeLists.txt
+add_executable(city_texture_baker
+    main.cpp
+    CityTextureBaker.cpp
+    TileRasterizer.cpp
+)
+target_link_libraries(city_texture_baker PRIVATE nlohmann_json stb_image_write)
+
+# Build pipeline integration
+add_custom_command(
+    OUTPUT ${GENERATED_DIR}/city_tiles/tile_manifest.json
+    COMMAND city_texture_baker
+        --city-dir ${GENERATED_DIR}/city
+        --output-dir ${GENERATED_DIR}/city_tiles
+        --tile-size 128
+        --world-size 65536
+    DEPENDS city_texture_baker
+            ${GENERATED_DIR}/city/city_streets.geojson
+            ${GENERATED_DIR}/city/city_wards.geojson
+    COMMENT "Baking city to virtual texture tiles"
+)
+```
+
+### VT Tile Merging
+
+City tiles need to merge with terrain tiles:
+
+```cpp
+// Option A: Layer compositing at bake time
+void mergeCityWithTerrain(const std::string& terrainTilePath,
+                          const std::string& cityTilePath,
+                          const std::string& outputPath) {
+    auto terrainTile = loadTile(terrainTilePath);
+    auto cityTile = loadTile(cityTilePath);
+
+    // City overwrites terrain where city material is non-zero
+    for (int y = 0; y < TILE_SIZE; y++) {
+        for (int x = 0; x < TILE_SIZE; x++) {
+            if (cityTile.materialId[y][x] != 0) {
+                terrainTile.materialId[y][x] = cityTile.materialId[y][x];
+            }
+        }
+    }
+
+    saveTile(outputPath, terrainTile);
+}
+
+// Option B: Runtime blending in shader (more flexible)
+// terrain.frag: sample both terrain VT and city VT, blend based on city alpha
+```
+
+### Shader Modification (Option B)
+
+```glsl
+// terrain.frag - add city overlay sampling
+uniform sampler2D cityMaterialTexture;  // City material ID texture
+uniform sampler2D cityBlendTexture;     // City blend weights
+
+vec4 sampleTerrainWithCity(vec2 worldPos) {
+    vec4 terrainColor = sampleVirtualTextureAuto(worldPos / VT_WORLD_SIZE);
+
+    // Sample city layer
+    vec2 cityUV = (worldPos - cityOrigin) / citySize;
+    if (cityUV.x >= 0.0 && cityUV.x <= 1.0 && cityUV.y >= 0.0 && cityUV.y <= 1.0) {
+        float cityMaterial = texture(cityMaterialTexture, cityUV).r;
+        float cityBlend = texture(cityBlendTexture, cityUV).r;
+
+        if (cityBlend > 0.0) {
+            vec4 cityColor = getMaterialColor(uint(cityMaterial * 255.0));
+            terrainColor = mix(terrainColor, cityColor, cityBlend);
+        }
+    }
+
+    return terrainColor;
+}
+```
+
+### Testing Phase 2
+
+1. Generate city GeoJSON (Phase 1)
+2. Run city_texture_baker
+3. Verify tiles in image viewer (should see street patterns)
+4. Load in engine, fly over city area
+5. Check streets visible at all distances
+6. Check ward colors differentiate areas
+
+**Expected Result**: City layout visible on terrain as painted streets and colored ward areas, before any 3D buildings are added.
+
+---
+
+## Phase 3: Partial/Progressive Generation
 
 ### Goal
 Enable generation at different levels of detail for LOD and streaming.
@@ -599,51 +874,62 @@ CitySystem::loadCity("generated/city/");
 
 **Test**: Visualize exported GeoJSON in QGIS or geojson.io
 
-### Milestone 2: Basic 3D Buildings
+### Milestone 2: Virtual Texture Streets (Priority)
+1. Create `city_texture_baker` tool
+2. Implement street line rasterization to tiles
+3. Implement ward polygon rasterization
+4. Add city materials to terrain material palette
+5. Merge city tiles with terrain VT (or add shader overlay)
+6. Integrate into CMake build pipeline
+
+**Test**: Fly over city area in engine - streets and ward colors visible on terrain at all distances
+
+### Milestone 3: Building Footprint Shadows
+1. Add building footprint rasterization to city_texture_baker
+2. Darken building areas slightly in VT
+3. Test visual density from distance
+
+**Test**: City area looks "built up" from far away without 3D geometry
+
+### Milestone 4: Basic 3D Buildings
 1. Create CityLoader to parse GeoJSON
 2. Create BuildingGenerator with simple extrusion
 3. Generate flat-roofed box buildings
 4. Render in engine with single material
+5. Sample terrain height for placement
 
-**Test**: See white box buildings in correct positions
+**Test**: See white box buildings sitting on textured streets
 
-### Milestone 3: Architectural Detail
-1. Add door placement algorithm
+### Milestone 5: Architectural Detail
+1. Add door placement algorithm (frontage edge detection)
 2. Add window placement algorithm
-3. Add procedural roof generation
+3. Add procedural roof generation (gabled, hipped, flat)
 4. Apply ward-based materials
 
 **Test**: Buildings have doors facing streets, varied roofs
 
-### Milestone 4: Infrastructure
-1. Generate street meshes
-2. Generate wall meshes with towers
+### Milestone 6: Walls & Infrastructure
+1. Generate wall meshes with towers
+2. Generate gate openings
 3. Generate bridge meshes
-4. Add ground materials per ward
+4. Add 3D street curbs/gutters (optional detail)
 
-**Test**: Complete city with streets, walls, varied ground
+**Test**: Complete walled city with gates and bridges
 
-### Milestone 5: Terrain Integration
-1. Height sampling for building placement
-2. Street path height following
-3. Foundation generation for sloped terrain
-4. Terrain flattening (optional)
-
-**Test**: City sits naturally on varied terrain
-
-### Milestone 6: LOD and Performance
-1. Implement LOD levels
+### Milestone 7: LOD and Performance
+1. Implement building LOD levels
 2. Add mesh merging per ward
 3. Add async LOD streaming
 4. Optimize draw calls
+5. Tune VT/3D transition distance
 
-**Test**: Maintain 60fps approaching large city
+**Test**: Maintain 60fps approaching large city, smooth VT→3D transition
 
-### Milestone 7: Polish
+### Milestone 8: Polish
 1. Add chimneys, signs, decorations
-2. Add lighting (lanterns, torches)
-3. Add ambient population hints (laundry, carts)
-4. Add interior volumes (for future)
+2. Add point lights (lanterns, torches) via LightManager
+3. Add ambient props (laundry, carts, market stalls)
+4. Suppress grass/vegetation in city bounds
 
 ---
 
@@ -682,9 +968,23 @@ CitySystem::loadCity("generated/city/");
 
 ## Dependencies
 
-- **Existing**: TerrainSystem (height queries), SceneManager, MaterialRegistry
-- **New textures**: Wall, roof, ground, detail textures from opengameart.org
-- **Libraries**: nlohmann/json (already in project for GeoJSON)
+- **Existing Systems**:
+  - `VirtualTextureSystem` - Terrain megatexture streaming
+  - `RoadNetworkLoader` - GeoJSON road loading (already exists, unused)
+  - `TerrainSystem` - Height queries for building placement
+  - `SceneManager` - Renderable management
+  - `MaterialRegistry` - Material/texture management
+
+- **New Tool Dependencies** (city_texture_baker):
+  - nlohmann/json - GeoJSON parsing (already in project)
+  - stb_image_write - PNG tile output (already in project)
+  - glm - Vector math (already in project)
+
+- **New Textures** (from opengameart.org):
+  - Cobblestone, plaza stone, dirt road (street materials)
+  - Wall textures: Stone, timber frame, plaster
+  - Roof textures: Thatch, clay tiles, slate
+  - Detail textures: Door, window atlases
 
 ---
 
@@ -693,26 +993,43 @@ CitySystem::loadCity("generated/city/");
 ```
 tools/town_generator/
 ├── src/export/
-│   └── GeoJSONWriter.cpp     # New: GeoJSON export
+│   └── GeoJSONWriter.cpp         # New: GeoJSON export
+
+tools/city_texture_baker/         # New: VT tile generator
+├── CMakeLists.txt
+├── main.cpp
+├── CityTextureBaker.h/cpp        # Main orchestrator
+├── TileRasterizer.h/cpp          # Vector→raster conversion
+├── StreetRasterizer.h/cpp        # Street line rendering
+├── PolygonRasterizer.h/cpp       # Ward/building polygon fill
+└── CityMaterialPalette.h/cpp     # Material ID assignments
 
 src/city/
-├── CitySystem.h/cpp          # Main system
-├── CityLoader.h/cpp          # GeoJSON loading
-├── BuildingGenerator.h/cpp   # 2D → 3D
-├── RoofGenerator.h/cpp       # Roof meshes
-├── WallGenerator.h/cpp       # Wall meshes
-├── DoorPlacer.h/cpp          # Door algorithm
-├── WindowPlacer.h/cpp        # Window algorithm
-├── StreetGenerator.h/cpp     # Street meshes
-├── CityWallGenerator.h/cpp   # Fortification meshes
-├── CityLODManager.h/cpp      # LOD management
-└── CityMaterialSet.h/cpp     # Material assignment
+├── CitySystem.h/cpp              # Main rendering system
+├── CityLoader.h/cpp              # GeoJSON loading
+├── BuildingGenerator.h/cpp       # 2D → 3D conversion
+├── RoofGenerator.h/cpp           # Procedural roofs
+├── WallGenerator.h/cpp           # Building walls with openings
+├── DoorPlacer.h/cpp              # Door placement algorithm
+├── WindowPlacer.h/cpp            # Window placement algorithm
+├── CityWallGenerator.h/cpp       # Fortification meshes
+├── CityLODManager.h/cpp          # LOD management
+└── CityMaterialSet.h/cpp         # Ward-based material assignment
 
-generated/city/
+generated/city/                    # City generator output
 ├── city_metadata.json
 ├── city_buildings.geojson
 ├── city_streets.geojson
 ├── city_walls.geojson
 ├── city_water.geojson
 └── city_wards.geojson
+
+generated/city_tiles/              # VT tile output
+├── tile_manifest.json            # Tile index
+├── mip0/                         # Full resolution tiles
+│   ├── tile_x_y.png
+│   └── ...
+├── mip1/                         # Half resolution
+├── mip2/                         # Quarter resolution
+└── ...
 ```
