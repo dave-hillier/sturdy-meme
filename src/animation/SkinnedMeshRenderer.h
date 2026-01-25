@@ -18,6 +18,7 @@
 #include "PerFrameBuffer.h"
 
 class AnimatedCharacter;
+class VulkanContext;
 
 // Skinned mesh renderer - handles GPU skinning pipeline and bone matrices
 class SkinnedMeshRenderer {
@@ -73,6 +74,12 @@ public:
      * Returns nullptr on failure.
      */
     static std::unique_ptr<SkinnedMeshRenderer> create(const InitInfo& info);
+    static std::unique_ptr<SkinnedMeshRenderer> createWithDependencies(
+        VulkanContext& vulkanContext,
+        DescriptorManager::Pool* descriptorPool,
+        VkRenderPass hdrRenderPass,
+        uint32_t framesInFlight,
+        const std::string& resourcePath);
 
 
     ~SkinnedMeshRenderer();
