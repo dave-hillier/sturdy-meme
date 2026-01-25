@@ -1,10 +1,12 @@
 #pragma once
 
 #include "NPC.h"
+#include "NPCRenderData.h"
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <memory>
 #include <functional>
+#include <mutex>
 
 class PhysicsWorld;
 class AnimatedCharacter;
@@ -14,6 +16,7 @@ class SkinnedMeshRenderer;
 using NPCEventCallback = std::function<void(NPCID npcId, const std::string& event)>;
 
 // Manager class for all NPCs in the scene
+// Designed for future multi-threading: simulation can run independently of rendering
 class NPCManager {
 public:
     NPCManager() = default;
@@ -25,13 +28,17 @@ public:
     NPCManager(NPCManager&&) = default;
     NPCManager& operator=(NPCManager&&) = default;
 
+    // =========================================================================
+    // Simulation Interface (can run on separate thread)
+    // =========================================================================
+
     // Spawn a new NPC and return its ID
     NPCID spawn(const NPCSpawnInfo& info);
 
     // Remove an NPC
     void remove(NPCID id);
 
-    // Update all NPCs (call each frame)
+    // Update all NPCs (call each frame from simulation thread)
     void update(float deltaTime, const glm::vec3& playerPosition, PhysicsWorld* physics);
 
     // Get NPC by ID (returns nullptr if not found)
@@ -69,17 +76,33 @@ public:
     // Debug: Get summary string
     std::string getDebugSummary() const;
 
-    // Animation/Rendering support
+    // =========================================================================
+    // Render Interface (call from render thread)
+    // =========================================================================
+
     // Set the shared character reference (uses player's AnimatedCharacter for mesh/skeleton)
     void setSharedCharacter(AnimatedCharacter* character) { sharedCharacter_ = character; }
     AnimatedCharacter* getSharedCharacter() const { return sharedCharacter_; }
+
+    // Generate render data for all visible NPCs
+    // This creates a snapshot that can be safely used by the render thread
+    void generateRenderData(NPCRenderData& outData, const NPCRenderConfig& config = {}) const;
 
     // Update animation and compute bone matrices for all NPCs
     // Call this after behavior update, before rendering
     void updateAnimations(float deltaTime, SkinnedMeshRenderer& renderer, uint32_t frameIndex);
 
     // Render all NPCs using the skinned mesh renderer
+    // Uses internal render data - for simpler single-threaded usage
     void render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRenderer& renderer);
+
+    // Render using pre-generated render data - for multi-threaded usage
+    void renderWithData(VkCommandBuffer cmd, uint32_t frameIndex,
+                        SkinnedMeshRenderer& renderer, const NPCRenderData& data);
+
+    // =========================================================================
+    // Configuration
+    // =========================================================================
 
     // LOD system configuration
     void setLODConfig(const NPCLODConfig& config) { lodConfig_ = config; }
@@ -116,6 +139,9 @@ private:
     std::vector<SystemicEvent> activeEvents_;
     float eventSpawnTimer_ = 0.0f;
     static constexpr float EVENT_CHECK_INTERVAL = 5.0f;  // Check for new events every 5s
+
+    // Render config
+    NPCRenderConfig renderConfig_;
 
     // Find NPC index by ID (returns -1 if not found)
     int findNPCIndex(NPCID id) const;

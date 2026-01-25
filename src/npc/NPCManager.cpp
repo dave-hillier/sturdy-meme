@@ -40,8 +40,9 @@ NPCID NPCManager::spawn(const NPCSpawnInfo& info) {
     npc.needs.hunger = 0.3f;
     npc.needs.tiredness = 0.2f;
 
-    // Start in virtual state (will be promoted based on distance)
-    npc.lodData.state = NPCLODState::Virtual;
+    // Start in Real state - updateLODStates will demote to Bulk/Virtual if far from player
+    // This ensures newly spawned NPCs are immediately visible
+    npc.lodData.state = NPCLODState::Real;
 
     // Create behavior tree based on hostility type
     npc.behaviorTree = NPCBehaviorTrees::CreateBehaviorTree(info.hostility);
@@ -378,7 +379,11 @@ void NPCManager::computeNPCBoneMatrices(NPC& npc, std::vector<glm::mat4>& outBon
 
 void NPCManager::render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRenderer& renderer) {
     if (!sharedCharacter_) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "NPCManager::render - no sharedCharacter_!");
+        static bool loggedOnce = false;
+        if (!loggedOnce) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "NPCManager::render - No shared character set");
+            loggedOnce = true;
+        }
         return;  // No shared character, can't render
     }
 
@@ -399,7 +404,6 @@ void NPCManager::render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRen
         }
 
         // Build model matrix for NPC
-        // Scale down slightly and offset Y for proper ground placement
         glm::mat4 modelMatrix = npc.transform.toMatrix();
 
         // Apply same scale as player (0.01 for Mixamo characters)
@@ -417,8 +421,65 @@ void NPCManager::render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRen
     static uint32_t frameCounter = 0;
     if (++frameCounter >= 60) {
         frameCounter = 0;
-        SDL_Log("NPCManager::render - rendered %u NPCs (V=%zu B=%zu R=%zu)",
-                renderedCount, getVirtualCount(), getBulkCount(), getRealCount());
+        SDL_Log("NPCManager::render - rendered %u/%zu NPCs (V=%zu B=%zu R=%zu)",
+                renderedCount, npcs_.size(), getVirtualCount(), getBulkCount(), getRealCount());
+    }
+}
+
+void NPCManager::generateRenderData(NPCRenderData& outData, const NPCRenderConfig& config) const {
+    outData.clear();
+    outData.reserve(npcs_.size());
+
+    outData.totalCount = static_cast<uint32_t>(npcs_.size());
+
+    for (const auto& npc : npcs_) {
+        if (!npc.isAlive()) {
+            continue;
+        }
+
+        // Count LOD states
+        if (npc.isVirtual()) outData.virtualCount++;
+        else if (npc.isBulk()) outData.bulkCount++;
+        else outData.realCount++;
+
+        // Skip non-visible NPCs unless debug mode forces visibility
+        bool shouldRender = npc.isVisible() || config.debugForceVisible;
+        if (!shouldRender) {
+            continue;
+        }
+
+        // Skip NPCs without assigned bone slots
+        if (npc.boneSlot == 0) {
+            continue;
+        }
+
+        NPCRenderInstance instance;
+        instance.visible = true;
+        instance.boneSlot = npc.boneSlot;
+        instance.tintColor = npc.getTintColor();
+
+        // Build model matrix with scale
+        instance.modelMatrix = npc.transform.toMatrix();
+        instance.modelMatrix = instance.modelMatrix * glm::scale(glm::mat4(1.0f), glm::vec3(config.characterScale));
+
+        outData.instances.push_back(instance);
+        outData.visibleCount++;
+    }
+}
+
+void NPCManager::renderWithData(VkCommandBuffer cmd, uint32_t frameIndex,
+                                 SkinnedMeshRenderer& renderer, const NPCRenderData& data) {
+    if (!sharedCharacter_) {
+        return;  // No shared character, can't render
+    }
+
+    for (const auto& instance : data.instances) {
+        if (!instance.visible) {
+            continue;
+        }
+
+        renderer.recordNPC(cmd, frameIndex, instance.boneSlot,
+                          instance.modelMatrix, instance.tintColor, *sharedCharacter_);
     }
 }
 
