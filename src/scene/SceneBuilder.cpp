@@ -23,6 +23,11 @@ bool SceneBuilder::initInternal(const InitInfo& info) {
     storedDevice = info.device;
     sceneOrigin = info.sceneOrigin;
 
+    // Calculate well entrance position immediately (needed for terrain hole creation)
+    // This must be available even if renderables are deferred
+    wellEntranceX = 20.0f + sceneOrigin.x;
+    wellEntranceZ = 20.0f + sceneOrigin.y;
+
     if (!info.assetRegistry) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SceneBuilder: AssetRegistry is required");
         return false;
@@ -719,9 +724,7 @@ void SceneBuilder::createRenderables() {
 
     // Well entrance - demonstrates terrain hole mask system
     // A stone-like frame floating above the terrain hole
-    auto [wellX, wellZ] = worldPos(20.0f, 20.0f);
-    wellEntranceX = wellX;
-    wellEntranceZ = wellZ;
+    // wellEntranceX/Z are pre-calculated in initInternal() for terrain hole creation
     float wellY = getTerrainHeight(wellEntranceX, wellEntranceZ);
     // Frame floats 3m above terrain so hole is visible
     glm::mat4 wellTransform = glm::translate(glm::mat4(1.0f),
