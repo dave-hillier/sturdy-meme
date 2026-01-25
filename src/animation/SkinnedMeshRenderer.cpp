@@ -3,6 +3,8 @@
 #include "AnimatedCharacter.h"
 #include "Bindings.h"
 #include "UBOs.h"
+#include "DescriptorInfrastructure.h"
+#include "VulkanContext.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "debug/QueueSubmitDiagnostics.h"
 
@@ -15,6 +17,32 @@ std::unique_ptr<SkinnedMeshRenderer> SkinnedMeshRenderer::create(const InitInfo&
         return nullptr;
     }
     return system;
+}
+
+std::unique_ptr<SkinnedMeshRenderer> SkinnedMeshRenderer::createWithDependencies(
+    VulkanContext& vulkanContext,
+    DescriptorManager::Pool* descriptorPool,
+    VkRenderPass hdrRenderPass,
+    uint32_t framesInFlight,
+    const std::string& resourcePath) {
+    SkinnedMeshRenderer::InitInfo info{};
+    info.device = vulkanContext.getVkDevice();
+    info.raiiDevice = &vulkanContext.getRaiiDevice();
+    info.allocator = vulkanContext.getAllocator();
+    info.descriptorPool = descriptorPool;
+    info.renderPass = hdrRenderPass;
+    info.extent = vulkanContext.getVkSwapchainExtent();
+    info.shaderPath = resourcePath + "/shaders";
+    info.framesInFlight = framesInFlight;
+    info.addCommonBindings = [](DescriptorManager::LayoutBuilder& builder) {
+        DescriptorInfrastructure::addCommonDescriptorBindings(builder);
+    };
+
+    auto skinnedMeshRenderer = SkinnedMeshRenderer::create(info);
+    if (!skinnedMeshRenderer) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SkinnedMeshRenderer");
+    }
+    return skinnedMeshRenderer;
 }
 
 SkinnedMeshRenderer::~SkinnedMeshRenderer() {

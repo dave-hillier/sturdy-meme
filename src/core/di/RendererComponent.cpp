@@ -3,7 +3,6 @@
 #include <SDL3/SDL_log.h>
 
 #include "DebugLineSystem.h"
-#include "DescriptorInfrastructure.h"
 #include "GlobalBufferManager.h"
 #include "HiZSystem.h"
 #include "Profiler.h"
@@ -39,25 +38,12 @@ std::unique_ptr<SkinnedMeshRenderer> provideSkinnedMeshRenderer(
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMeshRenderer requires a valid PostProcessSystem");
         return nullptr;
     }
-
-    SkinnedMeshRenderer::InitInfo info{};
-    info.device = vulkanContext.getVkDevice();
-    info.raiiDevice = &vulkanContext.getRaiiDevice();
-    info.allocator = vulkanContext.getAllocator();
-    info.descriptorPool = descriptorPool;
-    info.renderPass = postProcessBundle->postProcess->getHDRRenderPass();
-    info.extent = vulkanContext.getVkSwapchainExtent();
-    info.shaderPath = resourcePath + "/shaders";
-    info.framesInFlight = framesInFlight;
-    info.addCommonBindings = [](DescriptorManager::LayoutBuilder& builder) {
-        DescriptorInfrastructure::addCommonDescriptorBindings(builder);
-    };
-
-    auto skinnedMeshRenderer = SkinnedMeshRenderer::create(info);
-    if (!skinnedMeshRenderer) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SkinnedMeshRenderer");
-    }
-    return skinnedMeshRenderer;
+    return SkinnedMeshRenderer::createWithDependencies(
+        vulkanContext,
+        descriptorPool,
+        postProcessBundle->postProcess->getHDRRenderPass(),
+        framesInFlight,
+        resourcePath);
 }
 
 std::unique_ptr<GlobalBufferManager> provideGlobalBufferManager(
