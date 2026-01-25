@@ -59,6 +59,9 @@
 #include "WaterSystem.h"
 #include "WaterTileCull.h"
 #include "WaterGBuffer.h"
+#include "WaterDisplacement.h"
+#include "FlowMapGenerator.h"
+#include "FoamBuffer.h"
 #include "SSRSystem.h"
 // Post-processing
 #include "BilateralGridSystem.h"
