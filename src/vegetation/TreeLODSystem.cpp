@@ -480,7 +480,7 @@ bool TreeLODSystem::createInstanceBuffer(size_t maxInstances) {
 
     auto bufferInfo = vk::BufferCreateInfo{}
         .setSize(instanceBufferSize_)
-        .setUsage(vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
@@ -632,16 +632,9 @@ void TreeLODSystem::bindShadowPipeline(vk::CommandBuffer& cmd, uint32_t frameInd
 }
 
 void TreeLODSystem::bindBillboardBuffers(vk::CommandBuffer& cmd, VkBuffer instanceBuf) {
+    (void)instanceBuf;  // Instance data comes from SSBO via descriptor set, not vertex buffers
     vk::DeviceSize offset = 0;
-    if (instanceBuf != VK_NULL_HANDLE) {
-        // GPU-culled path: only bind vertex buffer (instances come from SSBO)
-        cmd.bindVertexBuffers(0, vk::Buffer(billboardVertexBuffer_), offset);
-    } else {
-        // CPU path: bind both vertex and instance buffers
-        vk::Buffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer_};
-        vk::DeviceSize offsets[] = {0, 0};
-        cmd.bindVertexBuffers(0, vertexBuffers, offsets);
-    }
+    cmd.bindVertexBuffers(0, vk::Buffer(billboardVertexBuffer_), offset);
     cmd.bindIndexBuffer(billboardIndexBuffer_, 0, vk::IndexType::eUint32);
 }
 
