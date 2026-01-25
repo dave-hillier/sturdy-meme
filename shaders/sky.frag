@@ -952,7 +952,11 @@ float lunarPhaseMask(vec3 dir, vec3 moonDir, vec3 sunDir, float discSize) {
         // Sun direction in moon's local space (right, up, toward-viewer)
         // At phase 0: sun is behind moon (away from viewer), so sunLocal.z = -1
         // At phase 0.5: sun is behind viewer, so sunLocal.z = +1
-        sunDirection = normalize(vec3(sin(phaseAngle), 0.0, -cos(phaseAngle)));
+        // Add a tilt angle (~23 degrees) to simulate ecliptic inclination for natural appearance
+        float tiltAngle = 0.4;  // ~23 degrees in radians
+        float sunY = sin(tiltAngle) * sin(phaseAngle);
+        float sunX = sin(phaseAngle) * cos(tiltAngle);
+        sunDirection = normalize(vec3(sunX, sunY, -cos(phaseAngle)));
         // Transform to world space for consistency (though we'll transform back below)
         sunDirection = right * sunDirection.x + tangentUp * sunDirection.y + moonCenter * sunDirection.z;
     } else {

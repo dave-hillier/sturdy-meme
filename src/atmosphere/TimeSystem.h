@@ -122,7 +122,7 @@ private:
 
     // Moon brightness controls
     float moonBrightness = 1.0f;       // Multiplier for moon light intensity (0-5)
-    float moonDiscIntensity = 20.0f;   // Visual disc intensity in sky (0-50)
+    float moonDiscIntensity = 12.0f;   // Visual disc intensity in sky (0-50)
     float moonEarthshine = 0.02f;      // Earthshine on dark side (0-0.2)
 
     // Eclipse simulation

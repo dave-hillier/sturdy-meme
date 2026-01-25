@@ -30,7 +30,7 @@ const float MOON_ALTITUDE_FULL = 0.17;       // ~10 degrees - full moon contribu
 // ============================================================================
 // Both sun and moon have approximately 0.5 degree angular diameter from Earth
 
-const float CELESTIAL_ANGULAR_RADIUS = 0.00935 / 2.0;  // ~0.27 degrees in radians
+const float CELESTIAL_ANGULAR_RADIUS = 0.0056 / 2.0;   // Reduced for smaller disc appearance
 const float CELESTIAL_DISC_SOFTNESS = 0.3;             // Smoothstep falloff factor
 
 // Derived disc size for celestialDisc function (produces visible disc)
@@ -41,7 +41,7 @@ const float MOON_DISC_SIZE = CELESTIAL_ANGULAR_RADIUS;
 
 // Phase mask radius - should match visible disc for consistent rendering
 // This is the angular distance used for phase calculations
-const float MOON_PHASE_RADIUS = 0.097;  // Angular radius for phase terminator calculation
+const float MOON_PHASE_RADIUS = 0.058;  // Angular radius for phase terminator calculation
 
 // ============================================================================
 // Julian Day Reference
