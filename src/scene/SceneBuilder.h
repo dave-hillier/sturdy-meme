@@ -20,6 +20,14 @@
 
 class AssetRegistry;
 
+// Non-player character data
+struct NPC {
+    glm::vec3 position{0.0f};
+    float yawDegrees = 0.0f;  // Facing direction in degrees
+    std::unique_ptr<AnimatedCharacter> character;
+    size_t renderableIndex = 0;  // Index in sceneObjects
+};
+
 // Holds all scene resources (meshes, textures) and provides scene objects
 class SceneBuilder {
 public:
@@ -137,6 +145,12 @@ public:
     const AnimatedCharacter& getAnimatedCharacter() const { return *animatedCharacter; }
     bool hasCharacter() const { return hasAnimatedCharacter; }
 
+    // NPC access
+    const std::vector<NPC>& getNPCs() const { return npcs; }
+    std::vector<NPC>& getNPCs() { return npcs; }
+    size_t getNPCCount() const { return npcs.size(); }
+    bool hasNPCs() const { return !npcs.empty(); }
+
     // Player weapons access
     bool hasWeapons() const { return rightHandBoneIndex >= 0 && leftHandBoneIndex >= 0; }
     size_t getSwordIndex() const { return swordIndex; }
@@ -154,6 +168,10 @@ public:
                                   VkCommandPool commandPool, VkQueue queue,
                                   float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false);
 
+    // Update all NPCs (call each frame) - updates animation states
+    void updateNPCs(float deltaTime, VmaAllocator allocator, VkDevice device,
+                    VkCommandPool commandPool, VkQueue queue);
+
     // Start a jump with trajectory prediction
     void startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const class PhysicsWorld* physics);
 
@@ -165,6 +183,7 @@ private:
     bool loadTextures(const InitInfo& info);
     void registerMaterials();
     void createRenderables();
+    void createNPCs(const InitInfo& info);  // Create NPC characters
 
     // Get terrain height at (x, z), returns 0 if no terrain function available
     float getTerrainHeight(float x, float z) const;
@@ -198,6 +217,9 @@ private:
     // Animated character (RAII-managed via unique_ptr - mesh uploaded once, bone matrices updated by Renderer)
     std::unique_ptr<AnimatedCharacter> animatedCharacter;
     bool hasAnimatedCharacter = false;  // True if animated character was loaded successfully
+
+    // NPCs (non-player characters with their own AnimatedCharacter instances)
+    std::vector<NPC> npcs;
 
     // Player cape (cloth simulation attached to character)
     PlayerCape playerCape;

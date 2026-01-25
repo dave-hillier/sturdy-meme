@@ -132,6 +132,9 @@ void SceneBuilder::cleanup() {
     // RAII-managed animated character
     animatedCharacter.reset();
 
+    // RAII-managed NPCs
+    npcs.clear();
+
     sceneObjects.clear();
 }
 
@@ -275,7 +278,68 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
         SDL_Log("SceneBuilder: Failed to load FBX character, using capsule fallback");
     }
 
+    // Create NPCs after main character is loaded
+    createNPCs(info);
+
     return true;
+}
+
+void SceneBuilder::createNPCs(const InitInfo& info) {
+    // Only create NPCs if the main character loaded successfully
+    if (!hasAnimatedCharacter) {
+        SDL_Log("SceneBuilder: Skipping NPC creation (no character model available)");
+        return;
+    }
+
+    // NPC spawn positions relative to scene origin
+    struct NPCSpawnInfo {
+        float x, z;        // Position offset from origin
+        float yawDegrees;  // Facing direction
+    };
+
+    const std::vector<NPCSpawnInfo> spawnPoints = {
+        {  5.0f,  5.0f,  45.0f },   // NPC 1: Near northeast
+        { -4.0f,  3.0f, 180.0f },   // NPC 2: West side, facing south
+        {  3.0f, -4.0f, -90.0f },   // NPC 3: South side, facing west
+    };
+
+    std::string characterPath = info.resourcePath + "/assets/characters/fbx/Y Bot.fbx";
+    std::vector<std::string> additionalAnimations = {
+        info.resourcePath + "/assets/characters/fbx/ss_idle.fbx",
+        info.resourcePath + "/assets/characters/fbx/ss_walk.fbx",
+        info.resourcePath + "/assets/characters/fbx/ss_run.fbx",
+        info.resourcePath + "/assets/characters/fbx/ss_jump.fbx"
+    };
+
+    for (const auto& spawn : spawnPoints) {
+        AnimatedCharacter::InitInfo charInfo{};
+        charInfo.path = characterPath;
+        charInfo.allocator = info.allocator;
+        charInfo.device = info.device;
+        charInfo.commandPool = info.commandPool;
+        charInfo.queue = info.graphicsQueue;
+
+        auto npcCharacter = AnimatedCharacter::create(charInfo);
+        if (!npcCharacter) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "SceneBuilder: Failed to create NPC character");
+            continue;
+        }
+
+        // Load animations
+        npcCharacter->loadAdditionalAnimations(additionalAnimations);
+
+        // Create NPC and add to list
+        NPC npc;
+        npc.position = glm::vec3(spawn.x + sceneOrigin.x, 0.0f, spawn.z + sceneOrigin.y);
+        npc.yawDegrees = spawn.yawDegrees;
+        npc.character = std::move(npcCharacter);
+        npcs.push_back(std::move(npc));
+
+        SDL_Log("SceneBuilder: Created NPC at (%.1f, %.1f) facing %.0f degrees",
+                spawn.x, spawn.z, spawn.yawDegrees);
+    }
+
+    SDL_Log("SceneBuilder: Created %zu NPCs", npcs.size());
 }
 
 bool SceneBuilder::loadTextures(const InitInfo& info) {
@@ -567,6 +631,32 @@ void SceneBuilder::createRenderables() {
             .build());
     }
 
+    // NPC characters - rendered with GPU skinning like the player
+    for (auto& npc : npcs) {
+        if (!npc.character) continue;
+
+        // Get terrain height at NPC position
+        float npcTerrainY = getTerrainHeight(npc.position.x, npc.position.z);
+        npc.position.y = npcTerrainY;  // Update stored position with terrain height
+
+        // Same material settings as player
+        float charRoughness = 0.5f;
+        float charMetallic = 0.0f;
+
+        npc.renderableIndex = sceneObjects.size();
+        sceneObjects.push_back(RenderableBuilder()
+            .withTransform(buildCharacterTransform(npc.position, glm::radians(npc.yawDegrees)))
+            .withMesh(&npc.character->getMesh())
+            .withTexture(whiteTex)
+            .withMaterialId(whiteMaterialId)
+            .withRoughness(charRoughness)
+            .withMetallic(charMetallic)
+            .withCastsShadow(true)
+            .build());
+
+        SDL_Log("SceneBuilder: Added NPC renderable at index %zu", npc.renderableIndex);
+    }
+
     // Player weapons - attached to hand bones, transforms updated each frame
     if (hasAnimatedCharacter && rightHandBoneIndex >= 0) {
         swordIndex = sceneObjects.size();
@@ -818,6 +908,29 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
 void SceneBuilder::startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const PhysicsWorld* physics) {
     if (!hasAnimatedCharacter) return;
     animatedCharacter->startJump(startPos, velocity, gravity, physics);
+}
+
+void SceneBuilder::updateNPCs(float deltaTime, VmaAllocator allocator, VkDevice device,
+                               VkCommandPool commandPool, VkQueue queue) {
+    for (auto& npc : npcs) {
+        if (!npc.character) continue;
+
+        // Build world transform for this NPC
+        glm::mat4 worldTransform = buildCharacterTransform(npc.position, glm::radians(npc.yawDegrees));
+
+        // Update animation (idle state - movementSpeed = 0, grounded, not jumping)
+        npc.character->update(deltaTime, allocator, device, commandPool, queue,
+                              0.0f,  // movementSpeed
+                              true,  // isGrounded
+                              false, // isJumping
+                              worldTransform);
+
+        // Update the renderable transform
+        if (npc.renderableIndex < sceneObjects.size()) {
+            sceneObjects[npc.renderableIndex].transform = worldTransform;
+            sceneObjects[npc.renderableIndex].mesh = &npc.character->getMesh();
+        }
+    }
 }
 
 void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
