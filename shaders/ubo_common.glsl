@@ -59,7 +59,7 @@ layout(set = 0, binding = UBO_BINDING) uniform UniformBufferObject {
     float moonBrightness;          // Multiplier for moon light intensity (0-5, default 1.0)
     float moonDiscIntensity;       // Visual disc intensity in sky (0-50, default 20)
     float moonEarthshine;          // Earthshine on dark side (0-0.2, default 0.02)
-    float moonPad;                 // Padding for alignment
+    float moonPhaseOverride;       // 1.0 = use stored phase from moonColor.a, 0.0 = calculate from geometry
 
     // Sky rendering parameters (from UI controls) - used by sky.frag
     float skyExposure;             // Sky brightness multiplier (1-20, default 5.0)
