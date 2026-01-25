@@ -158,7 +158,7 @@ UniformBufferObject UBOBuilder::buildUniformBufferData(
     ubo.moonDiscIntensity = systems_.timeSystem->getMoonDiscIntensity();
     ubo.moonEarthshine = systems_.timeSystem->getMoonEarthshine();
     // Pass phase override flag to shader (1.0 = use stored phase, 0.0 = calculate from geometry)
-    ubo.moonPad = systems_.timeSystem->isMoonPhaseOverrideEnabled() ? 1.0f : 0.0f;
+    ubo.moonPhaseOverride = systems_.timeSystem->isMoonPhaseOverrideEnabled() ? 1.0f : 0.0f;
 
     // Sky rendering parameters for sky.frag
     ubo.skyExposure = config.skyExposure;
