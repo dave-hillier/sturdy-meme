@@ -6,6 +6,7 @@
 #include <string>
 #include <optional>
 #include <memory>
+#include "VmaImageHandle.h"
 
 // Terrain textures - albedo and grass far LOD textures
 class TerrainTextures {
@@ -36,11 +37,11 @@ public:
     TerrainTextures& operator=(const TerrainTextures&) = delete;
 
     // Terrain albedo texture
-    VkImageView getAlbedoView() const { return albedoView; }
+    VkImageView getAlbedoView() const { return albedoImage_.getView(); }
     VkSampler getAlbedoSampler() const { return albedoSampler_ ? **albedoSampler_ : VK_NULL_HANDLE; }
 
     // Grass far LOD texture (for terrain blending at distance)
-    VkImageView getGrassFarLODView() const { return grassFarLODView; }
+    VkImageView getGrassFarLODView() const { return grassFarLODImage_.getView(); }
     VkSampler getGrassFarLODSampler() const { return grassFarLODSampler_ ? **grassFarLODSampler_ : VK_NULL_HANDLE; }
 
 private:
@@ -60,16 +61,12 @@ private:
     std::string resourcePath;
 
     // Terrain albedo texture
-    VkImage albedoImage = VK_NULL_HANDLE;
-    VmaAllocation albedoAllocation = VK_NULL_HANDLE;
-    VkImageView albedoView = VK_NULL_HANDLE;
+    VmaImageHandle albedoImage_{};
     std::optional<vk::raii::Sampler> albedoSampler_;
     uint32_t albedoMipLevels = 1;
 
     // Grass far LOD texture
-    VkImage grassFarLODImage = VK_NULL_HANDLE;
-    VmaAllocation grassFarLODAllocation = VK_NULL_HANDLE;
-    VkImageView grassFarLODView = VK_NULL_HANDLE;
+    VmaImageHandle grassFarLODImage_{};
     std::optional<vk::raii::Sampler> grassFarLODSampler_;
     uint32_t grassFarLODMipLevels = 1;
 };

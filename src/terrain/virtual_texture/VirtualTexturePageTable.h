@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include "VmaBuffer.h"
+#include "VmaImageHandle.h"
 
 namespace VirtualTexture {
 
@@ -100,9 +101,7 @@ private:
     const vk::raii::Device* raiiDevice_ = nullptr;
 
     // One image per mip level
-    std::vector<VkImage> pageTableImages;
-    std::vector<VmaAllocation> pageTableAllocations;
-    std::vector<VkImageView> pageTableViews;
+    std::vector<VmaImageHandle> pageTableImages_;
 
     // Combined image view (texture array)
     VkImageView combinedImageView = VK_NULL_HANDLE;

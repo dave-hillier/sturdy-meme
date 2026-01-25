@@ -9,6 +9,7 @@
 #include <optional>
 #include <memory>
 #include "VmaBuffer.h"
+#include "VmaImageHandle.h"
 
 namespace VirtualTexture {
 
@@ -85,7 +86,7 @@ public:
     uint32_t getStagingBufferCount() const { return static_cast<uint32_t>(stagingBuffers_.size()); }
 
     // Get the cache texture image view
-    VkImageView getCacheImageView() const { return cacheImageView; }
+    VkImageView getCacheImageView() const { return cacheImage_.getView(); }
 
     // Get the sampler for the cache texture
     VkSampler getCacheSampler() const { return cacheSampler_ ? **cacheSampler_ : VK_NULL_HANDLE; }
@@ -126,9 +127,7 @@ private:
     const vk::raii::Device* raiiDevice_ = nullptr;
 
     // Physical cache texture
-    VkImage cacheImage = VK_NULL_HANDLE;
-    VmaAllocation cacheAllocation = VK_NULL_HANDLE;
-    VkImageView cacheImageView = VK_NULL_HANDLE;
+    VmaImageHandle cacheImage_{};
     std::optional<vk::raii::Sampler> cacheSampler_;
 
     // Per-frame staging buffers to avoid race conditions with in-flight frames

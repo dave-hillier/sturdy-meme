@@ -1,6 +1,7 @@
 #include "VirtualTextureCache.h"
 #include "VmaBufferFactory.h"
 #include "SamplerFactory.h"
+#include "VmaImageHandle.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_log.h>
 #include <algorithm>
@@ -31,19 +32,7 @@ VirtualTextureCache::~VirtualTextureCache() {
 
     cacheSampler_.reset();
 
-    if (device_) {
-        vk::Device vkDevice(device_);
-        if (cacheImageView != VK_NULL_HANDLE) {
-            vkDevice.destroyImageView(cacheImageView);
-            cacheImageView = VK_NULL_HANDLE;
-        }
-    }
-
-    if (cacheImage != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator_, cacheImage, cacheAllocation);
-        cacheImage = VK_NULL_HANDLE;
-        cacheAllocation = VK_NULL_HANDLE;
-    }
+    cacheImage_.reset();
 
     slots.clear();
     tileToSlot.clear();
@@ -55,9 +44,7 @@ VirtualTextureCache::VirtualTextureCache(VirtualTextureCache&& other) noexcept
     , config(other.config)
     , useCompression_(other.useCompression_)
     , raiiDevice_(other.raiiDevice_)
-    , cacheImage(other.cacheImage)
-    , cacheAllocation(other.cacheAllocation)
-    , cacheImageView(other.cacheImageView)
+    , cacheImage_(std::move(other.cacheImage_))
     , cacheSampler_(std::move(other.cacheSampler_))
     , stagingBuffers_(std::move(other.stagingBuffers_))
     , stagingMapped_(std::move(other.stagingMapped_))
@@ -67,8 +54,7 @@ VirtualTextureCache::VirtualTextureCache(VirtualTextureCache&& other) noexcept
 {
     other.device_ = VK_NULL_HANDLE;
     other.allocator_ = VK_NULL_HANDLE;
-    other.cacheImage = VK_NULL_HANDLE;
-    other.cacheImageView = VK_NULL_HANDLE;
+    other.cacheImage_ = {};
 }
 
 VirtualTextureCache& VirtualTextureCache::operator=(VirtualTextureCache&& other) noexcept {
@@ -81,15 +67,7 @@ VirtualTextureCache& VirtualTextureCache::operator=(VirtualTextureCache&& other)
             stagingBuffers_[i].reset();
         }
         cacheSampler_.reset();
-        if (device_) {
-            vk::Device vkDevice(device_);
-            if (cacheImageView != VK_NULL_HANDLE) {
-                vkDevice.destroyImageView(cacheImageView);
-            }
-        }
-        if (cacheImage != VK_NULL_HANDLE) {
-            vmaDestroyImage(allocator_, cacheImage, cacheAllocation);
-        }
+        cacheImage_.reset();
 
         // Move from other
         device_ = other.device_;
@@ -97,9 +75,7 @@ VirtualTextureCache& VirtualTextureCache::operator=(VirtualTextureCache&& other)
         config = other.config;
         useCompression_ = other.useCompression_;
         raiiDevice_ = other.raiiDevice_;
-        cacheImage = other.cacheImage;
-        cacheAllocation = other.cacheAllocation;
-        cacheImageView = other.cacheImageView;
+        cacheImage_ = std::move(other.cacheImage_);
         cacheSampler_ = std::move(other.cacheSampler_);
         stagingBuffers_ = std::move(other.stagingBuffers_);
         stagingMapped_ = std::move(other.stagingMapped_);
@@ -109,8 +85,7 @@ VirtualTextureCache& VirtualTextureCache::operator=(VirtualTextureCache&& other)
 
         other.device_ = VK_NULL_HANDLE;
         other.allocator_ = VK_NULL_HANDLE;
-        other.cacheImage = VK_NULL_HANDLE;
-        other.cacheImageView = VK_NULL_HANDLE;
+        other.cacheImage_ = {};
     }
     return *this;
 }
@@ -184,49 +159,18 @@ bool VirtualTextureCache::initInternal(const InitInfo& info) {
 
 bool VirtualTextureCache::createCacheTexture(VkDevice device, VmaAllocator allocator,
                                               VkCommandPool commandPool, VkQueue queue) {
-    VkFormat cacheFormat = useCompression_ ? VK_FORMAT_BC1_RGB_SRGB_BLOCK : VK_FORMAT_R8G8B8A8_SRGB;
+    vk::Format cacheFormat = useCompression_ ? vk::Format::eBc1RgbSrgbBlock : vk::Format::eR8G8B8A8Srgb;
+    VmaImageSpec spec{};
+    spec = spec.withFormat(cacheFormat)
+        .withExtent(vk::Extent3D{config.cacheSizePixels, config.cacheSizePixels, 1})
+        .withMipLevels(1)
+        .withUsage(vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled)
+        .withView(vk::ImageViewType::e2D, vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)
+        .withRequiredFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = cacheFormat;
-    imageInfo.extent.width = config.cacheSizePixels;
-    imageInfo.extent.height = config.cacheSizePixels;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-    if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &cacheImage,
-                       &cacheAllocation, nullptr) != VK_SUCCESS) {
-        return false;
-    }
-
-    // Create image view using vulkan-hpp
-    auto viewInfo = vk::ImageViewCreateInfo{}
-        .setImage(cacheImage)
-        .setViewType(vk::ImageViewType::e2D)
-        .setFormat(static_cast<vk::Format>(cacheFormat))
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(1)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
-
-    vk::Device vkDevice(device);
-    try {
-        cacheImageView = static_cast<VkImageView>(vkDevice.createImageView(viewInfo));
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create VT cache image view: %s", e.what());
+    cacheImage_ = spec.build(allocator, device);
+    if (!cacheImage_.isValid()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create VT cache image");
         return false;
     }
 
@@ -253,7 +197,7 @@ bool VirtualTextureCache::createCacheTexture(VkDevice device, VmaAllocator alloc
         .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
         .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
         .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-        .setImage(cacheImage)
+        .setImage(cacheImage_.getImage())
         .setSubresourceRange(vk::ImageSubresourceRange{}
             .setAspectMask(vk::ImageAspectFlagBits::eColor)
             .setBaseMipLevel(0)
@@ -423,7 +367,7 @@ void VirtualTextureCache::recordTileUpload(TileId id, const void* pixelData,
             .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
             .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
             .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(cacheImage)
+            .setImage(cacheImage_.getImage())
             .setSubresourceRange(vk::ImageSubresourceRange{}
                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
                 .setBaseMipLevel(0)
@@ -449,7 +393,7 @@ void VirtualTextureCache::recordTileUpload(TileId id, const void* pixelData,
             .setImageOffset({static_cast<int32_t>(slotX * config.tileSizePixels),
                             static_cast<int32_t>(slotY * config.tileSizePixels), 0})
             .setImageExtent({width, height, 1});
-        vkCmd.copyBufferToImage(stagingBuffers_[bufferIndex].get(), cacheImage,
+        vkCmd.copyBufferToImage(stagingBuffers_[bufferIndex].get(), cacheImage_.getImage(),
                                 vk::ImageLayout::eTransferDstOptimal, region);
     }
 
@@ -462,7 +406,7 @@ void VirtualTextureCache::recordTileUpload(TileId id, const void* pixelData,
             .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
             .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
             .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(cacheImage)
+            .setImage(cacheImage_.getImage())
             .setSubresourceRange(vk::ImageSubresourceRange{}
                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
                 .setBaseMipLevel(0)

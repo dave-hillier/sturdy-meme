@@ -2,6 +2,7 @@
 #include "CommandBufferUtils.h"
 #include "VmaBufferFactory.h"
 #include "SamplerFactory.h"
+#include "VmaImageHandle.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL_log.h>
 #include <cstring>
@@ -114,20 +115,7 @@ void VirtualTexturePageTable::cleanup() {
         combinedImageView = VK_NULL_HANDLE;
     }
 
-    for (auto view : pageTableViews) {
-        if (view != VK_NULL_HANDLE) {
-            vkDevice.destroyImageView(view);
-        }
-    }
-    pageTableViews.clear();
-
-    for (size_t i = 0; i < pageTableImages.size(); ++i) {
-        if (pageTableImages[i] != VK_NULL_HANDLE) {
-            vmaDestroyImage(allocator, pageTableImages[i], pageTableAllocations[i]);
-        }
-    }
-    pageTableImages.clear();
-    pageTableAllocations.clear();
+    pageTableImages_.clear();
 
     cpuData.clear();
     mipOffsets.clear();
@@ -137,55 +125,22 @@ void VirtualTexturePageTable::cleanup() {
 
 bool VirtualTexturePageTable::createPageTableTextures(VkDevice device, VmaAllocator allocator,
                                                        VkCommandPool commandPool, VkQueue queue) {
-    pageTableImages.resize(config.maxMipLevels);
-    pageTableAllocations.resize(config.maxMipLevels);
-    pageTableViews.resize(config.maxMipLevels);
+    pageTableImages_.resize(config.maxMipLevels);
 
     for (uint32_t mip = 0; mip < config.maxMipLevels; ++mip) {
         uint32_t tilesAtMip = config.getTilesAtMip(mip);
 
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = VK_FORMAT_R8G8B8A8_UINT;  // RGBA8 for page table
-        imageInfo.extent.width = tilesAtMip;
-        imageInfo.extent.height = tilesAtMip;
-        imageInfo.extent.depth = 1;
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VmaImageSpec spec{};
+        spec = spec.withFormat(vk::Format::eR8G8B8A8Uint)
+            .withExtent(vk::Extent3D{tilesAtMip, tilesAtMip, 1})
+            .withMipLevels(1)
+            .withUsage(vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled)
+            .withView(vk::ImageViewType::e2D, vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1)
+            .withRequiredFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-        allocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-        if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &pageTableImages[mip],
-                           &pageTableAllocations[mip], nullptr) != VK_SUCCESS) {
+        pageTableImages_[mip] = spec.build(allocator, device);
+        if (!pageTableImages_[mip].isValid()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create page table image for mip %u", mip);
-            return false;
-        }
-
-        // Create image view using vulkan-hpp
-        auto viewInfo = vk::ImageViewCreateInfo{}
-            .setImage(pageTableImages[mip])
-            .setViewType(vk::ImageViewType::e2D)
-            .setFormat(vk::Format::eR8G8B8A8Uint)
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1));
-
-        vk::Device vkDevice(device);
-        try {
-            pageTableViews[mip] = static_cast<VkImageView>(vkDevice.createImageView(viewInfo));
-        } catch (const vk::SystemError& e) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create page table view for mip %u: %s", mip, e.what());
             return false;
         }
     }
@@ -207,7 +162,7 @@ bool VirtualTexturePageTable::createPageTableTextures(VkDevice device, VmaAlloca
                 .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
                 .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
                 .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .setImage(pageTableImages[mip])
+                .setImage(pageTableImages_[mip].getImage())
                 .setSubresourceRange(vk::ImageSubresourceRange{}
                     .setAspectMask(vk::ImageAspectFlagBits::eColor)
                     .setBaseMipLevel(0)
@@ -281,8 +236,8 @@ PageTableEntry VirtualTexturePageTable::getEntry(TileId id) const {
 }
 
 VkImageView VirtualTexturePageTable::getImageView(uint32_t mipLevel) const {
-    if (mipLevel >= pageTableViews.size()) return VK_NULL_HANDLE;
-    return pageTableViews[mipLevel];
+    if (mipLevel >= pageTableImages_.size()) return VK_NULL_HANDLE;
+    return pageTableImages_[mipLevel].getView();
 }
 
 void VirtualTexturePageTable::recordUpload(VkCommandBuffer cmd, uint32_t frameIndex) {
@@ -318,7 +273,7 @@ void VirtualTexturePageTable::recordUpload(VkCommandBuffer cmd, uint32_t frameIn
                 .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
                 .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
                 .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .setImage(pageTableImages[mip])
+                .setImage(pageTableImages_[mip].getImage())
                 .setSubresourceRange(vk::ImageSubresourceRange{}
                     .setAspectMask(vk::ImageAspectFlagBits::eColor)
                     .setBaseMipLevel(0)
@@ -343,7 +298,7 @@ void VirtualTexturePageTable::recordUpload(VkCommandBuffer cmd, uint32_t frameIn
                     .setLayerCount(1))
                 .setImageOffset({0, 0, 0})
                 .setImageExtent({tilesAtMip, tilesAtMip, 1});
-            vkCmd.copyBufferToImage(stagingBuffers_[bufferIndex].get(), pageTableImages[mip],
+            vkCmd.copyBufferToImage(stagingBuffers_[bufferIndex].get(), pageTableImages_[mip].getImage(),
                                     vk::ImageLayout::eTransferDstOptimal, region);
         }
 
@@ -356,7 +311,7 @@ void VirtualTexturePageTable::recordUpload(VkCommandBuffer cmd, uint32_t frameIn
                 .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
                 .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
                 .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-                .setImage(pageTableImages[mip])
+                .setImage(pageTableImages_[mip].getImage())
                 .setSubresourceRange(vk::ImageSubresourceRange{}
                     .setAspectMask(vk::ImageAspectFlagBits::eColor)
                     .setBaseMipLevel(0)

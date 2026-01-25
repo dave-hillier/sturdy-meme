@@ -2,6 +2,7 @@
 #include "CommandBufferUtils.h"
 #include "VmaBufferFactory.h"
 #include "SamplerFactory.h"
+#include "VmaImageHandle.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <stb_image.h>
@@ -19,15 +20,12 @@ std::unique_ptr<TerrainTextures> TerrainTextures::create(const InitInfo& info) {
 
 TerrainTextures::~TerrainTextures() {
     if (!device) return;
-    vk::Device vkDevice(device);
     // Samplers via RAII
     albedoSampler_.reset();
-    if (albedoView) vkDevice.destroyImageView(albedoView);
-    if (albedoImage) vmaDestroyImage(allocator, albedoImage, albedoAllocation);
+    albedoImage_.reset();
 
     grassFarLODSampler_.reset();
-    if (grassFarLODView) vkDevice.destroyImageView(grassFarLODView);
-    if (grassFarLODImage) vmaDestroyImage(allocator, grassFarLODImage, grassFarLODAllocation);
+    grassFarLODImage_.reset();
 }
 
 TerrainTextures::TerrainTextures(TerrainTextures&& other) noexcept
@@ -37,37 +35,28 @@ TerrainTextures::TerrainTextures(TerrainTextures&& other) noexcept
     , graphicsQueue(other.graphicsQueue)
     , commandPool(other.commandPool)
     , resourcePath(std::move(other.resourcePath))
-    , albedoImage(other.albedoImage)
-    , albedoAllocation(other.albedoAllocation)
-    , albedoView(other.albedoView)
+    , albedoImage_(std::move(other.albedoImage_))
     , albedoSampler_(std::move(other.albedoSampler_))
     , albedoMipLevels(other.albedoMipLevels)
-    , grassFarLODImage(other.grassFarLODImage)
-    , grassFarLODAllocation(other.grassFarLODAllocation)
-    , grassFarLODView(other.grassFarLODView)
+    , grassFarLODImage_(std::move(other.grassFarLODImage_))
     , grassFarLODSampler_(std::move(other.grassFarLODSampler_))
     , grassFarLODMipLevels(other.grassFarLODMipLevels)
 {
     // Null out other's handles to prevent double-free
     other.device = VK_NULL_HANDLE;
     other.allocator = VK_NULL_HANDLE;
-    other.albedoImage = VK_NULL_HANDLE;
-    other.albedoView = VK_NULL_HANDLE;
-    other.grassFarLODImage = VK_NULL_HANDLE;
-    other.grassFarLODView = VK_NULL_HANDLE;
+    other.albedoImage_ = {};
+    other.grassFarLODImage_ = {};
 }
 
 TerrainTextures& TerrainTextures::operator=(TerrainTextures&& other) noexcept {
     if (this != &other) {
         // Clean up current resources
         if (device) {
-            vk::Device vkDevice(device);
             albedoSampler_.reset();
-            if (albedoView) vkDevice.destroyImageView(albedoView);
-            if (albedoImage) vmaDestroyImage(allocator, albedoImage, albedoAllocation);
+            albedoImage_.reset();
             grassFarLODSampler_.reset();
-            if (grassFarLODView) vkDevice.destroyImageView(grassFarLODView);
-            if (grassFarLODImage) vmaDestroyImage(allocator, grassFarLODImage, grassFarLODAllocation);
+            grassFarLODImage_.reset();
         }
 
         // Move from other
@@ -77,24 +66,18 @@ TerrainTextures& TerrainTextures::operator=(TerrainTextures&& other) noexcept {
         graphicsQueue = other.graphicsQueue;
         commandPool = other.commandPool;
         resourcePath = std::move(other.resourcePath);
-        albedoImage = other.albedoImage;
-        albedoAllocation = other.albedoAllocation;
-        albedoView = other.albedoView;
+        albedoImage_ = std::move(other.albedoImage_);
         albedoSampler_ = std::move(other.albedoSampler_);
         albedoMipLevels = other.albedoMipLevels;
-        grassFarLODImage = other.grassFarLODImage;
-        grassFarLODAllocation = other.grassFarLODAllocation;
-        grassFarLODView = other.grassFarLODView;
+        grassFarLODImage_ = std::move(other.grassFarLODImage_);
         grassFarLODSampler_ = std::move(other.grassFarLODSampler_);
         grassFarLODMipLevels = other.grassFarLODMipLevels;
 
         // Null out other's handles
         other.device = VK_NULL_HANDLE;
         other.allocator = VK_NULL_HANDLE;
-        other.albedoImage = VK_NULL_HANDLE;
-        other.albedoView = VK_NULL_HANDLE;
-        other.grassFarLODImage = VK_NULL_HANDLE;
-        other.grassFarLODView = VK_NULL_HANDLE;
+        other.albedoImage_ = {};
+        other.grassFarLODImage_ = {};
     }
     return *this;
 }
@@ -135,45 +118,16 @@ bool TerrainTextures::createAlbedoTexture() {
     // Calculate mip levels
     albedoMipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
 
-    // Create Vulkan image with mip levels
-    auto imageInfo = vk::ImageCreateInfo{}
-        .setImageType(vk::ImageType::e2D)
-        .setFormat(vk::Format::eR8G8B8A8Srgb)
-        .setExtent(vk::Extent3D{width, height, 1})
-        .setMipLevels(albedoMipLevels)
-        .setArrayLayers(1)
-        .setSamples(vk::SampleCountFlagBits::e1)
-        .setTiling(vk::ImageTiling::eOptimal)
-        .setUsage(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc)
-        .setSharingMode(vk::SharingMode::eExclusive)
-        .setInitialLayout(vk::ImageLayout::eUndefined);
+    VmaImageSpec spec{};
+    spec = spec.withFormat(vk::Format::eR8G8B8A8Srgb)
+        .withExtent(vk::Extent3D{width, height, 1})
+        .withMipLevels(albedoMipLevels)
+        .withUsage(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc)
+        .withView(vk::ImageViewType::e2D, vk::ImageAspectFlagBits::eColor, 0, albedoMipLevels, 0, 1);
 
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo, &albedoImage, &albedoAllocation, nullptr) != VK_SUCCESS) {
+    albedoImage_ = spec.build(allocator, device);
+    if (!albedoImage_.isValid()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain albedo image");
-        stbi_image_free(pixels);
-        return false;
-    }
-
-    // Create image view with all mip levels
-    auto viewInfo = vk::ImageViewCreateInfo{}
-        .setImage(albedoImage)
-        .setViewType(vk::ImageViewType::e2D)
-        .setFormat(vk::Format::eR8G8B8A8Srgb)
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(albedoMipLevels)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
-
-    vk::Device vkDevice(device);
-    try {
-        albedoView = static_cast<VkImageView>(vkDevice.createImageView(viewInfo));
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create terrain albedo image view: %s", e.what());
         stbi_image_free(pixels);
         return false;
     }
@@ -188,7 +142,7 @@ bool TerrainTextures::createAlbedoTexture() {
     albedoSampler_ = std::move(*albedoSampler);
 
     // Upload base level texture to GPU
-    if (!uploadImageDataMipLevel(albedoImage, pixels, width, height, VK_FORMAT_R8G8B8A8_SRGB, 4, 0)) {
+    if (!uploadImageDataMipLevel(albedoImage_.getImage(), pixels, width, height, VK_FORMAT_R8G8B8A8_SRGB, 4, 0)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to upload terrain albedo texture to GPU");
         stbi_image_free(pixels);
         return false;
@@ -197,7 +151,7 @@ bool TerrainTextures::createAlbedoTexture() {
     stbi_image_free(pixels);
 
     // Generate mipmaps on GPU
-    if (!generateMipmaps(albedoImage, width, height, albedoMipLevels)) {
+    if (!generateMipmaps(albedoImage_.getImage(), width, height, albedoMipLevels)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to generate mipmaps for terrain albedo texture");
         return false;
     }
@@ -224,45 +178,16 @@ bool TerrainTextures::createGrassFarLODTexture() {
     // Calculate mip levels
     grassFarLODMipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
 
-    // Create Vulkan image with mip levels
-    auto imageInfo = vk::ImageCreateInfo{}
-        .setImageType(vk::ImageType::e2D)
-        .setFormat(vk::Format::eR8G8B8A8Srgb)
-        .setExtent(vk::Extent3D{width, height, 1})
-        .setMipLevels(grassFarLODMipLevels)
-        .setArrayLayers(1)
-        .setSamples(vk::SampleCountFlagBits::e1)
-        .setTiling(vk::ImageTiling::eOptimal)
-        .setUsage(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc)
-        .setSharingMode(vk::SharingMode::eExclusive)
-        .setInitialLayout(vk::ImageLayout::eUndefined);
+    VmaImageSpec spec{};
+    spec = spec.withFormat(vk::Format::eR8G8B8A8Srgb)
+        .withExtent(vk::Extent3D{width, height, 1})
+        .withMipLevels(grassFarLODMipLevels)
+        .withUsage(vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc)
+        .withView(vk::ImageViewType::e2D, vk::ImageAspectFlagBits::eColor, 0, grassFarLODMipLevels, 0, 1);
 
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-
-    if (vmaCreateImage(allocator, reinterpret_cast<const VkImageCreateInfo*>(&imageInfo), &allocInfo, &grassFarLODImage, &grassFarLODAllocation, nullptr) != VK_SUCCESS) {
+    grassFarLODImage_ = spec.build(allocator, device);
+    if (!grassFarLODImage_.isValid()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create grass far LOD image");
-        stbi_image_free(pixels);
-        return false;
-    }
-
-    // Create image view with all mip levels
-    auto viewInfo = vk::ImageViewCreateInfo{}
-        .setImage(grassFarLODImage)
-        .setViewType(vk::ImageViewType::e2D)
-        .setFormat(vk::Format::eR8G8B8A8Srgb)
-        .setSubresourceRange(vk::ImageSubresourceRange{}
-            .setAspectMask(vk::ImageAspectFlagBits::eColor)
-            .setBaseMipLevel(0)
-            .setLevelCount(grassFarLODMipLevels)
-            .setBaseArrayLayer(0)
-            .setLayerCount(1));
-
-    vk::Device vkDevice(device);
-    try {
-        grassFarLODView = static_cast<VkImageView>(vkDevice.createImageView(viewInfo));
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create grass far LOD image view: %s", e.what());
         stbi_image_free(pixels);
         return false;
     }
@@ -277,7 +202,7 @@ bool TerrainTextures::createGrassFarLODTexture() {
     grassFarLODSampler_ = std::move(*grassSampler);
 
     // Upload base level texture to GPU
-    if (!uploadImageDataMipLevel(grassFarLODImage, pixels, width, height, VK_FORMAT_R8G8B8A8_SRGB, 4, 0)) {
+    if (!uploadImageDataMipLevel(grassFarLODImage_.getImage(), pixels, width, height, VK_FORMAT_R8G8B8A8_SRGB, 4, 0)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to upload grass far LOD texture to GPU");
         stbi_image_free(pixels);
         return false;
@@ -286,7 +211,7 @@ bool TerrainTextures::createGrassFarLODTexture() {
     stbi_image_free(pixels);
 
     // Generate mipmaps on GPU
-    if (!generateMipmaps(grassFarLODImage, width, height, grassFarLODMipLevels)) {
+    if (!generateMipmaps(grassFarLODImage_.getImage(), width, height, grassFarLODMipLevels)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to generate mipmaps for grass far LOD texture");
         return false;
     }
