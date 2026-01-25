@@ -328,7 +328,7 @@ private:
     // Hole mask CPU data and state
     std::vector<uint8_t> holeMaskCpuData_;
     bool holeMaskDirty_ = false;
-    uint32_t holeMaskResolution_ = 2048;  // Global coarse mask for GPU (~8m/texel)
+    uint32_t holeMaskResolution_ = 8192;  // High-res mask for GPU (~2m/texel)
 
     // Hole definitions - geometric primitives
     std::vector<TerrainHole> holes_;
