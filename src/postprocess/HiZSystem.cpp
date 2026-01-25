@@ -3,6 +3,7 @@
 #include "VmaBufferFactory.h"
 #include "SamplerFactory.h"
 #include "core/ImageBuilder.h"
+#include "core/InitInfoBuilder.h"
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
@@ -21,15 +22,8 @@ std::unique_ptr<HiZSystem> HiZSystem::create(const InitInfo& info) {
 }
 
 std::unique_ptr<HiZSystem> HiZSystem::create(const InitContext& ctx, VkFormat depthFormat_) {
-    InitInfo info;
-    info.device = ctx.device;
-    info.allocator = ctx.allocator;
-    info.descriptorPool = ctx.descriptorPool;
-    info.extent = ctx.extent;
-    info.shaderPath = ctx.shaderPath;
-    info.framesInFlight = ctx.framesInFlight;
+    InitInfo info = InitInfoBuilder::fromContext<InitInfo>(ctx);
     info.depthFormat = depthFormat_;
-    info.raiiDevice = ctx.raiiDevice;
     return create(info);
 }
 

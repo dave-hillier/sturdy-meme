@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
 #include "CommandBufferUtils.h"
+#include "core/InitInfoBuilder.h"
 #include "core/vulkan/SamplerFactory.h"
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
@@ -20,17 +21,8 @@ std::unique_ptr<SSRSystem> SSRSystem::create(const InitInfo& info) {
 }
 
 std::unique_ptr<SSRSystem> SSRSystem::create(const InitContext& ctx) {
-    InitInfo info;
-    info.device = ctx.device;
-    info.physicalDevice = ctx.physicalDevice;
-    info.allocator = ctx.allocator;
-    info.commandPool = ctx.commandPool;
+    InitInfo info = InitInfoBuilder::fromContext<InitInfo>(ctx);
     info.computeQueue = ctx.graphicsQueue;  // Use graphics queue for compute
-    info.shaderPath = ctx.shaderPath;
-    info.framesInFlight = ctx.framesInFlight;
-    info.extent = ctx.extent;
-    info.descriptorPool = ctx.descriptorPool;
-    info.raiiDevice = ctx.raiiDevice;
     return create(info);
 }
 

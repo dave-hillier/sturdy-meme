@@ -1,5 +1,6 @@
 #include "BilateralGridSystem.h"
 #include "ShaderLoader.h"
+#include "core/InitInfoBuilder.h"
 #include "core/vulkan/SamplerFactory.h"
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
@@ -39,14 +40,7 @@ std::unique_ptr<BilateralGridSystem> BilateralGridSystem::create(const InitInfo&
 }
 
 std::unique_ptr<BilateralGridSystem> BilateralGridSystem::create(const InitContext& ctx) {
-    InitInfo info{};
-    info.device = ctx.device;
-    info.allocator = ctx.allocator;
-    info.descriptorPool = ctx.descriptorPool;
-    info.extent = ctx.extent;
-    info.shaderPath = ctx.shaderPath;
-    info.framesInFlight = ctx.framesInFlight;
-    info.raiiDevice = ctx.raiiDevice;
+    InitInfo info = InitInfoBuilder::fromContext<InitInfo>(ctx);
     return create(info);
 }
 

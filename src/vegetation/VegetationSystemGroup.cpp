@@ -10,6 +10,7 @@
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
+#include "core/InitInfoBuilder.h"
 #include <SDL3/SDL.h>
 
 std::optional<VegetationSystemGroup::Bundle> VegetationSystemGroup::createAll(
@@ -83,18 +84,10 @@ std::optional<VegetationSystemGroup::Bundle> VegetationSystemGroup::createAll(
 
     // 4. Create TreeRenderer
     {
-        TreeRenderer::InitInfo info{};
-        info.raiiDevice = ctx.raiiDevice;
-        info.device = vk::Device(ctx.device);
-        info.physicalDevice = vk::PhysicalDevice(ctx.physicalDevice);
-        info.allocator = ctx.allocator;
+        TreeRenderer::InitInfo info = InitInfoBuilder::fromContext<TreeRenderer::InitInfo>(ctx);
         info.hdrRenderPass = vk::RenderPass(deps.hdrRenderPass);
         info.shadowRenderPass = vk::RenderPass(deps.shadowRenderPass);
-        info.descriptorPool = ctx.descriptorPool;
-        info.extent = vk::Extent2D{ctx.extent.width, ctx.extent.height};
         info.shadowMapSize = deps.shadowMapSize;
-        info.resourcePath = ctx.resourcePath;
-        info.maxFramesInFlight = ctx.framesInFlight;
 
         bundle.treeRenderer = TreeRenderer::create(info);
         if (!bundle.treeRenderer) {

@@ -6,6 +6,7 @@
 #include "GraphicsPipelineFactory.h"
 #include "debug/QueueSubmitDiagnostics.h"
 #include "shaders/bindings.h"
+#include "core/InitInfoBuilder.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -26,15 +27,9 @@ std::unique_ptr<ShadowSystem> ShadowSystem::create(const InitInfo& info) {
 std::unique_ptr<ShadowSystem> ShadowSystem::create(const InitContext& ctx,
                                                     VkDescriptorSetLayout mainDescriptorSetLayout_,
                                                     VkDescriptorSetLayout skinnedDescriptorSetLayout_) {
-    InitInfo info;
-    info.raiiDevice = ctx.raiiDevice;
-    info.device = ctx.device;
-    info.physicalDevice = ctx.physicalDevice;
-    info.allocator = ctx.allocator;
+    InitInfo info = InitInfoBuilder::fromContext<InitInfo>(ctx);
     info.mainDescriptorSetLayout = mainDescriptorSetLayout_;
     info.skinnedDescriptorSetLayout = skinnedDescriptorSetLayout_;
-    info.shaderPath = ctx.shaderPath;
-    info.framesInFlight = ctx.framesInFlight;
     return create(info);
 }
 
