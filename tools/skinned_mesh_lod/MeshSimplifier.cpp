@@ -1,5 +1,8 @@
 #include "MeshSimplifier.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <fastgltf/core.hpp>
 #include <fastgltf/types.hpp>
 #include <fastgltf/tools.hpp>
@@ -362,7 +365,8 @@ bool MeshSimplifier::generateLODs(const LODConfig& config, ProgressCallback prog
         return false;
     }
 
-    const auto& lod0 = lodData_.lods[0];
+    // Make a copy of LOD 0 since push_back may invalidate references
+    LODMeshData lod0 = lodData_.lods[0];
 
     if (progress) {
         progress(0.0f, "Starting LOD generation...");
@@ -416,7 +420,7 @@ LODMeshData MeshSimplifier::simplifyMesh(const LODMeshData& source, float target
     // Round to multiple of 3
     targetIndexCount = (targetIndexCount / 3) * 3;
 
-    // Prepare position data for meshoptimizer (it only needs positions for simplification)
+    // Prepare position data for meshoptimizer
     std::vector<float> positions(source.vertices.size() * 3);
     for (size_t i = 0; i < source.vertices.size(); ++i) {
         positions[i * 3 + 0] = source.vertices[i].position.x;
@@ -424,7 +428,36 @@ LODMeshData MeshSimplifier::simplifyMesh(const LODMeshData& source, float target
         positions[i * 3 + 2] = source.vertices[i].position.z;
     }
 
-    // Simplify the mesh
+    // First, generate a vertex remap to weld duplicate positions
+    // This helps simplification work better on meshes with split normals/UVs
+    std::vector<unsigned int> positionRemap(source.vertices.size());
+    size_t uniqueVertexCount = meshopt_generateVertexRemap(
+        positionRemap.data(),
+        source.indices.data(),
+        source.indices.size(),
+        positions.data(),
+        source.vertices.size(),
+        sizeof(float) * 3
+    );
+
+    // Create remapped indices for simplification
+    std::vector<uint32_t> remappedIndices(source.indices.size());
+    for (size_t i = 0; i < source.indices.size(); ++i) {
+        remappedIndices[i] = positionRemap[source.indices[i]];
+    }
+
+    // Create position array for unique vertices only
+    std::vector<float> uniquePositions(uniqueVertexCount * 3);
+    for (size_t i = 0; i < source.vertices.size(); ++i) {
+        size_t newIdx = positionRemap[i];
+        uniquePositions[newIdx * 3 + 0] = source.vertices[i].position.x;
+        uniquePositions[newIdx * 3 + 1] = source.vertices[i].position.y;
+        uniquePositions[newIdx * 3 + 2] = source.vertices[i].position.z;
+    }
+
+    SDL_Log("  Vertex welding: %zu -> %zu unique positions", source.vertices.size(), uniqueVertexCount);
+
+    // Simplify the mesh using welded positions
     std::vector<uint32_t> simplifiedIndices(source.indices.size());
     float resultError = 0.0f;
 
@@ -435,10 +468,10 @@ LODMeshData MeshSimplifier::simplifyMesh(const LODMeshData& source, float target
 
     size_t newIndexCount = meshopt_simplify(
         simplifiedIndices.data(),
-        source.indices.data(),
-        source.indices.size(),
-        positions.data(),
-        source.vertices.size(),
+        remappedIndices.data(),
+        remappedIndices.size(),
+        uniquePositions.data(),
+        uniqueVertexCount,
         sizeof(float) * 3,
         targetIndexCount,
         config.targetError,
@@ -446,7 +479,38 @@ LODMeshData MeshSimplifier::simplifyMesh(const LODMeshData& source, float target
         &resultError
     );
 
+    // If standard simplification didn't reduce much, try sloppy simplification
+    if (newIndexCount > targetIndexCount * 1.5f && targetIndexCount < source.indices.size() * 0.9f) {
+        SDL_Log("  Standard simplification insufficient, trying sloppy mode...");
+        newIndexCount = meshopt_simplifySloppy(
+            simplifiedIndices.data(),
+            remappedIndices.data(),
+            remappedIndices.size(),
+            uniquePositions.data(),
+            uniqueVertexCount,
+            sizeof(float) * 3,
+            targetIndexCount,
+            config.targetError * 2.0f,  // Allow more error for sloppy mode
+            &resultError
+        );
+    }
+
     simplifiedIndices.resize(newIndexCount);
+
+    // Map simplified indices back to original vertex indices
+    // We need to pick one original vertex for each welded position
+    std::vector<uint32_t> reverseRemap(uniqueVertexCount, UINT32_MAX);
+    for (size_t i = 0; i < source.vertices.size(); ++i) {
+        size_t newIdx = positionRemap[i];
+        if (reverseRemap[newIdx] == UINT32_MAX) {
+            reverseRemap[newIdx] = static_cast<uint32_t>(i);
+        }
+    }
+
+    // Convert simplified indices back to original vertex space
+    for (size_t i = 0; i < simplifiedIndices.size(); ++i) {
+        simplifiedIndices[i] = reverseRemap[simplifiedIndices[i]];
+    }
 
     // Now we need to remap vertices - only keep vertices that are actually used
     std::vector<uint32_t> vertexRemap(source.vertices.size(), UINT32_MAX);
