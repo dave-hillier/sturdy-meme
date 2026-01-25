@@ -240,6 +240,12 @@ void WardGroup::createGeometry() {
             blocks.push_back(std::move(block));
         }
     }
+
+    // Filter buildings at city fringe for non-urban (slum) wards
+    // Faithful to mfcg.js: this.urban || this.filter()
+    if (!urban) {
+        filter();
+    }
 }
 
 std::vector<geom::Point> WardGroup::spawnTrees() {
