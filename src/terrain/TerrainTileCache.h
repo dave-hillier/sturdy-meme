@@ -12,6 +12,7 @@
 #include <memory>
 #include <limits>
 #include <optional>
+#include <functional>
 #include "VmaBuffer.h"
 #include "VmaImage.h"
 #include "core/FrameBuffered.h"
@@ -61,6 +62,10 @@ public:
     struct ConstructToken { explicit ConstructToken() = default; };
     explicit TerrainTileCache(ConstructToken) {}
 
+    // Callback invoked during long operations to yield to the UI
+    // Parameters: (progress 0-1, phase description)
+    using YieldCallback = std::function<void(float, const char*)>;
+
     struct InitInfo {
         const vk::raii::Device* raiiDevice = nullptr;
         std::string cacheDirectory;
@@ -70,6 +75,7 @@ public:
         VkCommandPool commandPool;
         float terrainSize;      // Total terrain size in world units
         float heightScale;      // Height scale: h=1 -> worldY=heightScale
+        YieldCallback yieldCallback;  // Optional: yield during long operations
     };
 
     // Special return value indicating a hole in terrain (no ground)
@@ -260,6 +266,9 @@ private:
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkCommandPool commandPool = VK_NULL_HANDLE;
     std::optional<vk::raii::Sampler> sampler_;
+
+    // Yield callback for long operations (allows loading screen to update)
+    YieldCallback yieldCallback_;
 
     // Tile info buffers for shader (RAII-managed, triple-buffered for frames-in-flight)
     TripleBuffered<ManagedBuffer> tileInfoBuffers_;

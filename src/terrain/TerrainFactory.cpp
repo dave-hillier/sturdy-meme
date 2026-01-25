@@ -7,6 +7,7 @@ std::unique_ptr<TerrainSystem> TerrainFactory::create(const InitContext& ctx, co
     terrainParams.shadowRenderPass = config.shadowRenderPass;
     terrainParams.shadowMapSize = config.shadowMapSize;
     terrainParams.texturePath = config.resourcePath + "/textures";
+    terrainParams.yieldCallback = config.yieldCallback;
 
     // Build terrain config with sensible defaults
     TerrainConfig terrainConfig = buildTerrainConfig(config);
