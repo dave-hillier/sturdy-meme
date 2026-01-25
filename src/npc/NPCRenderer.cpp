@@ -98,6 +98,10 @@ void NPCRenderer::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
         auto* character = currentNpcSim_->getCharacter(data.npcIndex);
         if (!character) continue;
 
+        // Update bone matrices UBO for this NPC before drawing
+        // Each NPC has its own skeleton pose that must be uploaded before rendering
+        skinnedMeshRenderer_->updateBoneMatrices(frameIndex, character);
+
         const Renderable& npcObj = (*currentSceneObjects_)[data.renderableIndex];
         skinnedMeshRenderer_->record(cmd, frameIndex, npcObj, *character);
     }

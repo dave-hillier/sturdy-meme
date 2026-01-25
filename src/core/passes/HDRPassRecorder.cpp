@@ -101,6 +101,8 @@ void HDRPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float tim
             size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
             if (playerIndex < sceneObjects.size()) {
                 const Renderable& playerObj = sceneObjects[playerIndex];
+                // Update bone matrices UBO for player before drawing
+                resources_.skinnedMesh->updateBoneMatrices(frameIndex, &sceneBuilder.getAnimatedCharacter());
                 resources_.skinnedMesh->record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
             }
         }
@@ -224,6 +226,8 @@ void HDRPassRecorder::recordSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
                 size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
                 if (playerIndex < sceneObjects.size()) {
                     const Renderable& playerObj = sceneObjects[playerIndex];
+                    // Update bone matrices UBO for player before drawing
+                    resources_.skinnedMesh->updateBoneMatrices(frameIndex, &sceneBuilder.getAnimatedCharacter());
                     resources_.skinnedMesh->record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
                 }
             }
