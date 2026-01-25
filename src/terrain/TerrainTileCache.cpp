@@ -38,6 +38,7 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
     commandPool = info.commandPool;
     terrainSize = info.terrainSize;
     heightScale = info.heightScale;
+    yieldCallback_ = info.yieldCallback;
 
     // Load metadata from cache
     if (!loadMetadata()) {
@@ -1069,7 +1070,7 @@ bool TerrainTileCache::loadBaseLODTiles() {
     if (baseTilesX < 1) baseTilesX = 1;
     if (baseTilesZ < 1) baseTilesZ = 1;
 
-    SDL_Log("TerrainTileCache: Loading %ux%u base LOD tiles (LOD%u) synchronously...",
+    SDL_Log("TerrainTileCache: Loading %ux%u base LOD tiles (LOD%u)...",
             baseTilesX, baseTilesZ, baseLOD_);
 
     baseTiles_.clear();
@@ -1077,6 +1078,7 @@ bool TerrainTileCache::loadBaseLODTiles() {
 
     uint32_t tilesLoaded = 0;
     uint32_t tilesFailed = 0;
+    uint32_t totalTiles = baseTilesX * baseTilesZ;
 
     for (uint32_t tz = 0; tz < baseTilesZ; tz++) {
         for (uint32_t tx = 0; tx < baseTilesX; tx++) {
@@ -1093,11 +1095,17 @@ bool TerrainTileCache::loadBaseLODTiles() {
             } else {
                 tilesFailed++;
             }
+
+            // Yield after each tile to allow loading screen to update
+            if (yieldCallback_) {
+                float progress = static_cast<float>(tilesLoaded + tilesFailed) / totalTiles * 0.5f;
+                yieldCallback_(progress, "Loading terrain tiles");
+            }
         }
     }
 
     SDL_Log("TerrainTileCache: Loaded %u/%u base LOD tiles (%u failed)",
-            tilesLoaded, baseTilesX * baseTilesZ, tilesFailed);
+            tilesLoaded, totalTiles, tilesFailed);
 
     if (tilesLoaded == 0) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
@@ -1138,6 +1146,9 @@ bool TerrainTileCache::createBaseHeightMap() {
     // Precompute inverse for faster division
     float invTerrainSize = 1.0f / terrainSize;
 
+    // Yield every N rows to keep loading screen responsive
+    constexpr uint32_t YIELD_INTERVAL = 32;
+
     for (uint32_t y = 0; y < baseHeightMapResolution_; y++) {
         for (uint32_t x = 0; x < baseHeightMapResolution_; x++) {
             // Map pixel to world coordinates
@@ -1166,6 +1177,12 @@ bool TerrainTileCache::createBaseHeightMap() {
             }
 
             baseHeightMapCpuData_[y * baseHeightMapResolution_ + x] = height;
+        }
+
+        // Yield periodically to allow loading screen to update
+        if (yieldCallback_ && (y % YIELD_INTERVAL) == 0) {
+            float progress = 0.5f + (static_cast<float>(y) / baseHeightMapResolution_) * 0.4f;
+            yieldCallback_(progress, "Building terrain heightmap");
         }
     }
 

@@ -88,6 +88,7 @@
 #include "RoadRiverVisualization.h"
 #include "ScatterSystemFactory.h"
 
+#include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <stdexcept>
@@ -1245,6 +1246,17 @@ bool Renderer::initSubsystemsAsync() {
             terrainFactoryConfig.shadowRenderPass = systems_->shadow().getShadowRenderPass();
             terrainFactoryConfig.shadowMapSize = systems_->shadow().getShadowMapSize();
             terrainFactoryConfig.resourcePath = resourcePath;
+
+            // Provide yield callback to keep loading screen responsive during terrain init
+            terrainFactoryConfig.yieldCallback = [this](float subProgress, const char* phase) {
+                // Map sub-progress (0-1) to terrain's portion of overall progress (0.20-0.28)
+                float overallProgress = 0.20f + subProgress * 0.08f;
+                if (progressCallback_) {
+                    progressCallback_(overallProgress, phase);
+                }
+                // Pump events to keep window responsive
+                SDL_PumpEvents();
+            };
 
             auto terrainSystem = TerrainFactory::create(*ctxPtr, terrainFactoryConfig);
             if (!terrainSystem) return false;

@@ -23,6 +23,9 @@
  */
 class TerrainFactory {
 public:
+    // Callback invoked during long operations to yield to the UI
+    using YieldCallback = std::function<void(float, const char*)>;
+
     /**
      * Configuration for terrain creation with sensible defaults.
      */
@@ -51,6 +54,9 @@ public:
 
         // Virtual texturing
         bool useVirtualTexture = true;
+
+        // Loading callback
+        YieldCallback yieldCallback;  // Optional: yield during long operations
     };
 
     /**
