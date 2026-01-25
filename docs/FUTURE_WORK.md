@@ -25,32 +25,14 @@ Outstanding features and improvements not yet implemented.
 
 ---
 
-## Animation - Combat & Advanced Locomotion
+## Animation - Combat & Advanced Locomotion ✅
 
-Available animations in `assets/characters/fbx/` not yet integrated:
-
-### Combat Attacks
-- `ss_attack1.fbx`, `ss_attack2.fbx`, `ss_attack3.fbx` - Sword swings with combo timing windows
-- `ss_slash1.fbx`, `ss_slash2.fbx` - Horizontal slashes
-- `ss_kick.fbx` - Kick attack
-
-### Combat Defense
-- `ss_block.fbx` - Raise shield
-- `ss_block_idle.fbx` - Hold block stance
-
-### Combat Reactions
-- `ss_impact1.fbx`, `ss_impact2.fbx` - Hit reactions
-- `ss_death1.fbx`, `ss_death2.fbx` - Death animations
-
-### Advanced Locomotion
-- `ss_strafe_left.fbx`, `ss_strafe_right.fbx` - Strafing when locked-on
-- `ss_turn_left.fbx`, `ss_turn_right.fbx`, `ss_turn_180.fbx` - Turn in place
-
-### Special States
-- `ss_crouch.fbx`, `ss_crouch_idle.fbx` - Crouch toggle
-- `ss_casting.fbx` - Magic cast
-- `ss_power_up.fbx` - Charge/power up
-- `ss_sheath.fbx` - Sheathe weapon
+Combat and locomotion animations from `assets/characters/fbx/` are now integrated:
+- Combat attacks (sword combos, slashes, kick)
+- Combat defense (block, block idle)
+- Combat reactions (hit impacts, death)
+- Advanced locomotion (strafing, turn in place)
+- Special states (crouch, casting, power-up, sheath)
 
 ---
 
