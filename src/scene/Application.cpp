@@ -15,6 +15,8 @@
 #include "TerrainTileCache.h"
 #include "ScatterSystem.h"
 #include "TreeSystem.h"
+#include "TreeCollision.h"
+#include "DeferredTerrainObjects.h"
 #include "SceneManager.h"
 #include "WaterSystem.h"
 #include "WindSystem.h"
@@ -328,6 +330,8 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Create compound capsule colliders for trees (trunk + major branches)
+    // Track how many trees currently have colliders for deferred generation
+    size_t treesWithColliders = 0;
     if (TreeSystem* treeSystem = renderer_->getSystems().tree()) {
         const auto& treeInstances = treeSystem->getTreeInstances();
         TreeCollision::Config treeCollisionConfig;
@@ -342,7 +346,37 @@ bool Application::init(const std::string& title, int width, int height) {
                 physics().createStaticCompoundCapsules(tree.position(), capsules, tree.rotation());
             }
         }
+        treesWithColliders = treeInstances.size();
         SDL_Log("Created %zu tree compound capsule colliders", treeInstances.size());
+    }
+
+    // Register callback for deferred tree generation (forest/woods trees)
+    // These trees are generated after terrain is ready, so we need to create colliders then
+    if (auto* deferred = renderer_->getSystems().deferredTerrainObjects()) {
+        deferred->setOnTreesGeneratedCallback([this, treesWithColliders](TreeSystem& treeSystem) {
+            const auto& treeInstances = treeSystem.getTreeInstances();
+
+            // Only create colliders for trees added after initial setup
+            if (treeInstances.size() <= treesWithColliders) {
+                return;  // No new trees to process
+            }
+
+            TreeCollision::Config treeCollisionConfig;
+            treeCollisionConfig.maxBranchLevel = 2;
+            treeCollisionConfig.minBranchRadius = 0.05f;
+
+            size_t newColliders = 0;
+            for (size_t i = treesWithColliders; i < treeInstances.size(); ++i) {
+                const auto& tree = treeInstances[i];
+                auto capsules = treeSystem.getTreeCollisionCapsules(static_cast<uint32_t>(i), treeCollisionConfig);
+
+                if (!capsules.empty()) {
+                    physics().createStaticCompoundCapsules(tree.position(), capsules, tree.rotation());
+                    ++newColliders;
+                }
+            }
+            SDL_Log("Created %zu tree colliders for deferred forest generation", newColliders);
+        });
     }
 
     // Create player entity and character controller

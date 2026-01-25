@@ -90,6 +90,11 @@ bool DeferredTerrainObjects::tryGenerate(
             config_.shadowSampler
         );
 
+        // Invoke callback to create physics colliders for the generated trees
+        if (onTreesGenerated_) {
+            onTreesGenerated_(*tree);
+        }
+
         SDL_Log("DeferredTerrainObjects: Tree generation complete");
     }
 

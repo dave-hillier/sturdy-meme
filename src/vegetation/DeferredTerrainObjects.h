@@ -66,6 +66,9 @@ public:
 
     using GetCommonBindingsFunc = std::function<MaterialDescriptorFactory::CommonBindings(uint32_t)>;
 
+    // Callback invoked after trees are generated, passing the TreeSystem with new trees
+    using OnTreesGeneratedFunc = std::function<void(TreeSystem&)>;
+
     /**
      * Factory: Create DeferredTerrainObjects instance.
      */
@@ -76,6 +79,12 @@ public:
      * Must be called before tryGenerate() if detritus needs descriptor sets.
      */
     void setCommonBindingsFunc(GetCommonBindingsFunc func) { getCommonBindings_ = std::move(func); }
+
+    /**
+     * Set callback invoked after trees are generated.
+     * Use this to create physics colliders for the generated trees.
+     */
+    void setOnTreesGeneratedCallback(OnTreesGeneratedFunc func) { onTreesGenerated_ = std::move(func); }
 
     /**
      * Attempt to generate terrain objects if not already done and terrain is ready.
@@ -117,6 +126,7 @@ private:
 
     Config config_;
     GetCommonBindingsFunc getCommonBindings_;
+    OnTreesGeneratedFunc onTreesGenerated_;
     bool generated_ = false;
     bool generating_ = false;
 };
