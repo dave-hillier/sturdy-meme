@@ -19,21 +19,14 @@
 #include <memory>
 
 class AssetRegistry;
-
-// Non-player character data
-struct NPC {
-    glm::vec3 position{0.0f};
-    float yawDegrees = 0.0f;  // Facing direction in degrees
-    std::unique_ptr<AnimatedCharacter> character;
-    size_t renderableIndex = 0;  // Index in sceneObjects
-};
+class NPCSimulation;
 
 // Holds all scene resources (meshes, textures) and provides scene objects
 class SceneBuilder {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
-    explicit SceneBuilder(ConstructToken) {}
+    explicit SceneBuilder(ConstructToken);
 
     // Function type for querying terrain height at world position (x, z)
     using HeightQueryFunc = std::function<float(float, float)>;
@@ -145,11 +138,11 @@ public:
     const AnimatedCharacter& getAnimatedCharacter() const { return *animatedCharacter; }
     bool hasCharacter() const { return hasAnimatedCharacter; }
 
-    // NPC access
-    const std::vector<NPC>& getNPCs() const { return npcs; }
-    std::vector<NPC>& getNPCs() { return npcs; }
-    size_t getNPCCount() const { return npcs.size(); }
-    bool hasNPCs() const { return !npcs.empty(); }
+    // NPC access via NPCSimulation
+    NPCSimulation* getNPCSimulation() { return npcSimulation_.get(); }
+    const NPCSimulation* getNPCSimulation() const { return npcSimulation_.get(); }
+    size_t getNPCCount() const;
+    bool hasNPCs() const;
 
     // Player weapons access
     bool hasWeapons() const { return rightHandBoneIndex >= 0 && leftHandBoneIndex >= 0; }
@@ -169,8 +162,8 @@ public:
                                   float movementSpeed = 0.0f, bool isGrounded = true, bool isJumping = false);
 
     // Update all NPCs (call each frame) - updates animation states
-    void updateNPCs(float deltaTime, VmaAllocator allocator, VkDevice device,
-                    VkCommandPool commandPool, VkQueue queue);
+    // cameraPos: used for LOD level calculation
+    void updateNPCs(float deltaTime, const glm::vec3& cameraPos);
 
     // Start a jump with trajectory prediction
     void startCharacterJump(const glm::vec3& startPos, const glm::vec3& velocity, float gravity, const class PhysicsWorld* physics);
@@ -218,8 +211,8 @@ private:
     std::unique_ptr<AnimatedCharacter> animatedCharacter;
     bool hasAnimatedCharacter = false;  // True if animated character was loaded successfully
 
-    // NPCs (non-player characters with their own AnimatedCharacter instances)
-    std::vector<NPC> npcs;
+    // NPCs (managed by NPCSimulation for update/LOD logic separation)
+    std::unique_ptr<NPCSimulation> npcSimulation_;
 
     // Player cape (cloth simulation attached to character)
     PlayerCape playerCape;

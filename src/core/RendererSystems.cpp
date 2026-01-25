@@ -47,6 +47,7 @@
 #include "SceneManager.h"
 #include "GlobalBufferManager.h"
 #include "SkinnedMeshRenderer.h"
+#include "npc/NPCRenderer.h"
 #include "TimeSystem.h"
 #include "CelestialCalculator.h"
 #include "EnvironmentSettings.h"
@@ -292,6 +293,10 @@ void RendererSystems::setScene(std::unique_ptr<SceneManager> system) {
 
 void RendererSystems::setSkinnedMesh(std::unique_ptr<SkinnedMeshRenderer> system) {
     skinnedMeshRenderer_ = std::move(system);
+}
+
+void RendererSystems::setNPCRenderer(std::unique_ptr<NPCRenderer> renderer) {
+    npcRenderer_ = std::move(renderer);
 }
 
 bool RendererSystems::init(const InitContext& /*initCtx*/,

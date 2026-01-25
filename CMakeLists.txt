@@ -36,6 +36,10 @@ set(SOURCES
     src/scene/Camera.cpp
     src/scene/Transform.cpp
     src/scene/InputSystem.cpp
+    # NPC
+    src/npc/NPCSimulation.cpp
+    src/npc/NPCRenderer.cpp
+    src/npc/CharacterTemplate.cpp
     # Core
     src/core/CrashHandler.cpp
     src/core/Renderer.cpp

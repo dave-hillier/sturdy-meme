@@ -9,6 +9,8 @@
 #include "CatmullClarkSystem.h"
 #include "SceneManager.h"
 #include "scene/SceneBuilder.h"
+#include "npc/NPCSimulation.h"
+#include "npc/NPCRenderer.h"
 #include "SkinnedMeshRenderer.h"
 #include "GrassSystem.h"
 #include "WaterSystem.h"
@@ -103,11 +105,11 @@ void HDRPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float tim
             }
         }
 
-        // Draw NPC characters
-        for (auto& npc : sceneBuilder.getNPCs()) {
-            if (npc.character && npc.renderableIndex < sceneObjects.size()) {
-                const Renderable& npcObj = sceneObjects[npc.renderableIndex];
-                resources_.skinnedMesh->record(cmd, frameIndex, npcObj, *npc.character);
+        // Draw NPC characters via NPCRenderer
+        if (resources_.npcRenderer) {
+            if (auto* npcSim = sceneBuilder.getNPCSimulation()) {
+                resources_.npcRenderer->prepare(frameIndex, *npcSim, sceneObjects);
+                resources_.npcRenderer->recordDraw(cmd, frameIndex);
             }
         }
     }
@@ -226,11 +228,11 @@ void HDRPassRecorder::recordSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
                 }
             }
 
-            // Draw NPC characters
-            for (auto& npc : sceneBuilder.getNPCs()) {
-                if (npc.character && npc.renderableIndex < sceneObjects.size()) {
-                    const Renderable& npcObj = sceneObjects[npc.renderableIndex];
-                    resources_.skinnedMesh->record(cmd, frameIndex, npcObj, *npc.character);
+            // Draw NPC characters via NPCRenderer
+            if (resources_.npcRenderer) {
+                if (auto* npcSim = sceneBuilder.getNPCSimulation()) {
+                    resources_.npcRenderer->prepare(frameIndex, *npcSim, sceneObjects);
+                    resources_.npcRenderer->recordDraw(cmd, frameIndex);
                 }
             }
         }
@@ -317,8 +319,8 @@ void HDRPassRecorder::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameInde
     MaterialId lastMaterialId = INVALID_MATERIAL_ID;
     VkDescriptorSet currentDescSet = VK_NULL_HANDLE;
 
-    // Build set of NPC indices to skip (rendered with GPU skinning)
-    const auto& npcs = resources_.scene->getSceneBuilder().getNPCs();
+    // Get NPC simulation for skipping NPC renderables (rendered with GPU skinning)
+    const NPCSimulation* npcSim = resources_.scene->getSceneBuilder().getNPCSimulation();
 
     for (size_t i : sortedIndices) {
         // Skip player character (rendered separately with GPU skinning)
@@ -328,10 +330,13 @@ void HDRPassRecorder::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameInde
 
         // Skip NPC characters (rendered separately with GPU skinning)
         bool isNPC = false;
-        for (const auto& npc : npcs) {
-            if (i == npc.renderableIndex) {
-                isNPC = true;
-                break;
+        if (npcSim) {
+            const auto& npcData = npcSim->getData();
+            for (size_t npcIdx = 0; npcIdx < npcData.count(); ++npcIdx) {
+                if (i == npcData.renderableIndices[npcIdx]) {
+                    isNPC = true;
+                    break;
+                }
             }
         }
         if (isNPC) {

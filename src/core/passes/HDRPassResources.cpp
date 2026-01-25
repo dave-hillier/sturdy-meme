@@ -21,6 +21,7 @@ HDRPassResources HDRPassResources::collect(RendererSystems& systems) {
     resources.snow = systems.snowGroup();
     resources.wind = &systems.wind();
     resources.debugLine = &systems.debugLine();
+    resources.npcRenderer = systems.npcRenderer();  // May be null if no NPCs
 
     return resources;
 }

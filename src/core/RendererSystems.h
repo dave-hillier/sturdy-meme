@@ -82,6 +82,7 @@ class ShadowSystem;
 class SceneManager;
 class GlobalBufferManager;
 class SkinnedMeshRenderer;
+class NPCRenderer;
 class TimeSystem;
 class CelestialCalculator;
 class BilateralGridSystem;
@@ -280,6 +281,11 @@ public:
     SkinnedMeshRenderer& skinnedMesh() { return *skinnedMeshRenderer_; }
     const SkinnedMeshRenderer& skinnedMesh() const { return *skinnedMeshRenderer_; }
     void setSkinnedMesh(std::unique_ptr<SkinnedMeshRenderer> system);
+
+    // NPC rendering
+    NPCRenderer* npcRenderer() { return npcRenderer_.get(); }
+    const NPCRenderer* npcRenderer() const { return npcRenderer_.get(); }
+    void setNPCRenderer(std::unique_ptr<NPCRenderer> renderer);
 
     // Tools and debug
     DebugLineSystem& debugLine() { return *debugLineSystem_; }
@@ -490,6 +496,7 @@ private:
     std::unique_ptr<RoadNetworkLoader> roadNetworkLoader_;
     std::unique_ptr<RoadRiverVisualization> roadRiverVisualization_;
     std::unique_ptr<SkinnedMeshRenderer> skinnedMeshRenderer_;
+    std::unique_ptr<NPCRenderer> npcRenderer_;
 
     // Tools and debug
     std::unique_ptr<DebugLineSystem> debugLineSystem_;

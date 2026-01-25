@@ -42,6 +42,7 @@
 #include "SkySystem.h"
 // Animation and debug
 #include "SkinnedMeshRenderer.h"
+#include "npc/NPCRenderer.h"
 #include "DebugLineSystem.h"
 #include "HiZSystem.h"
 #include "interfaces/IDebugControl.h"
@@ -849,6 +850,16 @@ bool Renderer::initSkinnedMeshRenderer() {
         return false;
     }
     systems_->setSkinnedMesh(std::move(skinnedMeshRenderer));
+
+    // Create NPCRenderer (uses SkinnedMeshRenderer for draw calls)
+    NPCRenderer::InitInfo npcInfo{};
+    npcInfo.skinnedMeshRenderer = &systems_->skinnedMesh();
+    auto npcRenderer = NPCRenderer::create(npcInfo);
+    if (npcRenderer) {
+        systems_->setNPCRenderer(std::move(npcRenderer));
+        SDL_Log("NPCRenderer created successfully");
+    }
+
     return true;
 }
 

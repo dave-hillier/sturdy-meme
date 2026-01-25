@@ -2,6 +2,8 @@
 #include "core/interfaces/IPlayerControl.h"
 #include "SceneBuilder.h"
 #include "animation/AnimatedCharacter.h"
+#include "npc/NPCSimulation.h"
+#include "npc/NPCData.h"
 
 #include <imgui.h>
 
@@ -147,4 +149,95 @@ void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& setting
     ImGui::BulletText("Cloth simulation: Verlet integration");
     ImGui::BulletText("Body colliders: Spheres + Capsules");
     ImGui::BulletText("Attachments: Shoulders + Upper back");
+
+    // NPC LOD section
+    if (auto* npcSim = sceneBuilder.getNPCSimulation()) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.7f, 0.5f, 1.0f));
+        ImGui::Text("NPC LOD");
+        ImGui::PopStyleColor();
+
+        const auto& npcData = npcSim->getData();
+        size_t npcCount = npcData.count();
+
+        if (npcCount == 0) {
+            ImGui::TextDisabled("No NPCs in scene");
+        } else {
+            // Count NPCs per LOD level
+            uint32_t virtualCount = 0, bulkCount = 0, realCount = 0;
+            for (size_t i = 0; i < npcCount; ++i) {
+                switch (npcData.lodLevels[i]) {
+                    case NPCLODLevel::Virtual: virtualCount++; break;
+                    case NPCLODLevel::Bulk: bulkCount++; break;
+                    case NPCLODLevel::Real: realCount++; break;
+                }
+            }
+
+            // LOD colors
+            ImVec4 colorReal(0.2f, 1.0f, 0.2f, 1.0f);     // Green
+            ImVec4 colorBulk(1.0f, 0.8f, 0.2f, 1.0f);     // Yellow
+            ImVec4 colorVirtual(1.0f, 0.3f, 0.3f, 1.0f);  // Red
+
+            ImGui::Text("Total NPCs: %zu", npcCount);
+
+            // Summary counts
+            ImGui::TextColored(colorReal, "Real (<25m):");
+            ImGui::SameLine();
+            ImGui::Text("%u", realCount);
+            ImGui::SameLine();
+            ImGui::TextColored(colorBulk, "  Bulk (25-50m):");
+            ImGui::SameLine();
+            ImGui::Text("%u", bulkCount);
+            ImGui::SameLine();
+            ImGui::TextColored(colorVirtual, "  Virtual (>50m):");
+            ImGui::SameLine();
+            ImGui::Text("%u", virtualCount);
+
+            ImGui::Spacing();
+
+            // Per-NPC details (collapsible)
+            if (ImGui::TreeNode("NPC Details")) {
+                for (size_t i = 0; i < npcCount; ++i) {
+                    const char* lodName = "Unknown";
+                    ImVec4 lodColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+
+                    switch (npcData.lodLevels[i]) {
+                        case NPCLODLevel::Real:
+                            lodName = "Real";
+                            lodColor = colorReal;
+                            break;
+                        case NPCLODLevel::Bulk:
+                            lodName = "Bulk";
+                            lodColor = colorBulk;
+                            break;
+                        case NPCLODLevel::Virtual:
+                            lodName = "Virtual";
+                            lodColor = colorVirtual;
+                            break;
+                    }
+
+                    ImGui::Text("NPC %zu:", i);
+                    ImGui::SameLine();
+                    ImGui::TextColored(lodColor, "%s", lodName);
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("(frames: %u)", npcData.framesSinceUpdate[i]);
+                }
+                ImGui::TreePop();
+            }
+
+            // LOD toggle
+            bool lodEnabled = npcSim->isLODEnabled();
+            if (ImGui::Checkbox("Enable NPC LOD", &lodEnabled)) {
+                const_cast<NPCSimulation*>(npcSim)->setLODEnabled(lodEnabled);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Virtual: >50m, no render, update every ~10s\n"
+                                  "Bulk: 25-50m, reduced updates ~1s\n"
+                                  "Real: <25m, full animation every frame");
+            }
+        }
+    }
 }

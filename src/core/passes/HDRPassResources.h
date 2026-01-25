@@ -25,6 +25,7 @@ class WaterSystem;
 class WaterTileCull;
 class WindSystem;
 class DebugLineSystem;
+class NPCRenderer;
 
 class RendererSystems;
 
@@ -51,6 +52,9 @@ struct HDRPassResources {
     SkinnedMeshRenderer* skinnedMesh = nullptr;
     GlobalBufferManager* globalBuffers = nullptr;
     ShadowSystem* shadow = nullptr;  // For impostor shadow bindings
+
+    // NPC rendering (optional - may be null if no NPCs)
+    NPCRenderer* npcRenderer = nullptr;
 
     // Vegetation (grass, trees, rocks, detritus)
     VegetationSystemGroup vegetation;
