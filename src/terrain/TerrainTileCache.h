@@ -185,8 +185,8 @@ public:
     const std::vector<float>& getBaseHeightMapData() const { return baseHeightMapCpuData_; }
     uint32_t getBaseHeightMapResolution() const { return baseHeightMapResolution_; }
 
-    // Hole mask GPU resource accessors
-    VkImageView getHoleMaskView() const { return holeMaskImageView_; }
+    // Hole mask GPU resource accessors (tiled array texture)
+    VkImageView getHoleMaskArrayView() const { return holeMaskArrayView_; }
     VkSampler getHoleMaskSampler() const { return holeMaskSampler_ ? **holeMaskSampler_ : VK_NULL_HANDLE; }
 
     // Hole management - geometric primitives rasterized on demand
@@ -319,23 +319,18 @@ private:
     // Sample height from base LOD tiles (fallback when no high-res tile covers position)
     bool sampleBaseLOD(float worldX, float worldZ, float& outHeight) const;
 
-    // Hole mask GPU resources (R8_UNORM: 0=solid, 255=hole)
-    VkImage holeMaskImage_ = VK_NULL_HANDLE;
-    VmaAllocation holeMaskAllocation_ = VK_NULL_HANDLE;
-    VkImageView holeMaskImageView_ = VK_NULL_HANDLE;
+    // Hole mask tile array (sampler2DArray, R8_UNORM: 0=solid, 255=hole)
+    // Uses same layer indices as height tile array for 1:1 correspondence
+    VkImage holeMaskArrayImage_ = VK_NULL_HANDLE;
+    VmaAllocation holeMaskArrayAllocation_ = VK_NULL_HANDLE;
+    VkImageView holeMaskArrayView_ = VK_NULL_HANDLE;
     std::optional<vk::raii::Sampler> holeMaskSampler_;
-
-    // Hole mask CPU data and state
-    std::vector<uint8_t> holeMaskCpuData_;
-    bool holeMaskDirty_ = false;
-    uint32_t holeMaskResolution_ = 2048;  // Global coarse mask for GPU (~8m/texel)
 
     // Hole definitions - geometric primitives
     std::vector<TerrainHole> holes_;
 
     // Hole mask helper methods
-    bool createHoleMaskResources();
-    bool uploadHoleMaskToGPUInternal();
-    void rasterizeHolesToGlobalMask();
-    void worldToHoleMaskTexel(float x, float z, int& texelX, int& texelY) const;
+    bool createHoleMaskArrayResources();
+    void uploadTileHoleMask(const TerrainTile& tile, int32_t layerIndex);
+    std::vector<uint8_t> generateTileHoleMask(const TerrainTile& tile) const;
 };

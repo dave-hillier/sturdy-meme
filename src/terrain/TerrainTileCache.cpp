@@ -149,16 +149,10 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
         return false;
     }
 
-    // Initialize hole mask (starts empty - no holes)
-    holeMaskCpuData_.resize(holeMaskResolution_ * holeMaskResolution_, 0);
-    if (!createHoleMaskResources()) {
+    // Initialize hole mask array (tiled, same layer count as height tiles)
+    if (!createHoleMaskArrayResources()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "TerrainTileCache: Failed to create hole mask resources");
-        return false;
-    }
-    if (!uploadHoleMaskToGPUInternal()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "TerrainTileCache: Failed to upload hole mask to GPU");
+                     "TerrainTileCache: Failed to create hole mask array resources");
         return false;
     }
 
@@ -210,17 +204,16 @@ void TerrainTileCache::cleanup() {
         baseHeightMapImage_ = VK_NULL_HANDLE;
     }
 
-    // Destroy hole mask resources
+    // Destroy hole mask array resources
     holeMaskSampler_.reset();
-    if (holeMaskImageView_) {
-        vkDestroyImageView(device, holeMaskImageView_, nullptr);
-        holeMaskImageView_ = VK_NULL_HANDLE;
+    if (holeMaskArrayView_) {
+        vkDestroyImageView(device, holeMaskArrayView_, nullptr);
+        holeMaskArrayView_ = VK_NULL_HANDLE;
     }
-    if (holeMaskImage_) {
-        vmaDestroyImage(allocator, holeMaskImage_, holeMaskAllocation_);
-        holeMaskImage_ = VK_NULL_HANDLE;
+    if (holeMaskArrayImage_) {
+        vmaDestroyImage(allocator, holeMaskArrayImage_, holeMaskArrayAllocation_);
+        holeMaskArrayImage_ = VK_NULL_HANDLE;
     }
-    holeMaskCpuData_.clear();
     holes_.clear();
 
     // Destroy sampler (RAII via reset)
@@ -950,6 +943,9 @@ void TerrainTileCache::copyTileToArrayLayer(TerrainTile* tile, uint32_t layerInd
 
     cmd.end();
     // ManagedBuffer automatically destroyed on scope exit
+
+    // Also upload hole mask for this tile (shares same layer index)
+    uploadTileHoleMask(*tile, static_cast<int32_t>(layerIndex));
 }
 
 const TerrainTile* TerrainTileCache::getLoadedTile(TileCoord coord, uint32_t lod) const {
@@ -1328,22 +1324,67 @@ std::vector<const TerrainTile*> TerrainTileCache::getAllCPUTiles() const {
 }
 
 // ============================================================================
-// Hole mask functionality
+// Hole mask functionality (tiled array texture)
 // ============================================================================
 
-bool TerrainTileCache::createHoleMaskResources() {
-    // Create Vulkan image for hole mask (R8_UNORM: 0=solid, 255=hole)
+bool TerrainTileCache::createHoleMaskArrayResources() {
+    // Create Vulkan 2D array image for hole mask (R8_UNORM: 0=solid, 255=hole)
+    // Same layer count as height tile array for 1:1 correspondence
     {
         ManagedImage image;
         if (!ImageBuilder(allocator)
-                .setExtent(holeMaskResolution_, holeMaskResolution_)
+                .setExtent(storedTileResolution, storedTileResolution)
                 .setFormat(VK_FORMAT_R8_UNORM)
+                .setArrayLayers(MAX_ACTIVE_TILES)
                 .setUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-                .build(device, image, holeMaskImageView_)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create hole mask image");
+                .build(device, image, holeMaskArrayView_)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create hole mask array image");
             return false;
         }
-        image.releaseToRaw(holeMaskImage_, holeMaskAllocation_);
+        image.releaseToRaw(holeMaskArrayImage_, holeMaskArrayAllocation_);
+    }
+
+    // Transition hole mask array to shader read layout
+    {
+        VkCommandBuffer cmd;
+        auto cmdAllocInfo = vk::CommandBufferAllocateInfo{}
+            .setCommandPool(commandPool)
+            .setLevel(vk::CommandBufferLevel::ePrimary)
+            .setCommandBufferCount(1);
+        vkAllocateCommandBuffers(device, reinterpret_cast<const VkCommandBufferAllocateInfo*>(&cmdAllocInfo), &cmd);
+
+        auto beginInfo = vk::CommandBufferBeginInfo{}
+            .setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+        vkBeginCommandBuffer(cmd, reinterpret_cast<const VkCommandBufferBeginInfo*>(&beginInfo));
+
+        vk::CommandBuffer vkCmd(cmd);
+        auto barrier = vk::ImageMemoryBarrier{}
+            .setSrcAccessMask(vk::AccessFlags{})
+            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
+            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+            .setImage(holeMaskArrayImage_)
+            .setSubresourceRange(vk::ImageSubresourceRange{}
+                .setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(MAX_ACTIVE_TILES));
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                              vk::PipelineStageFlagBits::eFragmentShader,
+                              {}, {}, {}, barrier);
+
+        vkEndCommandBuffer(cmd);
+
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &cmd;
+        vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+        vkQueueWaitIdle(graphicsQueue);
+        vkFreeCommandBuffers(device, commandPool, 1, &cmd);
     }
 
     // Create sampler (linear filtering for smooth edges) using factory
@@ -1354,52 +1395,67 @@ bool TerrainTileCache::createHoleMaskResources() {
     }
     holeMaskSampler_ = std::move(*holeSampler);
 
+    SDL_Log("TerrainTileCache: Created hole mask array (%ux%u x %u layers)",
+            storedTileResolution, storedTileResolution, MAX_ACTIVE_TILES);
+
     return true;
 }
 
-bool TerrainTileCache::uploadHoleMaskToGPUInternal() {
-    VkDeviceSize imageSize = holeMaskResolution_ * holeMaskResolution_ * sizeof(uint8_t);
+std::vector<uint8_t> TerrainTileCache::generateTileHoleMask(const TerrainTile& tile) const {
+    // Use TileGrid helper to rasterize holes for this specific tile
+    return TileGrid::rasterizeHolesForTile(
+        tile.worldMinX, tile.worldMinZ,
+        tile.worldMaxX, tile.worldMaxZ,
+        storedTileResolution, holes_);
+}
+
+void TerrainTileCache::uploadTileHoleMask(const TerrainTile& tile, int32_t layerIndex) {
+    if (layerIndex < 0 || layerIndex >= static_cast<int32_t>(MAX_ACTIVE_TILES)) return;
+
+    // Generate hole mask for this tile
+    std::vector<uint8_t> holeMaskData = generateTileHoleMask(tile);
 
     // Create staging buffer
+    VkDeviceSize imageSize = holeMaskData.size() * sizeof(uint8_t);
     ManagedBuffer stagingBuffer;
     if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create staging buffer for hole mask");
-        return false;
+        return;
     }
 
     // Copy data to staging buffer
     void* mappedData = stagingBuffer.map();
-    memcpy(mappedData, holeMaskCpuData_.data(), imageSize);
+    memcpy(mappedData, holeMaskData.data(), imageSize);
     stagingBuffer.unmap();
 
     // Use CommandScope for one-time command submission
     CommandScope cmd(device, commandPool, graphicsQueue);
-    if (!cmd.begin()) return false;
+    if (!cmd.begin()) return;
 
     vk::CommandBuffer vkCmd(cmd.get());
 
-    // Transition to transfer dst
+    // Transition layer to transfer dst
     {
         auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlags{})
+            .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
             .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
-            .setOldLayout(vk::ImageLayout::eUndefined)
+            .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
             .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
             .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
             .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(holeMaskImage_)
+            .setImage(holeMaskArrayImage_)
             .setSubresourceRange(vk::ImageSubresourceRange{}
                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
                 .setBaseMipLevel(0)
                 .setLevelCount(1)
-                .setBaseArrayLayer(0)
+                .setBaseArrayLayer(static_cast<uint32_t>(layerIndex))
                 .setLayerCount(1));
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader,
                               vk::PipelineStageFlagBits::eTransfer,
                               {}, {}, {}, barrier);
     }
 
-    // Copy buffer to image
+    // Copy buffer to image layer
     {
         auto region = vk::BufferImageCopy{}
             .setBufferOffset(0)
@@ -1408,14 +1464,15 @@ bool TerrainTileCache::uploadHoleMaskToGPUInternal() {
             .setImageSubresource(vk::ImageSubresourceLayers{}
                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
                 .setMipLevel(0)
-                .setBaseArrayLayer(0)
+                .setBaseArrayLayer(static_cast<uint32_t>(layerIndex))
                 .setLayerCount(1))
             .setImageOffset({0, 0, 0})
-            .setImageExtent({holeMaskResolution_, holeMaskResolution_, 1});
-        vkCmd.copyBufferToImage(stagingBuffer.get(), holeMaskImage_, vk::ImageLayout::eTransferDstOptimal, region);
+            .setImageExtent({storedTileResolution, storedTileResolution, 1});
+        vkCmd.copyBufferToImage(stagingBuffer.get(), holeMaskArrayImage_,
+                                vk::ImageLayout::eTransferDstOptimal, region);
     }
 
-    // Transition to shader read
+    // Transition back to shader read
     {
         auto barrier = vk::ImageMemoryBarrier{}
             .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
@@ -1424,32 +1481,19 @@ bool TerrainTileCache::uploadHoleMaskToGPUInternal() {
             .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
             .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
             .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(holeMaskImage_)
+            .setImage(holeMaskArrayImage_)
             .setSubresourceRange(vk::ImageSubresourceRange{}
                 .setAspectMask(vk::ImageAspectFlagBits::eColor)
                 .setBaseMipLevel(0)
                 .setLevelCount(1)
-                .setBaseArrayLayer(0)
+                .setBaseArrayLayer(static_cast<uint32_t>(layerIndex))
                 .setLayerCount(1));
         vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
                               vk::PipelineStageFlagBits::eFragmentShader,
                               {}, {}, {}, barrier);
     }
 
-    if (!cmd.end()) return false;
-
-    return true;
-}
-
-void TerrainTileCache::worldToHoleMaskTexel(float x, float z, int& texelX, int& texelY) const {
-    float u = (x / terrainSize) + 0.5f;
-    float v = (z / terrainSize) + 0.5f;
-    u = std::clamp(u, 0.0f, 1.0f);
-    v = std::clamp(v, 0.0f, 1.0f);
-    texelX = static_cast<int>(u * (holeMaskResolution_ - 1));
-    texelY = static_cast<int>(v * (holeMaskResolution_ - 1));
-    texelX = std::clamp(texelX, 0, static_cast<int>(holeMaskResolution_ - 1));
-    texelY = std::clamp(texelY, 0, static_cast<int>(holeMaskResolution_ - 1));
+    cmd.end();
 }
 
 bool TerrainTileCache::isHole(float x, float z) const {
@@ -1459,9 +1503,19 @@ bool TerrainTileCache::isHole(float x, float z) const {
 void TerrainTileCache::addHoleCircle(float centerX, float centerZ, float radius) {
     holes_.push_back({centerX, centerZ, radius});
 
-    // Rasterize to global mask and mark dirty
-    rasterizeHolesToGlobalMask();
-    holeMaskDirty_ = true;
+    // Re-upload hole masks for all active tiles that might be affected
+    for (TerrainTile* tile : activeTiles) {
+        if (tile && tile->arrayLayerIndex >= 0) {
+            // Check if hole might intersect this tile
+            float closestX = std::clamp(centerX, tile->worldMinX, tile->worldMaxX);
+            float closestZ = std::clamp(centerZ, tile->worldMinZ, tile->worldMaxZ);
+            float dx = centerX - closestX;
+            float dz = centerZ - closestZ;
+            if (dx * dx + dz * dz <= radius * radius) {
+                uploadTileHoleMask(*tile, tile->arrayLayerIndex);
+            }
+        }
+    }
 
     SDL_Log("TerrainTileCache: Added hole circle at (%.1f, %.1f) radius %.1f, total holes: %zu",
             centerX, centerZ, radius, holes_.size());
@@ -1475,67 +1529,36 @@ void TerrainTileCache::removeHoleCircle(float centerX, float centerZ, float radi
     });
     if (it != holes_.end()) {
         holes_.erase(it, holes_.end());
-        rasterizeHolesToGlobalMask();
-        holeMaskDirty_ = true;
+
+        // Re-upload hole masks for all active tiles that might be affected
+        for (TerrainTile* tile : activeTiles) {
+            if (tile && tile->arrayLayerIndex >= 0) {
+                float closestX = std::clamp(centerX, tile->worldMinX, tile->worldMaxX);
+                float closestZ = std::clamp(centerZ, tile->worldMinZ, tile->worldMaxZ);
+                float dx = centerX - closestX;
+                float dz = centerZ - closestZ;
+                if (dx * dx + dz * dz <= radius * radius) {
+                    uploadTileHoleMask(*tile, tile->arrayLayerIndex);
+                }
+            }
+        }
+
         SDL_Log("TerrainTileCache: Removed hole circle at (%.1f, %.1f), total holes: %zu",
                 centerX, centerZ, holes_.size());
     }
 }
 
-void TerrainTileCache::rasterizeHolesToGlobalMask() {
-    // Use TileGrid helper to rasterize holes for the entire terrain
-    float halfTerrain = terrainSize * 0.5f;
-    holeMaskCpuData_ = TileGrid::rasterizeHolesForTile(
-        -halfTerrain, -halfTerrain, halfTerrain, halfTerrain,
-        holeMaskResolution_, holes_);
-}
-
 std::vector<uint8_t> TerrainTileCache::rasterizeHolesForTile(
     float tileMinX, float tileMinZ, float tileMaxX, float tileMaxZ, uint32_t resolution) const {
-
-    std::vector<uint8_t> tileMask(resolution * resolution, 0);
-
-    float tileWidth = tileMaxX - tileMinX;
-    float tileHeight = tileMaxZ - tileMinZ;
-
-    // For each hole, check if it intersects this tile
-    for (const auto& hole : holes_) {
-        // Quick AABB check for circle-rectangle intersection
-        float closestX = std::clamp(hole.centerX, tileMinX, tileMaxX);
-        float closestZ = std::clamp(hole.centerZ, tileMinZ, tileMaxZ);
-        float dx = hole.centerX - closestX;
-        float dz = hole.centerZ - closestZ;
-        if (dx * dx + dz * dz > hole.radius * hole.radius) {
-            continue;  // Circle doesn't intersect tile
-        }
-
-        // Rasterize circle into tile mask
-        // Shrink radius slightly to match GPU rendering
-        float shrinkAmount = tileWidth / resolution;
-        float effectiveRadius = hole.radius - shrinkAmount;
-        if (effectiveRadius <= 0.0f) effectiveRadius = hole.radius * 0.5f;
-        float radiusSq = effectiveRadius * effectiveRadius;
-
-        for (uint32_t y = 0; y < resolution; y++) {
-            for (uint32_t x = 0; x < resolution; x++) {
-                float worldX = tileMinX + (static_cast<float>(x) / (resolution - 1)) * tileWidth;
-                float worldZ = tileMinZ + (static_cast<float>(y) / (resolution - 1)) * tileHeight;
-
-                float distX = worldX - hole.centerX;
-                float distZ = worldZ - hole.centerZ;
-                if (distX * distX + distZ * distZ < radiusSq) {
-                    tileMask[y * resolution + x] = 255;
-                }
-            }
-        }
-    }
-
-    return tileMask;
+    // Delegate to TileGrid helper
+    return TileGrid::rasterizeHolesForTile(tileMinX, tileMinZ, tileMaxX, tileMaxZ, resolution, holes_);
 }
 
 void TerrainTileCache::uploadHoleMaskToGPU() {
-    if (holeMaskDirty_) {
-        uploadHoleMaskToGPUInternal();
-        holeMaskDirty_ = false;
+    // Re-upload hole masks for all active tiles
+    for (TerrainTile* tile : activeTiles) {
+        if (tile && tile->arrayLayerIndex >= 0) {
+            uploadTileHoleMask(*tile, tile->arrayLayerIndex);
+        }
     }
 }

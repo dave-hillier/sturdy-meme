@@ -331,8 +331,9 @@ public:
     }
 
     // Hole mask accessors (for grass/other systems to avoid terrain cutouts)
-    vk::ImageView getHoleMaskView() const {
-        return tileCache ? vk::ImageView(tileCache->getHoleMaskView()) : vk::ImageView{};
+    // Returns array texture view - use sampler2DArray in shaders
+    vk::ImageView getHoleMaskArrayView() const {
+        return tileCache ? vk::ImageView(tileCache->getHoleMaskArrayView()) : vk::ImageView{};
     }
     vk::Sampler getHoleMaskSampler() const {
         return tileCache ? vk::Sampler(tileCache->getHoleMaskSampler()) : vk::Sampler{};

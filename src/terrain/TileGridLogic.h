@@ -163,6 +163,7 @@ inline bool isPointInHole(float x, float z, const std::vector<TerrainHole>& hole
 
 // Rasterize holes into a mask for a tile region
 // Returns mask where 255 = hole, 0 = solid
+// Inflates hole radius by texel size to ensure GPU bilinear sampling hits marked texels
 inline std::vector<uint8_t> rasterizeHolesForTile(
     float tileMinX, float tileMinZ, float tileMaxX, float tileMaxZ,
     uint32_t resolution, const std::vector<TerrainHole>& holes) {
@@ -176,13 +177,28 @@ inline std::vector<uint8_t> rasterizeHolesForTile(
     float texelSizeX = (tileMaxX - tileMinX) / static_cast<float>(resolution);
     float texelSizeZ = (tileMaxZ - tileMinZ) / static_cast<float>(resolution);
 
+    // Inflate radius by half a texel to account for GPU bilinear interpolation.
+    // Without this, a hole smaller than the texel size would only mark ~1 texel,
+    // and bilinear sampling at positions offset from texel center would dilute
+    // the hole value below the 0.5 discard threshold.
+    // Using half texel provides a good balance between accuracy and visibility.
+    float texelSize = std::max(texelSizeX, texelSizeZ);
+    float inflation = texelSize * 0.5f;
+
+    // Create inflated holes for rasterization
+    std::vector<TerrainHole> inflatedHoles;
+    inflatedHoles.reserve(holes.size());
+    for (const auto& hole : holes) {
+        inflatedHoles.push_back({hole.centerX, hole.centerZ, hole.radius + inflation});
+    }
+
     for (uint32_t row = 0; row < resolution; ++row) {
         for (uint32_t col = 0; col < resolution; ++col) {
             // Sample at texel center
             float worldX = tileMinX + (col + 0.5f) * texelSizeX;
             float worldZ = tileMinZ + (row + 0.5f) * texelSizeZ;
 
-            if (isPointInHole(worldX, worldZ, holes)) {
+            if (isPointInHole(worldX, worldZ, inflatedHoles)) {
                 mask[row * resolution + col] = 255;
             }
         }

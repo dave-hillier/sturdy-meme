@@ -47,8 +47,8 @@ layout(binding = BINDING_GRASS_COMPUTE_HEIGHT_MAP) uniform sampler2D terrainHeig
 // Displacement map for player/NPC grass interaction (RG16F - XZ displacement)
 layout(binding = BINDING_GRASS_COMPUTE_DISPLACEMENT) uniform sampler2D displacementMap;
 
-// Hole mask for terrain cutouts (caves, wells) - R8: 0=solid, 1=hole
-layout(binding = BINDING_GRASS_COMPUTE_HOLE_MASK) uniform sampler2D holeMask;
+// Hole mask tile array for terrain cutouts (caves, wells) - R8: 0=solid, 1=hole
+layout(binding = BINDING_GRASS_COMPUTE_HOLE_MASK) uniform sampler2DArray holeMaskTiles;
 
 // LOD tile array (high-res tiles near camera)
 layout(binding = BINDING_GRASS_COMPUTE_TILE_ARRAY) uniform sampler2DArray heightMapTiles;
@@ -221,7 +221,7 @@ void main() {
     if (terrainUV.x < 0.0 || terrainUV.x > 1.0 || terrainUV.y < 0.0 || terrainUV.y > 1.0) return;
 
     // Check hole mask - don't spawn grass in terrain holes (caves, wells)
-    float holeMaskValue = texture(holeMask, terrainUV).r;
+    float holeMaskValue = sampleHoleMaskWithTileCache(holeMaskTiles, vec2(x, z), activeTileCount);
     if (holeMaskValue > 0.5) return;
 
     // Sample terrain height with tile cache support for ~1m resolution near camera

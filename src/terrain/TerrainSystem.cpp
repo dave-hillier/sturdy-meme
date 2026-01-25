@@ -483,9 +483,9 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
                               VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         }
 
-        // Hole mask (binding 16)
-        if (tileCache && tileCache->getHoleMaskView() != VK_NULL_HANDLE) {
-            writer.writeImage(16, tileCache->getHoleMaskView(), tileCache->getHoleMaskSampler(),
+        // Hole mask array (binding 16) - tiled hole mask for high-res cutouts
+        if (tileCache && tileCache->getHoleMaskArrayView() != VK_NULL_HANDLE) {
+            writer.writeImage(16, tileCache->getHoleMaskArrayView(), tileCache->getHoleMaskSampler(),
                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         }
 

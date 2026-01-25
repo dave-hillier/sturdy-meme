@@ -83,4 +83,26 @@ vec3 calculateNormalWithTileCache(sampler2D heightMapGlobal, sampler2DArray heig
     return normalize(vec3(-dx, 1.0, -dz));
 }
 
+// Sample hole mask with LOD tile support
+// Returns hole value: 0=solid, 1=hole (GPU threshold is typically 0.5)
+float sampleHoleMaskWithTileCache(sampler2DArray holeMaskTiles, vec2 worldXZ, uint tileCount) {
+    int tileIdx = tileCacheFindTile(worldXZ, tileCount);
+    if (tileIdx >= 0) {
+        // High-res tile available - calculate local UV within tile
+        vec4 bounds = tiles[tileIdx].worldBounds;
+        vec2 tileUV = (worldXZ - bounds.xy) / (bounds.zw - bounds.xy);
+        // Use the stored layer index
+        int layerIdx = tiles[tileIdx].layerIndex.x;
+        if (layerIdx >= 0) {
+            // Apply half-texel correction for GPU sampling
+            ivec2 tileSize = textureSize(holeMaskTiles, 0).xy;
+            float N = float(tileSize.x);
+            vec2 correctedUV = (tileUV * (N - 1.0) + 0.5) / N;
+            return texture(holeMaskTiles, vec3(correctedUV, float(layerIdx))).r;
+        }
+    }
+    // No tile covers this position - return solid (no hole)
+    return 0.0;
+}
+
 #endif // TILE_CACHE_COMMON_GLSL

@@ -73,7 +73,7 @@ void SystemWiring::wireGrassDescriptors(RendererSystems& systems) {
         vk::Sampler(terrain.getTileSampler()),
         toVkBuffersArray<3>(collectTileInfoBuffers(terrain)),
         &globalBuffers.dynamicRendererUBO,
-        vk::ImageView(terrain.getHoleMaskView()),
+        vk::ImageView(terrain.getHoleMaskArrayView()),
         vk::Sampler(terrain.getHoleMaskSampler()));
 }
 

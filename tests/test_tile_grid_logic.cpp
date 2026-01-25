@@ -455,6 +455,46 @@ TEST_SUITE("rasterizeHolesForTile") {
             CHECK(val == 0);
         }
     }
+
+    TEST_CASE("small hole is inflated for GPU bilinear sampling") {
+        // Simulates the well hole scenario: 5m radius hole on 16384m terrain with 2048 resolution
+        // Texel size = 16384 / 2048 = 8m, inflation = 4m (half texel)
+        // Effective radius = 5m + 4m = 9m, which spans ~2 texels from center
+        const float terrainSize = 16384.0f;
+        const uint32_t resolution = 2048;
+        const float halfTerrain = terrainSize * 0.5f;
+
+        // Hole at center of terrain, radius smaller than texel size
+        std::vector<TerrainHole> holes = {
+            {0.0f, 0.0f, 5.0f}  // 5m radius, less than 8m texel size
+        };
+
+        auto mask = rasterizeHolesForTile(-halfTerrain, -halfTerrain, halfTerrain, halfTerrain,
+                                          resolution, holes);
+
+        // Find center texel (resolution/2, resolution/2)
+        const uint32_t centerCol = resolution / 2;
+        const uint32_t centerRow = resolution / 2;
+
+        // Count marked texels around the center
+        int markedCount = 0;
+        for (int dy = -2; dy <= 2; dy++) {
+            for (int dx = -2; dx <= 2; dx++) {
+                uint32_t col = centerCol + dx;
+                uint32_t row = centerRow + dy;
+                if (mask[row * resolution + col] == 255) {
+                    markedCount++;
+                }
+            }
+        }
+
+        // With half-texel inflation, multiple texels should be marked
+        // Effective radius 9m with 8m texels means ~2x2 to 3x3 texels
+        CHECK(markedCount >= 2);  // At minimum, should mark more than 1 texel
+
+        // Verify center texel is marked
+        CHECK(mask[centerRow * resolution + centerCol] == 255);
+    }
 }
 
 // ============================================================================

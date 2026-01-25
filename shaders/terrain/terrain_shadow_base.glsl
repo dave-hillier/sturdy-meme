@@ -52,8 +52,9 @@ layout(push_constant) uniform PushConstants {
     int padding;
 };
 
-// Output UV for hole mask sampling in fragment shader
+// Output UV and world position for hole mask sampling in fragment shader
 layout(location = 0) out vec2 fragTexCoord;
+layout(location = 1) out vec2 fragWorldXZ;
 
 /*
  * Transform terrain UV to light-space position for shadow rendering.
@@ -78,8 +79,9 @@ void terrainShadowTransform(vec2 uv) {
     // Transform to light space
     gl_Position = lightViewProj * vec4(worldPos, 1.0);
 
-    // Pass UV for hole mask sampling
+    // Pass UV and world position for hole mask sampling
     fragTexCoord = uv;
+    fragWorldXZ = worldXZ;
 }
 
 #endif // TERRAIN_SHADOW_BASE_GLSL
