@@ -224,40 +224,34 @@ bool GrassSystem::createBuffers() {
 
     // Use framesInFlight for buffer set count to ensure proper triple buffering
     uint32_t bufferSetCount = getFramesInFlight();
+    const auto doubleBufferedConfig = BufferUtils::DoubleBufferedBufferConfig(getAllocator(), bufferSetCount);
+    const auto perFrameConfig = BufferUtils::PerFrameBufferConfig(getAllocator(), getFramesInFlight());
 
-    BufferUtils::DoubleBufferedBufferBuilder instanceBuilder;
-    if (!instanceBuilder.setAllocator(getAllocator())
-             .setSetCount(bufferSetCount)
-             .setSize(instanceBufferSize)
-             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
+    if (!BufferUtils::DoubleBufferedBufferBuilder::fromConfig(doubleBufferedConfig)
+             .withSize(instanceBufferSize)
+             .withUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
              .build(instanceBuffers)) {
         SDL_Log("Failed to create grass instance buffers");
         return false;
     }
 
-    BufferUtils::DoubleBufferedBufferBuilder indirectBuilder;
-    if (!indirectBuilder.setAllocator(getAllocator())
-             .setSetCount(bufferSetCount)
-             .setSize(indirectBufferSize)
-             .setUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
+    if (!BufferUtils::DoubleBufferedBufferBuilder::fromConfig(doubleBufferedConfig)
+             .withSize(indirectBufferSize)
+             .withUsage(VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)
              .build(indirectBuffers)) {
         SDL_Log("Failed to create grass indirect buffers");
         return false;
     }
 
-    BufferUtils::PerFrameBufferBuilder uniformBuilder;
-    if (!uniformBuilder.setAllocator(getAllocator())
-             .setFrameCount(getFramesInFlight())
-             .setSize(cullingUniformSize)
+    if (!BufferUtils::PerFrameBufferBuilder::fromConfig(perFrameConfig)
+             .withSize(cullingUniformSize)
              .build(uniformBuffers)) {
         SDL_Log("Failed to create grass culling uniform buffers");
         return false;
     }
 
-    BufferUtils::PerFrameBufferBuilder paramsBuilder;
-    if (!paramsBuilder.setAllocator(getAllocator())
-             .setFrameCount(getFramesInFlight())
-             .setSize(grassParamsSize)
+    if (!BufferUtils::PerFrameBufferBuilder::fromConfig(perFrameConfig)
+             .withSize(grassParamsSize)
              .build(paramsBuffers)) {
         SDL_Log("Failed to create grass params buffers");
         return false;

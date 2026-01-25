@@ -18,6 +18,67 @@ void destroyCreatedBuffers(VmaAllocator allocator,
 
 }  // namespace
 
+DoubleBufferedBufferConfig::DoubleBufferedBufferConfig(
+    VmaAllocator allocator,
+    uint32_t setCount,
+    VkDeviceSize size,
+    VkBufferUsageFlags usage,
+    VmaMemoryUsage memoryUsage,
+    VmaAllocationCreateFlags allocationFlags)
+    : allocator(allocator),
+      setCount(setCount),
+      size(size),
+      usage(usage),
+      memoryUsage(memoryUsage),
+      allocationFlags(allocationFlags) {}
+
+DoubleBufferedBufferBuilder DoubleBufferedBufferBuilder::fromConfig(const DoubleBufferedBufferConfig& config) {
+    DoubleBufferedBufferBuilder builder;
+    builder.allocator_ = config.allocator;
+    builder.setCount_ = config.setCount;
+    builder.bufferSize_ = config.size;
+    builder.usage_ = config.usage;
+    builder.memoryUsage_ = config.memoryUsage;
+    builder.allocationFlags_ = config.allocationFlags;
+    return builder;
+}
+
+DoubleBufferedBufferBuilder DoubleBufferedBufferBuilder::withAllocator(VmaAllocator allocator) const {
+    auto builder = *this;
+    builder.allocator_ = allocator;
+    return builder;
+}
+
+DoubleBufferedBufferBuilder DoubleBufferedBufferBuilder::withSetCount(uint32_t count) const {
+    auto builder = *this;
+    builder.setCount_ = count;
+    return builder;
+}
+
+DoubleBufferedBufferBuilder DoubleBufferedBufferBuilder::withSize(VkDeviceSize size) const {
+    auto builder = *this;
+    builder.bufferSize_ = size;
+    return builder;
+}
+
+DoubleBufferedBufferBuilder DoubleBufferedBufferBuilder::withUsage(VkBufferUsageFlags usage) const {
+    auto builder = *this;
+    builder.usage_ = usage;
+    return builder;
+}
+
+DoubleBufferedBufferBuilder DoubleBufferedBufferBuilder::withMemoryUsage(VmaMemoryUsage usage) const {
+    auto builder = *this;
+    builder.memoryUsage_ = usage;
+    return builder;
+}
+
+DoubleBufferedBufferBuilder DoubleBufferedBufferBuilder::withAllocationFlags(VmaAllocationCreateFlags flags) const {
+    auto builder = *this;
+    builder.allocationFlags_ = flags;
+    return builder;
+}
+
 DoubleBufferedBufferBuilder& DoubleBufferedBufferBuilder::setAllocator(VmaAllocator newAllocator) {
     allocator_ = newAllocator;
     return *this;
@@ -43,6 +104,11 @@ DoubleBufferedBufferBuilder& DoubleBufferedBufferBuilder::setMemoryUsage(VmaMemo
     return *this;
 }
 
+DoubleBufferedBufferBuilder& DoubleBufferedBufferBuilder::setAllocationFlags(VmaAllocationCreateFlags flags) {
+    allocationFlags_ = flags;
+    return *this;
+}
+
 bool DoubleBufferedBufferBuilder::build(DoubleBufferedBufferSet& outBuffers) const {
     if (!allocator_ || setCount_ == 0 || bufferSize_ == 0 || usage_ == 0) {
         SDL_Log("DoubleBufferedBufferBuilder missing required fields (allocator=%p, setCount=%u, size=%zu, usage=%u)",
@@ -61,6 +127,7 @@ bool DoubleBufferedBufferBuilder::build(DoubleBufferedBufferSet& outBuffers) con
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = memoryUsage_;
+    allocInfo.flags = allocationFlags_;
 
     for (uint32_t i = 0; i < setCount_; i++) {
         if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo, &result.buffers[i], &result.allocations[i], nullptr) !=
