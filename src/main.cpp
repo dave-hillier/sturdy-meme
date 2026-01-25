@@ -1,4 +1,5 @@
 #include "Application.h"
+#include "core/CrashHandler.h"
 #include <SDL3/SDL.h>
 #include <string>
 #include <vector>
@@ -29,6 +30,8 @@ static void printUsage(const char* progName) {
 }
 
 int main(int argc, char* argv[]) {
+    installCrashHandler();
+
     // Parse command line arguments
     std::vector<std::pair<std::string, bool>> toggleChanges;
     bool minimalMode = false;

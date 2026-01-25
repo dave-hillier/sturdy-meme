@@ -37,6 +37,7 @@ set(SOURCES
     src/scene/Transform.cpp
     src/scene/InputSystem.cpp
     # Core
+    src/core/CrashHandler.cpp
     src/core/Renderer.cpp
     src/core/RendererCore.cpp
     src/core/RendererInitPhases.cpp
