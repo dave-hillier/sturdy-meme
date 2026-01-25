@@ -2,6 +2,7 @@
 
 #include "HostilityState.h"
 #include "NPCPerception.h"
+#include "NPCLODSystem.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
@@ -121,6 +122,23 @@ struct NPC {
     size_t currentAnimation = 0;    // Current animation clip index
     uint32_t boneSlot = 0;          // Slot index for bone matrices in renderer
 
+    // LOD system (Virtual/Bulk/Real states from AC Origins)
+    NPCLODData lodData;
+
+    // Needs-based behavior (drives emergent behavior)
+    NPCNeeds needs;
+    NPCArchetype archetype = NPCArchetype::Villager;
+
+    // Schedule and locations
+    glm::vec3 homeLocation{0.0f};      // Where NPC lives
+    glm::vec3 workLocation{0.0f};      // Where NPC works
+    glm::vec3 socialLocation{0.0f};    // Where NPC socializes (tavern, square)
+    ScheduleActivity currentActivity = ScheduleActivity::Idle;
+    glm::vec3 activityTarget{0.0f};    // Current goal location
+
+    // Deterministic spawning (for consistent world state)
+    uint32_t spawnSeed = 0;            // Seed for deterministic behavior
+
     // Check if NPC is alive
     bool isAlive() const { return health > 0.0f; }
 
@@ -152,6 +170,76 @@ struct NPC {
             default: return 1.0f;
         }
     }
+
+    // LOD state checks
+    bool isVirtual() const { return lodData.state == NPCLODState::Virtual; }
+    bool isBulk() const { return lodData.state == NPCLODState::Bulk; }
+    bool isReal() const { return lodData.state == NPCLODState::Real; }
+
+    // Check if NPC should be rendered (Bulk or Real)
+    bool isVisible() const { return lodData.state != NPCLODState::Virtual; }
+
+    // Check if NPC needs full AI update (Real only)
+    bool needsFullUpdate() const { return lodData.state == NPCLODState::Real; }
+
+    // Get schedule activity for current time
+    ScheduleActivity getScheduledActivity(float hourOfDay) const {
+        DayPeriod period = getDayPeriod(hourOfDay);
+        switch (archetype) {
+            case NPCArchetype::Guard:
+                if (period == DayPeriod::Night) return ScheduleActivity::Sleep;
+                return ScheduleActivity::Patrol;
+
+            case NPCArchetype::Merchant:
+                if (period == DayPeriod::Night || period == DayPeriod::Dawn) return ScheduleActivity::Sleep;
+                if (period == DayPeriod::Midday) return ScheduleActivity::Eat;
+                if (period == DayPeriod::Evening) return ScheduleActivity::Socialize;
+                return ScheduleActivity::Work;
+
+            case NPCArchetype::Farmer:
+                if (period == DayPeriod::Night) return ScheduleActivity::Sleep;
+                if (period == DayPeriod::Dawn) return ScheduleActivity::Eat;
+                if (period == DayPeriod::Evening) return ScheduleActivity::Socialize;
+                return ScheduleActivity::Work;
+
+            case NPCArchetype::Noble:
+                if (period == DayPeriod::Night || period == DayPeriod::Dawn) return ScheduleActivity::Sleep;
+                if (period == DayPeriod::Midday || period == DayPeriod::Evening) return ScheduleActivity::Eat;
+                return ScheduleActivity::Wander;
+
+            case NPCArchetype::Beggar:
+                if (period == DayPeriod::Night) return ScheduleActivity::Sleep;
+                return ScheduleActivity::Wander;
+
+            case NPCArchetype::Child:
+                if (period == DayPeriod::Night || period == DayPeriod::Dawn) return ScheduleActivity::Sleep;
+                if (period == DayPeriod::Midday) return ScheduleActivity::Eat;
+                return ScheduleActivity::Wander;
+
+            case NPCArchetype::Villager:
+            default:
+                if (period == DayPeriod::Night) return ScheduleActivity::Sleep;
+                if (period == DayPeriod::Dawn || period == DayPeriod::Midday) return ScheduleActivity::Eat;
+                if (period == DayPeriod::Evening) return ScheduleActivity::Socialize;
+                return ScheduleActivity::Work;
+        }
+    }
+
+    // Get target location for an activity
+    glm::vec3 getActivityLocation(ScheduleActivity activity) const {
+        switch (activity) {
+            case ScheduleActivity::Sleep:
+            case ScheduleActivity::Eat:
+                return homeLocation;
+            case ScheduleActivity::Work:
+            case ScheduleActivity::Patrol:
+                return workLocation;
+            case ScheduleActivity::Socialize:
+                return socialLocation;
+            default:
+                return transform.position;
+        }
+    }
 };
 
 // NPC spawn configuration
@@ -163,4 +251,13 @@ struct NPCSpawnInfo {
     float health = 100.0f;
     HostilityConfig config;         // Optional custom config
     std::vector<PatrolWaypoint> patrolPath;  // Optional patrol path
+
+    // Schedule and archetype
+    NPCArchetype archetype = NPCArchetype::Villager;
+    glm::vec3 homeLocation{0.0f};   // Where NPC lives (defaults to spawn position)
+    glm::vec3 workLocation{0.0f};   // Where NPC works
+    glm::vec3 socialLocation{0.0f}; // Where NPC socializes
+
+    // Deterministic spawning
+    uint32_t seed = 0;              // 0 = random seed, otherwise deterministic
 };

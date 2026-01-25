@@ -25,16 +25,33 @@ NPCID NPCManager::spawn(const NPCSpawnInfo& info) {
     npc.config = info.config;
     npc.patrolPath = info.patrolPath;
 
+    // Archetype and schedule locations
+    npc.archetype = info.archetype;
+    npc.homeLocation = (glm::length(info.homeLocation) > 0.01f) ? info.homeLocation : info.position;
+    npc.workLocation = (glm::length(info.workLocation) > 0.01f) ? info.workLocation : info.position;
+    npc.socialLocation = (glm::length(info.socialLocation) > 0.01f) ? info.socialLocation : info.position;
+
+    // Deterministic seeding
+    npc.spawnSeed = (info.seed != 0) ? info.seed :
+        static_cast<uint32_t>(info.position.x * 1000.0f + info.position.z * 7919.0f);
+
+    // Initialize needs based on time of day
+    npc.needs.hunger = 0.3f;
+    npc.needs.tiredness = 0.2f;
+
+    // Start in virtual state (will be promoted based on distance)
+    npc.lodData.state = NPCLODState::Virtual;
+
     // Create behavior tree based on hostility type
     npc.behaviorTree = NPCBehaviorTrees::CreateBehaviorTree(info.hostility);
 
     NPCID spawnedId = npc.id;
     npcs_.push_back(std::move(npc));
 
-    SDL_Log("Spawned NPC '%s' (ID: %u) at (%.1f, %.1f, %.1f) with hostility %d [BehaviorTree]",
+    SDL_Log("Spawned NPC '%s' (ID: %u) at (%.1f, %.1f, %.1f) hostility=%d archetype=%d [LOD+BT]",
             info.name.c_str(), spawnedId,
             info.position.x, info.position.y, info.position.z,
-            static_cast<int>(info.hostility));
+            static_cast<int>(info.hostility), static_cast<int>(info.archetype));
 
     fireEvent(spawnedId, "spawned");
     return spawnedId;
@@ -53,42 +70,26 @@ void NPCManager::remove(NPCID id) {
 }
 
 void NPCManager::update(float deltaTime, const glm::vec3& playerPosition, PhysicsWorld* physics) {
-    for (auto& npc : npcs_) {
-        if (!npc.isAlive()) {
-            continue;
-        }
+    // Advance game time
+    float gameHours = (deltaTime * timeScale_) / 3600.0f;  // Convert to hours
+    timeOfDay_ += gameHours;
+    if (timeOfDay_ >= 24.0f) timeOfDay_ -= 24.0f;
 
-        // Update perception first (this feeds data to the behavior tree)
-        npc.perception.update(deltaTime, npc.transform.position, npc.transform.forward(),
-                              playerPosition, npc.config, physics);
+    // Update LOD states for all NPCs based on distance to player
+    updateLODStates(playerPosition);
 
-        // Update attack cooldown
-        npc.attackCooldownTimer = std::max(0.0f, npc.attackCooldownTimer - deltaTime);
+    // Update systemic events
+    updateSystemicEvents(deltaTime);
 
-        // Update behavior tree
-        if (npc.behaviorTree) {
-            npc.behaviorTree->tick(&npc, playerPosition, physics, deltaTime);
-        }
+    // Update NPCs based on their LOD state
+    // Virtual NPCs: minimal updates (needs only)
+    updateVirtualNPCs(deltaTime, gameHours);
 
-        // Apply velocity to position
-        if (glm::length(npc.velocity) > 0.001f) {
-            npc.transform.position += npc.velocity * deltaTime;
-        }
+    // Bulk NPCs: simplified updates (needs + schedule + simple movement)
+    updateBulkNPCs(deltaTime, gameHours, playerPosition);
 
-        // Update alert level for visual feedback (smooth transition)
-        float targetAlert = 0.0f;
-        if (npc.behaviorState == BehaviorState::Attack) {
-            targetAlert = 1.0f;
-        } else if (npc.behaviorState == BehaviorState::Chase || npc.behaviorState == BehaviorState::Flee) {
-            targetAlert = 0.7f;
-        } else if (npc.perception.awareness > npc.config.detectionThreshold) {
-            targetAlert = npc.perception.awareness * 0.5f;
-        }
-        npc.alertLevel += (targetAlert - npc.alertLevel) * (1.0f - std::exp(-5.0f * deltaTime));
-
-        // Update state timer
-        npc.stateTimer += deltaTime;
-    }
+    // Real NPCs: full updates (perception + behavior tree + physics)
+    updateRealNPCs(deltaTime, gameHours, playerPosition, physics);
 }
 
 NPC* NPCManager::getNPC(NPCID id) {
@@ -197,22 +198,23 @@ void NPCManager::clear() {
 std::string NPCManager::getDebugSummary() const {
     std::ostringstream ss;
     ss << "NPCs: " << getAliveCount() << "/" << npcs_.size() << " alive, "
-       << getHostileCount() << " hostile [BehaviorTree AI]";
+       << getHostileCount() << " hostile\n";
+    ss << "  LOD: V=" << getVirtualCount() << " B=" << getBulkCount() << " R=" << getRealCount();
+    ss << " | Time: " << static_cast<int>(timeOfDay_) << ":"
+       << std::setfill('0') << std::setw(2) << static_cast<int>((timeOfDay_ - static_cast<int>(timeOfDay_)) * 60);
+    ss << " | Events: " << activeEvents_.size();
 
-    if (!npcs_.empty()) {
+    if (!npcs_.empty() && npcs_.size() <= 10) {
         ss << "\n";
         for (const auto& npc : npcs_) {
+            const char* lodStr = npc.isVirtual() ? "V" : (npc.isBulk() ? "B" : "R");
             ss << "  [" << npc.id << "] " << npc.name
+               << " " << lodStr
                << " H:" << static_cast<int>(npc.hostility)
-               << " S:" << static_cast<int>(npc.behaviorState)
-               << " A:" << static_cast<int>(npc.perception.awareness * 100) << "%"
-               << " HP:" << static_cast<int>(npc.health) << "/"
-               << static_cast<int>(npc.maxHealth);
-            if (npc.perception.canSeePlayer) {
-                ss << " [SEES]";
-            }
-            if (npc.behaviorTree) {
-                ss << " [BT]";
+               << " S:" << static_cast<int>(npc.behaviorState);
+            if (npc.isReal()) {
+                ss << " A:" << static_cast<int>(npc.perception.awareness * 100) << "%";
+                if (npc.perception.canSeePlayer) ss << " [SEES]";
             }
             ss << "\n";
         }
@@ -373,6 +375,11 @@ void NPCManager::render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRen
             continue;
         }
 
+        // Only render visible NPCs (Bulk and Real states)
+        if (!npc.isVisible()) {
+            continue;
+        }
+
         if (npc.boneSlot == 0) {
             continue;  // Slot 0 reserved for player, skip unassigned NPCs
         }
@@ -390,4 +397,351 @@ void NPCManager::render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRen
         // Render NPC
         renderer.recordNPC(cmd, frameIndex, npc.boneSlot, modelMatrix, tintColor, *sharedCharacter_);
     }
+}
+
+// =============================================================================
+// LOD System Implementation
+// =============================================================================
+
+size_t NPCManager::getVirtualCount() const {
+    return std::count_if(npcs_.begin(), npcs_.end(),
+        [](const NPC& npc) { return npc.isAlive() && npc.isVirtual(); });
+}
+
+size_t NPCManager::getBulkCount() const {
+    return std::count_if(npcs_.begin(), npcs_.end(),
+        [](const NPC& npc) { return npc.isAlive() && npc.isBulk(); });
+}
+
+size_t NPCManager::getRealCount() const {
+    return std::count_if(npcs_.begin(), npcs_.end(),
+        [](const NPC& npc) { return npc.isAlive() && npc.isReal(); });
+}
+
+void NPCManager::updateLODStates(const glm::vec3& playerPosition) {
+    uint32_t realCount = 0;
+    uint32_t bulkCount = 0;
+
+    // First pass: calculate distances and count current states
+    for (auto& npc : npcs_) {
+        if (!npc.isAlive()) continue;
+
+        glm::vec3 diff = npc.transform.position - playerPosition;
+        npc.lodData.distanceToPlayer = glm::length(diff);
+
+        // Calculate priority based on hostility and distance
+        float priorityScore = 0.0f;
+        if (npc.hostility == HostilityLevel::Hostile) priorityScore += 100.0f;
+        if (npc.perception.canSeePlayer) priorityScore += 50.0f;
+        priorityScore += npc.needs.getUrgencyScore() * 10.0f;
+        priorityScore -= npc.lodData.distanceToPlayer;
+        npc.lodData.updatePriority = static_cast<uint8_t>(glm::clamp(priorityScore, 0.0f, 255.0f));
+    }
+
+    // Sort by priority for LOD budget allocation
+    std::vector<NPC*> sortedNPCs;
+    for (auto& npc : npcs_) {
+        if (npc.isAlive()) sortedNPCs.push_back(&npc);
+    }
+    std::sort(sortedNPCs.begin(), sortedNPCs.end(),
+        [](const NPC* a, const NPC* b) {
+            return a->lodData.updatePriority > b->lodData.updatePriority;
+        });
+
+    // Assign LOD states respecting budgets
+    for (NPC* npc : sortedNPCs) {
+        float dist = npc->lodData.distanceToPlayer;
+        NPCLODState currentState = npc->lodData.state;
+        NPCLODState newState = currentState;
+
+        // Determine desired state based on distance (with hysteresis)
+        if (currentState == NPCLODState::Virtual) {
+            if (dist < lodConfig_.virtualToRealDistance) {
+                newState = (dist < lodConfig_.bulkToRealDistance) ? NPCLODState::Real : NPCLODState::Bulk;
+            }
+        } else if (currentState == NPCLODState::Bulk) {
+            if (dist < lodConfig_.bulkToRealDistance) {
+                newState = NPCLODState::Real;
+            } else if (dist > lodConfig_.realToVirtualDistance) {
+                newState = NPCLODState::Virtual;
+            }
+        } else {  // Real
+            if (dist > lodConfig_.realToBulkDistance) {
+                newState = (dist > lodConfig_.realToVirtualDistance) ? NPCLODState::Virtual : NPCLODState::Bulk;
+            }
+        }
+
+        // Apply budget constraints
+        if (newState == NPCLODState::Real && realCount >= lodConfig_.maxRealNPCs) {
+            newState = NPCLODState::Bulk;
+        }
+        if (newState == NPCLODState::Bulk && bulkCount >= lodConfig_.maxBulkNPCs) {
+            newState = NPCLODState::Virtual;
+        }
+
+        // Update counts
+        if (newState == NPCLODState::Real) realCount++;
+        else if (newState == NPCLODState::Bulk) bulkCount++;
+
+        npc->lodData.state = newState;
+    }
+}
+
+void NPCManager::updateVirtualNPCs(float deltaTime, float gameHours) {
+    for (auto& npc : npcs_) {
+        if (!npc.isAlive() || !npc.isVirtual()) continue;
+
+        npc.lodData.timeSinceLastUpdate += deltaTime;
+
+        // Only update virtual NPCs periodically (every 5-15 seconds)
+        if (npc.lodData.timeSinceLastUpdate < lodConfig_.virtualUpdateInterval) {
+            continue;
+        }
+        npc.lodData.timeSinceLastUpdate = 0.0f;
+
+        // Update needs
+        updateNPCNeeds(npc, gameHours * lodConfig_.virtualUpdateInterval);
+
+        // Update schedule (move to scheduled location)
+        updateNPCSchedule(npc);
+
+        // Teleport to activity location if far away (virtual NPCs don't animate travel)
+        glm::vec3 targetLoc = npc.getActivityLocation(npc.currentActivity);
+        float distToTarget = glm::length(targetLoc - npc.transform.position);
+        if (distToTarget > 50.0f) {
+            // Teleport - we're virtual anyway
+            npc.transform.position = targetLoc;
+        }
+    }
+}
+
+void NPCManager::updateBulkNPCs(float deltaTime, float gameHours, const glm::vec3& playerPosition) {
+    for (auto& npc : npcs_) {
+        if (!npc.isAlive() || !npc.isBulk()) continue;
+
+        npc.lodData.timeSinceLastUpdate += deltaTime;
+
+        // Update bulk NPCs every second
+        if (npc.lodData.timeSinceLastUpdate < lodConfig_.bulkUpdateInterval) {
+            continue;
+        }
+        float updateDelta = npc.lodData.timeSinceLastUpdate;
+        npc.lodData.timeSinceLastUpdate = 0.0f;
+
+        // Update needs
+        updateNPCNeeds(npc, gameHours * updateDelta);
+
+        // Update schedule
+        updateNPCSchedule(npc);
+
+        // Simple movement toward activity target
+        glm::vec3 targetLoc = npc.activityTarget;
+        glm::vec3 toTarget = targetLoc - npc.transform.position;
+        float dist = glm::length(toTarget);
+
+        if (dist > 2.0f) {
+            // Move toward target at reduced speed
+            glm::vec3 dir = toTarget / dist;
+            float speed = npc.baseSpeed * 0.5f;  // Slower for bulk NPCs
+            npc.transform.position += dir * speed * updateDelta;
+            npc.transform.lookAt(targetLoc);
+            npc.behaviorState = BehaviorState::Patrol;
+        } else {
+            npc.velocity = glm::vec3(0.0f);
+            npc.behaviorState = BehaviorState::Idle;
+        }
+    }
+}
+
+void NPCManager::updateRealNPCs(float deltaTime, float gameHours,
+                                 const glm::vec3& playerPosition, PhysicsWorld* physics) {
+    for (auto& npc : npcs_) {
+        if (!npc.isAlive() || !npc.isReal()) continue;
+
+        npc.lodData.timeSinceLastUpdate = 0.0f;  // Real NPCs update every frame
+
+        // Update needs
+        updateNPCNeeds(npc, gameHours);
+
+        // Update schedule
+        updateNPCSchedule(npc);
+
+        // Full perception update
+        npc.perception.update(deltaTime, npc.transform.position, npc.transform.forward(),
+                              playerPosition, npc.config, physics);
+
+        // Update attack cooldown
+        npc.attackCooldownTimer = std::max(0.0f, npc.attackCooldownTimer - deltaTime);
+
+        // Update behavior tree (full AI)
+        if (npc.behaviorTree) {
+            npc.behaviorTree->tick(&npc, playerPosition, physics, deltaTime);
+        }
+
+        // Apply velocity to position
+        if (glm::length(npc.velocity) > 0.001f) {
+            npc.transform.position += npc.velocity * deltaTime;
+        }
+
+        // Update alert level for visual feedback
+        float targetAlert = 0.0f;
+        if (npc.behaviorState == BehaviorState::Attack) {
+            targetAlert = 1.0f;
+        } else if (npc.behaviorState == BehaviorState::Chase || npc.behaviorState == BehaviorState::Flee) {
+            targetAlert = 0.7f;
+        } else if (npc.perception.awareness > npc.config.detectionThreshold) {
+            targetAlert = npc.perception.awareness * 0.5f;
+        }
+        npc.alertLevel += (targetAlert - npc.alertLevel) * (1.0f - std::exp(-5.0f * deltaTime));
+
+        // Update state timer
+        npc.stateTimer += deltaTime;
+    }
+}
+
+void NPCManager::updateNPCNeeds(NPC& npc, float gameHours) {
+    bool isSafe = npc.hostility != HostilityLevel::Hostile &&
+                  npc.behaviorState != BehaviorState::Flee;
+    bool isWorking = npc.currentActivity == ScheduleActivity::Work ||
+                     npc.currentActivity == ScheduleActivity::Patrol;
+    bool isSocializing = npc.currentActivity == ScheduleActivity::Socialize;
+    bool isEating = npc.currentActivity == ScheduleActivity::Eat;
+    bool isResting = npc.currentActivity == ScheduleActivity::Sleep;
+
+    npc.needs.update(gameHours, isSafe, isWorking, isSocializing, isEating, isResting);
+
+    // Needs can override scheduled activity
+    auto urgentNeed = npc.needs.getMostUrgentNeed(0.8f);
+    if (urgentNeed == NPCNeeds::NeedType::Fear && npc.hostility != HostilityLevel::Hostile) {
+        npc.needs.fear += 0.5f;  // Fear increases hostility reaction
+    }
+    if (urgentNeed == NPCNeeds::NeedType::Aggression && npc.hostility == HostilityLevel::Neutral) {
+        // Aggression might make neutral NPCs confront the player
+        npc.needs.aggression = glm::clamp(npc.needs.aggression, 0.0f, 1.0f);
+    }
+}
+
+void NPCManager::updateNPCSchedule(NPC& npc) {
+    // Get scheduled activity for current time
+    ScheduleActivity scheduled = npc.getScheduledActivity(timeOfDay_);
+
+    // Check if urgent needs override schedule
+    auto urgentNeed = npc.needs.getMostUrgentNeed(0.85f);
+    if (urgentNeed == NPCNeeds::NeedType::Hunger && scheduled != ScheduleActivity::Eat) {
+        scheduled = ScheduleActivity::Eat;
+    } else if (urgentNeed == NPCNeeds::NeedType::Tiredness && scheduled != ScheduleActivity::Sleep) {
+        scheduled = ScheduleActivity::Sleep;
+    }
+
+    npc.currentActivity = scheduled;
+    npc.activityTarget = npc.getActivityLocation(scheduled);
+}
+
+// =============================================================================
+// Systemic Events
+// =============================================================================
+
+SystemicEvent* NPCManager::getEventAt(const glm::vec3& position, float radius) {
+    float radiusSq = radius * radius;
+    for (auto& event : activeEvents_) {
+        if (!event.isActive()) continue;
+        glm::vec3 diff = event.location - position;
+        if (glm::dot(diff, diff) <= radiusSq) {
+            return &event;
+        }
+    }
+    return nullptr;
+}
+
+void NPCManager::updateSystemicEvents(float deltaTime) {
+    // Update existing events
+    for (auto& event : activeEvents_) {
+        if (event.isActive()) {
+            event.elapsed += deltaTime;
+        }
+    }
+
+    // Remove completed events
+    activeEvents_.erase(
+        std::remove_if(activeEvents_.begin(), activeEvents_.end(),
+            [](const SystemicEvent& e) { return !e.isActive(); }),
+        activeEvents_.end());
+
+    // Try to spawn new events periodically
+    eventSpawnTimer_ += deltaTime;
+    if (eventSpawnTimer_ >= EVENT_CHECK_INTERVAL) {
+        eventSpawnTimer_ = 0.0f;
+        trySpawnSystemicEvent();
+    }
+}
+
+void NPCManager::trySpawnSystemicEvent() {
+    // Only spawn events if we have enough real NPCs
+    if (getRealCount() < 2) return;
+
+    // Find potential instigators for events
+    for (auto& npc : npcs_) {
+        if (!npc.isAlive() || !npc.isReal()) continue;
+
+        // Hostile NPCs might start fights or muggings
+        if (npc.hostility == HostilityLevel::Hostile && npc.needs.aggression > 0.6f) {
+            if (canSpawnEvent(SystemicEventType::Fistfight, npc)) {
+                // Find a nearby target
+                auto nearbyNPCs = getNPCsInRadius(npc.transform.position, 10.0f);
+                for (NPC* target : nearbyNPCs) {
+                    if (target->id != npc.id && target->hostility != HostilityLevel::Hostile) {
+                        SystemicEvent event;
+                        event.type = SystemicEventType::Fistfight;
+                        event.instigatorId = npc.id;
+                        event.targetId = target->id;
+                        event.location = (npc.transform.position + target->transform.position) * 0.5f;
+                        event.duration = 15.0f;
+                        event.playerCanIntervene = true;
+                        activeEvents_.push_back(event);
+                        SDL_Log("Systemic event: Fistfight between %s and %s",
+                                npc.name.c_str(), target->name.c_str());
+                        return;  // One event per check
+                    }
+                }
+            }
+        }
+
+        // Social NPCs might start conversations
+        if (npc.needs.social > 0.7f && npc.behaviorState == BehaviorState::Idle) {
+            auto nearbyNPCs = getNPCsInRadius(npc.transform.position, 5.0f);
+            for (NPC* target : nearbyNPCs) {
+                if (target->id != npc.id && target->behaviorState == BehaviorState::Idle) {
+                    SystemicEvent event;
+                    event.type = SystemicEventType::Conversation;
+                    event.instigatorId = npc.id;
+                    event.targetId = target->id;
+                    event.location = (npc.transform.position + target->transform.position) * 0.5f;
+                    event.duration = 30.0f;
+                    event.playerCanIntervene = false;
+                    activeEvents_.push_back(event);
+
+                    // Reduce social need for both
+                    npc.needs.social -= 0.3f;
+                    target->needs.social -= 0.3f;
+                    return;
+                }
+            }
+        }
+    }
+}
+
+bool NPCManager::canSpawnEvent(SystemicEventType type, const NPC& instigator) const {
+    // Check if this NPC is already involved in an event
+    for (const auto& event : activeEvents_) {
+        if (event.instigatorId == instigator.id || event.targetId == instigator.id) {
+            return false;
+        }
+    }
+
+    // Limit total active events
+    if (activeEvents_.size() >= 5) {
+        return false;
+    }
+
+    return true;
 }

@@ -80,11 +80,41 @@ public:
     // Render all NPCs using the skinned mesh renderer
     void render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRenderer& renderer);
 
+    // LOD system configuration
+    void setLODConfig(const NPCLODConfig& config) { lodConfig_ = config; }
+    const NPCLODConfig& getLODConfig() const { return lodConfig_; }
+
+    // Time of day for schedule system (0-24 hours)
+    void setTimeOfDay(float hour) { timeOfDay_ = hour; }
+    float getTimeOfDay() const { return timeOfDay_; }
+
+    // Game time scale (how fast time passes, 1.0 = real time)
+    void setTimeScale(float scale) { timeScale_ = scale; }
+
+    // Systemic events
+    const std::vector<SystemicEvent>& getActiveEvents() const { return activeEvents_; }
+    SystemicEvent* getEventAt(const glm::vec3& position, float radius);
+
+    // LOD statistics
+    size_t getVirtualCount() const;
+    size_t getBulkCount() const;
+    size_t getRealCount() const;
+
 private:
     std::vector<NPC> npcs_;
     NPCID nextId_ = 1;
     NPCEventCallback eventCallback_;
     AnimatedCharacter* sharedCharacter_ = nullptr;  // Shared mesh/skeleton from player
+
+    // LOD system
+    NPCLODConfig lodConfig_;
+    float timeOfDay_ = 12.0f;      // Current hour (0-24)
+    float timeScale_ = 60.0f;      // Game minutes per real second (default: 1 hour = 1 minute)
+
+    // Systemic events
+    std::vector<SystemicEvent> activeEvents_;
+    float eventSpawnTimer_ = 0.0f;
+    static constexpr float EVENT_CHECK_INTERVAL = 5.0f;  // Check for new events every 5s
 
     // Find NPC index by ID (returns -1 if not found)
     int findNPCIndex(NPCID id) const;
@@ -94,4 +124,19 @@ private:
 
     // Compute bone matrices for a single NPC based on its animation state
     void computeNPCBoneMatrices(NPC& npc, std::vector<glm::mat4>& outBoneMatrices);
+
+    // LOD system helpers
+    void updateLODStates(const glm::vec3& playerPosition);
+    void updateVirtualNPCs(float deltaTime, float gameHours);
+    void updateBulkNPCs(float deltaTime, float gameHours, const glm::vec3& playerPosition);
+    void updateRealNPCs(float deltaTime, float gameHours, const glm::vec3& playerPosition, PhysicsWorld* physics);
+
+    // Needs and schedule helpers
+    void updateNPCNeeds(NPC& npc, float gameHours);
+    void updateNPCSchedule(NPC& npc);
+
+    // Systemic event helpers
+    void updateSystemicEvents(float deltaTime);
+    void trySpawnSystemicEvent();
+    bool canSpawnEvent(SystemicEventType type, const NPC& instigator) const;
 };
