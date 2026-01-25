@@ -910,13 +910,12 @@ float starField(vec3 dir) {
 
 // celestialDisc function now in celestial_common.glsl
 
-// Lunar phase mask - creates moon phases based on actual sun-moon geometry
-// sunDir: actual sun direction in world space
+// Lunar phase mask - creates moon phases based on sun-moon geometry or stored phase
+// sunDir: actual sun direction in world space (used when phase override is disabled)
 // Returns 0-1 illumination factor
 float lunarPhaseMask(vec3 dir, vec3 moonDir, vec3 sunDir, float discSize) {
     vec3 viewDir = normalize(dir);
     vec3 moonCenter = normalize(moonDir);
-    vec3 sunDirection = normalize(sunDir);
 
     // Calculate angular distance from moon center
     float centerDot = dot(viewDir, moonCenter);
@@ -942,6 +941,24 @@ float lunarPhaseMask(vec3 dir, vec3 moonDir, vec3 sunDir, float discSize) {
     // Calculate 3D sphere normal (z points toward viewer)
     float z = sqrt(max(0.0, 1.0 - r * r));
 
+    // Determine sun direction - either from geometry or synthesized from phase override
+    vec3 sunDirection;
+    if (ubo.moonPhaseOverride > 0.5) {
+        // Phase override enabled - synthesize sun direction from stored phase value
+        // Phase: 0 = new moon (sun behind moon), 0.5 = full moon (sun behind Earth)
+        // Convert phase to angle: phase 0 -> sun at +Z (behind moon), phase 0.5 -> sun at -Z (toward viewer)
+        float phase = ubo.moonColor.w;
+        float phaseAngle = phase * 2.0 * PI;
+        // Sun direction in moon's local space (right, up, toward-viewer)
+        // At phase 0: sun is behind moon (away from viewer), so sunLocal.z = -1
+        // At phase 0.5: sun is behind viewer, so sunLocal.z = +1
+        sunDirection = normalize(vec3(sin(phaseAngle), 0.0, -cos(phaseAngle)));
+        // Transform to world space for consistency (though we'll transform back below)
+        sunDirection = right * sunDirection.x + tangentUp * sunDirection.y + moonCenter * sunDirection.z;
+    } else {
+        sunDirection = normalize(sunDir);
+    }
+
     // Transform sun direction into moon's local coordinate system
     // The moon's local frame: right, tangentUp, moonCenter (toward viewer)
     vec3 sunLocal;
@@ -953,7 +970,7 @@ float lunarPhaseMask(vec3 dir, vec3 moonDir, vec3 sunDir, float discSize) {
     // Surface normal at this point in local space
     vec3 normal = normalize(vec3(x, y, z));
 
-    // Lambertian lighting based on actual sun direction
+    // Lambertian lighting based on sun direction
     float lighting = dot(normal, sunLocal);
 
     // Smooth terminator
@@ -1185,8 +1202,10 @@ vec3 renderAtmosphere(vec3 dir) {
     // Moon surface has albedo ~0.12, so it's much dimmer than the sun
     // Use user-configurable disc intensity scaled by phase mask
     float moonDiscBrightness = ubo.moonDiscIntensity * phaseMask;
-    // Allow moon to redden at horizon like the sun (remove minimum clamp)
-    sky += ubo.moonColor.rgb * moonDisc * moonDiscBrightness * ubo.moonDirection.w *
+    // Moon disc visibility is based on altitude (above horizon), not atmospheric light intensity
+    // moonDirection.w is for atmospheric scattering; disc visibility uses altitude check
+    float moonAltitudeVisibility = smoothstep(-0.05, 0.1, ubo.moonDirection.y);
+    sky += ubo.moonColor.rgb * moonDisc * moonDiscBrightness * moonAltitudeVisibility *
            skyTransmittance * clouds.transmittance;
 
     // Star field blended over the atmospheric tint (also behind clouds)
