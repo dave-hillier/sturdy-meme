@@ -382,6 +382,26 @@ std::vector<double> WardGroup::getAvailable() const {
         return false;
     };
 
+    // Helper to check if edge is "outward facing" (borders non-city, non-water cell)
+    // Used by slum wards to prevent buildings on edges facing away from the city
+    auto isOutwardFacingEdge = [this](const geom::Point& v0, const geom::Point& v1) -> bool {
+        for (Cell* cell : cells) {
+            for (Cell* neighbor : cell->neighbors) {
+                // Skip cells that are in our group
+                if (neighbor->group == this) continue;
+
+                // Check if neighbor shares this edge
+                if (neighbor->shape.findEdge(v0, v1) != -1 || neighbor->shape.findEdge(v1, v0) != -1) {
+                    // Edge is outward-facing if neighbor is NOT withinCity and NOT waterbody
+                    if (!neighbor->withinCity && !neighbor->waterbody) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+
     for (size_t i = 0; i < border.length(); ++i) {
         const geom::Point& v0 = border[i];
         const geom::Point& v1 = border[(i + 1) % border.length()];
@@ -431,11 +451,13 @@ std::vector<double> WardGroup::getAvailable() const {
                 else if (isEdgeOnRoad(v0, v1, model->streets) || isEdgeOnRoad(v0, v1, model->roads)) {
                     inset = INSET_STREET;
                 }
+                // For non-urban (slum) wards: outward-facing edges get large inset
+                // This prevents buildings from being placed on edges facing away from city
+                else if (!urban && isOutwardFacingEdge(v0, v1)) {
+                    inset = 1000.0;  // Large inset = no buildings on this edge
+                }
             }
         }
-        // Default: INSET_DEFAULT (0.6)
-        // Note: We don't check for internal edges here because the border is already
-        // the circumference of all cells in the group, so it doesn't contain internal edges.
 
         insets.push_back(inset);
     }
