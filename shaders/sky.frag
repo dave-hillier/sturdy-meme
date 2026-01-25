@@ -1185,8 +1185,10 @@ vec3 renderAtmosphere(vec3 dir) {
     // Moon surface has albedo ~0.12, so it's much dimmer than the sun
     // Use user-configurable disc intensity scaled by phase mask
     float moonDiscBrightness = ubo.moonDiscIntensity * phaseMask;
-    // Allow moon to redden at horizon like the sun (remove minimum clamp)
-    sky += ubo.moonColor.rgb * moonDisc * moonDiscBrightness * ubo.moonDirection.w *
+    // Moon disc visibility is based on altitude (above horizon), not atmospheric light intensity
+    // moonDirection.w is for atmospheric scattering; disc visibility uses altitude check
+    float moonAltitudeVisibility = smoothstep(-0.05, 0.1, ubo.moonDirection.y);
+    sky += ubo.moonColor.rgb * moonDisc * moonDiscBrightness * moonAltitudeVisibility *
            skyTransmittance * clouds.transmittance;
 
     // Star field blended over the atmospheric tint (also behind clouds)
