@@ -17,8 +17,8 @@
 
 // Factory implementations
 std::unique_ptr<ShadowSystem> ShadowSystem::create(const InitInfo& info) {
-    auto system = std::make_unique<ShadowSystem>(ConstructToken{});
-    if (!system->initInternal(info)) {
+    auto system = std::make_unique<ShadowSystem>(ConstructToken{}, info);
+    if (!system->initialized_) {
         return nullptr;
     }
     return system;
@@ -33,37 +33,34 @@ std::unique_ptr<ShadowSystem> ShadowSystem::create(const InitContext& ctx,
     return create(info);
 }
 
+ShadowSystem::ShadowSystem(ConstructToken, const InitInfo& info)
+    : initInfo_(info) {
+    if (initInfo_.device == VK_NULL_HANDLE) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "ShadowSystem requires a valid VkDevice");
+        return;
+    }
+
+    if (!createShadowRenderPass()
+        || !createShadowResources()
+        || !createDynamicShadowResources()
+        || !createInstancedShadowResources()
+        || !createShadowPipeline()
+        || !createSkinnedShadowPipeline()
+        || !createDynamicShadowPipeline()
+        || !createInstancedShadowPipeline()) {
+        return;
+    }
+
+    initialized_ = true;
+}
+
 // Destructor
 ShadowSystem::~ShadowSystem() {
-    cleanup();
-}
+    if (initInfo_.device == VK_NULL_HANDLE) {
+        return;
+    }
 
-bool ShadowSystem::initInternal(const InitInfo& info) {
-    raiiDevice = info.raiiDevice;
-    device = info.device;
-    physicalDevice = info.physicalDevice;
-    allocator = info.allocator;
-    mainDescriptorSetLayout = info.mainDescriptorSetLayout;
-    skinnedDescriptorSetLayout = info.skinnedDescriptorSetLayout;
-    shaderPath = info.shaderPath;
-    framesInFlight = info.framesInFlight;
-
-    if (!createShadowRenderPass()) return false;
-    if (!createShadowResources()) return false;
-    if (!createDynamicShadowResources()) return false;
-    if (!createInstancedShadowResources()) return false;
-    if (!createShadowPipeline()) return false;
-    if (!createSkinnedShadowPipeline()) return false;
-    if (!createDynamicShadowPipeline()) return false;
-    if (!createInstancedShadowPipeline()) return false;
-
-    return true;
-}
-
-void ShadowSystem::cleanup() {
-    if (device == VK_NULL_HANDLE) return;
-
-    vk::Device vkDevice(device);
+    vk::Device vkDevice(initInfo_.device);
 
     // Pipeline cleanup
     if (shadowPipeline != VK_NULL_HANDLE) vkDevice.destroyPipeline(shadowPipeline);
@@ -88,8 +85,6 @@ void ShadowSystem::cleanup() {
 
     // Render pass
     if (shadowRenderPass != VK_NULL_HANDLE) vkDevice.destroyRenderPass(shadowRenderPass);
-
-    device = VK_NULL_HANDLE;
 }
 
 bool ShadowSystem::createShadowRenderPass() {
@@ -129,7 +124,7 @@ bool ShadowSystem::createShadowRenderPass() {
         .setPDependencies(&dependency);
 
     try {
-        shadowRenderPass = vk::Device(device).createRenderPass(renderPassInfo);
+        shadowRenderPass = vk::Device(initInfo_.device).createRenderPass(renderPassInfo);
     } catch (const vk::SystemError& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow render pass: %s", e.what());
         return false;
@@ -138,7 +133,7 @@ bool ShadowSystem::createShadowRenderPass() {
 }
 
 bool ShadowSystem::createShadowResources() {
-    if (!raiiDevice) {
+    if (!initInfo_.raiiDevice) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "ShadowSystem::createShadowResources: raiiDevice is null");
         return false;
     }
@@ -148,12 +143,12 @@ bool ShadowSystem::createShadowResources() {
     cfg.format = vk::Format::eD32Sfloat;
     cfg.arrayLayers = NUM_SHADOW_CASCADES;
 
-    if (!::createDepthArrayResources(*raiiDevice, allocator, cfg, csmResources)) {
+    if (!::createDepthArrayResources(*initInfo_.raiiDevice, initInfo_.allocator, cfg, csmResources)) {
         return false;
     }
 
     // Create framebuffers for each cascade
-    vk::Device vkDevice(device);
+    vk::Device vkDevice(initInfo_.device);
     cascadeFramebuffers.resize(NUM_SHADOW_CASCADES);
     for (uint32_t i = 0; i < NUM_SHADOW_CASCADES; i++) {
         vk::ImageView layerView(*csmResources.layerViews[i]);
@@ -183,13 +178,13 @@ bool ShadowSystem::createShadowPipelineCommon(
     VkPipelineLayout& outLayout,
     VkPipeline& outPipeline)
 {
-    PipelineBuilder layoutBuilder(device);
+    PipelineBuilder layoutBuilder(initInfo_.device);
     layoutBuilder.addPushConstantRange(VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(ShadowPushConstants));
     if (!layoutBuilder.buildPipelineLayout({descriptorSetLayout}, outLayout)) return false;
 
-    GraphicsPipelineFactory factory(device);
+    GraphicsPipelineFactory factory(initInfo_.device);
     factory.applyPreset(GraphicsPipelineFactory::Preset::Shadow)
-           .setShaders(shaderPath + "/" + vertShader, shaderPath + "/" + fragShader)
+           .setShaders(initInfo_.shaderPath + "/" + vertShader, initInfo_.shaderPath + "/" + fragShader)
            .setRenderPass(shadowRenderPass)
            .setPipelineLayout(outLayout)
            .setExtent({SHADOW_MAP_SIZE, SHADOW_MAP_SIZE})
@@ -204,11 +199,11 @@ bool ShadowSystem::createShadowPipeline() {
     auto attrsArr = Vertex::getAttributeDescriptions();
     std::vector<VkVertexInputAttributeDescription> attrs(attrsArr.begin(), attrsArr.end());
     return createShadowPipelineCommon("shadow.vert.spv", "shadow.frag.spv",
-        mainDescriptorSetLayout, binding, attrs, shadowPipelineLayout, shadowPipeline);
+        initInfo_.mainDescriptorSetLayout, binding, attrs, shadowPipelineLayout, shadowPipeline);
 }
 
 bool ShadowSystem::createSkinnedShadowPipeline() {
-    if (skinnedDescriptorSetLayout == VK_NULL_HANDLE) {
+    if (initInfo_.skinnedDescriptorSetLayout == VK_NULL_HANDLE) {
         SDL_Log("Skinned shadow pipeline skipped (no skinned descriptor set layout)");
         return true;
     }
@@ -216,7 +211,7 @@ bool ShadowSystem::createSkinnedShadowPipeline() {
     auto attrsArr = SkinnedVertex::getAttributeDescriptions();
     std::vector<VkVertexInputAttributeDescription> attrs(attrsArr.begin(), attrsArr.end());
     bool result = createShadowPipelineCommon("skinned_shadow.vert.spv", "shadow.frag.spv",
-        skinnedDescriptorSetLayout, binding, attrs, skinnedShadowPipelineLayout, skinnedShadowPipeline);
+        initInfo_.skinnedDescriptorSetLayout, binding, attrs, skinnedShadowPipelineLayout, skinnedShadowPipeline);
     if (result) SDL_Log("Created skinned shadow pipeline for GPU-skinned character shadows");
     return result;
 }
@@ -226,21 +221,21 @@ bool ShadowSystem::createDynamicShadowPipeline() {
     auto attrsArr = Vertex::getAttributeDescriptions();
     std::vector<VkVertexInputAttributeDescription> attrs(attrsArr.begin(), attrsArr.end());
     return createShadowPipelineCommon("shadow.vert.spv", "shadow.frag.spv",
-        mainDescriptorSetLayout, binding, attrs, dynamicShadowPipelineLayout, dynamicShadowPipeline);
+        initInfo_.mainDescriptorSetLayout, binding, attrs, dynamicShadowPipelineLayout, dynamicShadowPipeline);
 }
 
 bool ShadowSystem::createDynamicShadowResources() {
-    if (!raiiDevice) {
+    if (!initInfo_.raiiDevice) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "ShadowSystem::createDynamicShadowResources: raiiDevice is null");
         return false;
     }
 
-    pointShadowResources.resize(framesInFlight);
-    spotShadowResources.resize(framesInFlight);
-    pointShadowFramebuffers.resize(framesInFlight);
-    spotShadowFramebuffers.resize(framesInFlight);
+    pointShadowResources.resize(initInfo_.framesInFlight);
+    spotShadowResources.resize(initInfo_.framesInFlight);
+    pointShadowFramebuffers.resize(initInfo_.framesInFlight);
+    spotShadowFramebuffers.resize(initInfo_.framesInFlight);
 
-    for (uint32_t frame = 0; frame < framesInFlight; frame++) {
+    for (uint32_t frame = 0; frame < initInfo_.framesInFlight; frame++) {
         // Point lights: cubemap array (6 faces per light)
         DepthArrayConfig pointCfg;
         pointCfg.extent = vk::Extent2D{DYNAMIC_SHADOW_MAP_SIZE, DYNAMIC_SHADOW_MAP_SIZE};
@@ -249,12 +244,12 @@ bool ShadowSystem::createDynamicShadowResources() {
         pointCfg.cubeCompatible = true;
         pointCfg.createSampler = (frame == 0);  // Only first frame needs sampler
 
-        if (!::createDepthArrayResources(*raiiDevice, allocator, pointCfg, pointShadowResources[frame])) {
+        if (!::createDepthArrayResources(*initInfo_.raiiDevice, initInfo_.allocator, pointCfg, pointShadowResources[frame])) {
             return false;
         }
 
         // Create point shadow framebuffers (only first 6 layers for now)
-        vk::Device vkDevice(device);
+        vk::Device vkDevice(initInfo_.device);
         pointShadowFramebuffers[frame].resize(6);
         for (uint32_t i = 0; i < 6; i++) {
             vk::ImageView layerView(*pointShadowResources[frame].layerViews[i]);
@@ -279,7 +274,7 @@ bool ShadowSystem::createDynamicShadowResources() {
         spotCfg.arrayLayers = MAX_SHADOW_CASTING_LIGHTS;
         spotCfg.createSampler = (frame == 0);
 
-        if (!::createDepthArrayResources(*raiiDevice, allocator, spotCfg, spotShadowResources[frame])) {
+        if (!::createDepthArrayResources(*initInfo_.raiiDevice, initInfo_.allocator, spotCfg, spotShadowResources[frame])) {
             return false;
         }
 
@@ -306,23 +301,33 @@ bool ShadowSystem::createDynamicShadowResources() {
 }
 
 void ShadowSystem::destroyDynamicShadowResources() {
-    vk::Device vkDevice(device);
-    for (uint32_t frame = 0; frame < framesInFlight; frame++) {
-        for (auto fb : pointShadowFramebuffers[frame]) {
-            if (fb != VK_NULL_HANDLE) vkDevice.destroyFramebuffer(fb);
+    vk::Device vkDevice(initInfo_.device);
+    const size_t frameCount = std::max(pointShadowFramebuffers.size(), spotShadowFramebuffers.size());
+    for (size_t frame = 0; frame < frameCount; frame++) {
+        if (frame < pointShadowFramebuffers.size()) {
+            for (auto fb : pointShadowFramebuffers[frame]) {
+                if (fb != VK_NULL_HANDLE) vkDevice.destroyFramebuffer(fb);
+            }
+            pointShadowFramebuffers[frame].clear();
         }
-        pointShadowFramebuffers[frame].clear();
-        for (auto fb : spotShadowFramebuffers[frame]) {
-            if (fb != VK_NULL_HANDLE) vkDevice.destroyFramebuffer(fb);
+        if (frame < spotShadowFramebuffers.size()) {
+            for (auto fb : spotShadowFramebuffers[frame]) {
+                if (fb != VK_NULL_HANDLE) vkDevice.destroyFramebuffer(fb);
+            }
+            spotShadowFramebuffers[frame].clear();
         }
-        spotShadowFramebuffers[frame].clear();
         if (frame < pointShadowResources.size()) pointShadowResources[frame].reset();
         if (frame < spotShadowResources.size()) spotShadowResources[frame].reset();
     }
+
+    pointShadowFramebuffers.clear();
+    spotShadowFramebuffers.clear();
+    pointShadowResources.clear();
+    spotShadowResources.clear();
 }
 
 bool ShadowSystem::createInstancedShadowResources() {
-    vk::Device vkDevice(device);
+    vk::Device vkDevice(initInfo_.device);
 
     // Create descriptor set layout for instanced shadow rendering
     auto instanceBufferBinding = vk::DescriptorSetLayoutBinding{}
@@ -342,9 +347,9 @@ bool ShadowSystem::createInstancedShadowResources() {
     }
 
     // Create per-frame instance buffers (persistently mapped for fast CPU writes)
-    instanceBuffers.resize(framesInFlight);
-    instanceAllocations.resize(framesInFlight);
-    instanceMappedPtrs.resize(framesInFlight);
+    instanceBuffers.resize(initInfo_.framesInFlight);
+    instanceAllocations.resize(initInfo_.framesInFlight);
+    instanceMappedPtrs.resize(initInfo_.framesInFlight);
 
     VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
     bufferInfo.size = MAX_SHADOW_INSTANCES * sizeof(glm::mat4);
@@ -354,9 +359,9 @@ bool ShadowSystem::createInstancedShadowResources() {
     allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
     allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-    for (uint32_t i = 0; i < framesInFlight; i++) {
+    for (uint32_t i = 0; i < initInfo_.framesInFlight; i++) {
         VmaAllocationInfo allocResult;
-        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
+        if (vmaCreateBuffer(initInfo_.allocator, &bufferInfo, &allocInfo,
                             &instanceBuffers[i], &instanceAllocations[i], &allocResult) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create instance buffer %u", i);
             return false;
@@ -368,10 +373,10 @@ bool ShadowSystem::createInstancedShadowResources() {
     // Note: In production, use a proper descriptor pool manager
     auto poolSize = vk::DescriptorPoolSize{}
         .setType(vk::DescriptorType::eStorageBuffer)
-        .setDescriptorCount(framesInFlight);
+        .setDescriptorCount(initInfo_.framesInFlight);
 
     auto poolInfo = vk::DescriptorPoolCreateInfo{}
-        .setMaxSets(framesInFlight)
+        .setMaxSets(initInfo_.framesInFlight)
         .setPoolSizes(poolSize);
 
     VkDescriptorPool pool;
@@ -382,7 +387,7 @@ bool ShadowSystem::createInstancedShadowResources() {
         return false;
     }
 
-    std::vector<vk::DescriptorSetLayout> layouts(framesInFlight, vk::DescriptorSetLayout(instancedShadowDescriptorSetLayout));
+    std::vector<vk::DescriptorSetLayout> layouts(initInfo_.framesInFlight, vk::DescriptorSetLayout(instancedShadowDescriptorSetLayout));
     auto allocInfoDS = vk::DescriptorSetAllocateInfo{}
         .setDescriptorPool(pool)
         .setSetLayouts(layouts);
@@ -395,7 +400,7 @@ bool ShadowSystem::createInstancedShadowResources() {
     }
 
     // Update descriptor sets with buffer bindings
-    for (uint32_t i = 0; i < framesInFlight; i++) {
+    for (uint32_t i = 0; i < initInfo_.framesInFlight; i++) {
         auto bufferInfoDS = vk::DescriptorBufferInfo{}
             .setBuffer(instanceBuffers[i])
             .setOffset(0)
@@ -410,12 +415,12 @@ bool ShadowSystem::createInstancedShadowResources() {
         vkDevice.updateDescriptorSets(writeDS, nullptr);
     }
 
-    SDL_Log("Created instanced shadow resources: %u frames, %u max instances", framesInFlight, MAX_SHADOW_INSTANCES);
+    SDL_Log("Created instanced shadow resources: %u frames, %u max instances", initInfo_.framesInFlight, MAX_SHADOW_INSTANCES);
     return true;
 }
 
 bool ShadowSystem::createInstancedShadowPipeline() {
-    vk::Device vkDevice(device);
+    vk::Device vkDevice(initInfo_.device);
 
     // Create pipeline layout with both main descriptor set (for UBO) and instanced set (for SSBO)
     auto pushConstantRange = vk::PushConstantRange{}
@@ -424,7 +429,7 @@ bool ShadowSystem::createInstancedShadowPipeline() {
         .setSize(sizeof(InstancedShadowPushConstants));
 
     std::array<vk::DescriptorSetLayout, 2> setLayouts = {
-        vk::DescriptorSetLayout(mainDescriptorSetLayout),           // Set 0: UBO with cascade matrices
+        vk::DescriptorSetLayout(initInfo_.mainDescriptorSetLayout),           // Set 0: UBO with cascade matrices
         vk::DescriptorSetLayout(instancedShadowDescriptorSetLayout) // Set 1: Instance SSBO
     };
 
@@ -444,9 +449,9 @@ bool ShadowSystem::createInstancedShadowPipeline() {
     auto attrsArr = Vertex::getAttributeDescriptions();
     std::vector<VkVertexInputAttributeDescription> attrs(attrsArr.begin(), attrsArr.end());
 
-    GraphicsPipelineFactory factory(device);
+    GraphicsPipelineFactory factory(initInfo_.device);
     factory.applyPreset(GraphicsPipelineFactory::Preset::Shadow)
-           .setShaders(shaderPath + "/shadow_instanced.vert.spv", shaderPath + "/shadow.frag.spv")
+           .setShaders(initInfo_.shaderPath + "/shadow_instanced.vert.spv", initInfo_.shaderPath + "/shadow.frag.spv")
            .setRenderPass(shadowRenderPass)
            .setPipelineLayout(instancedShadowPipelineLayout)
            .setExtent({SHADOW_MAP_SIZE, SHADOW_MAP_SIZE})
@@ -463,11 +468,11 @@ bool ShadowSystem::createInstancedShadowPipeline() {
 }
 
 void ShadowSystem::destroyInstancedShadowResources() {
-    vk::Device vkDevice(device);
+    vk::Device vkDevice(initInfo_.device);
 
     for (uint32_t i = 0; i < instanceBuffers.size(); i++) {
         if (instanceBuffers[i] != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, instanceBuffers[i], instanceAllocations[i]);
+            vmaDestroyBuffer(initInfo_.allocator, instanceBuffers[i], instanceAllocations[i]);
         }
     }
     instanceBuffers.clear();

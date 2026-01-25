@@ -13,8 +13,8 @@
 #include <cmath>
 
 std::unique_ptr<FroxelSystem> FroxelSystem::create(const InitInfo& info) {
-    auto system = std::make_unique<FroxelSystem>(ConstructToken{});
-    if (!system->initInternal(info)) {
+    auto system = std::make_unique<FroxelSystem>(ConstructToken{}, info);
+    if (!system->initialized_) {
         return nullptr;
     }
     return system;
@@ -30,45 +30,37 @@ std::unique_ptr<FroxelSystem> FroxelSystem::create(const InitContext& ctx, VkIma
     return create(info);
 }
 
-FroxelSystem::~FroxelSystem() {
-    cleanup();
-}
-
-bool FroxelSystem::initInternal(const InitInfo& info) {
-    device = info.device;
-    allocator = info.allocator;
-    descriptorPool = info.descriptorPool;
-    extent = info.extent;
-    shaderPath = info.shaderPath;
-    framesInFlight = info.framesInFlight;
-    shadowMapView = info.shadowMapView;
-    shadowSampler = info.shadowSampler;
-    lightBuffers = info.lightBuffers;
-    raiiDevice_ = info.raiiDevice;
-
-    if (!raiiDevice_) {
-        SDL_Log("FroxelSystem requires raiiDevice");
-        return false;
+FroxelSystem::FroxelSystem(ConstructToken, const InitInfo& info)
+    : initInfo_(info), extent_(info.extent) {
+    if (!initInfo_.raiiDevice) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "FroxelSystem requires raiiDevice");
+        return;
     }
 
-    if (!createScatteringVolume()) return false;
-    if (!createIntegratedVolume()) return false;
-    if (!createSampler()) return false;
-    if (!createDescriptorSetLayout()) return false;
-    if (!createUniformBuffers()) return false;
-    if (!createDescriptorSets()) return false;
-    if (!createFroxelUpdatePipeline()) return false;
-    if (!createIntegrationPipeline()) return false;
+    if (!createScatteringVolume()
+        || !createIntegratedVolume()
+        || !createSampler()
+        || !createDescriptorSetLayout()
+        || !createUniformBuffers()
+        || !createDescriptorSets()
+        || !createFroxelUpdatePipeline()
+        || !createIntegrationPipeline()) {
+        return;
+    }
 
-    return true;
+    initialized_ = true;
 }
 
-void FroxelSystem::cleanup() {
-    if (!device) return;  // Not initialized
+FroxelSystem::~FroxelSystem() {
+    if (!initInfo_.device) {
+        return;
+    }
 
     destroyVolumeResources();
 
-    BufferUtils::destroyBuffers(allocator, uniformBuffers);
+    if (initInfo_.allocator) {
+        BufferUtils::destroyBuffers(initInfo_.allocator, uniformBuffers);
+    }
 
     // RAII wrappers handle cleanup automatically
     froxelUpdatePipeline_.reset();
@@ -90,7 +82,9 @@ void FroxelSystem::destroyVolumeResources() {
 }
 
 void FroxelSystem::resize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent) {
-    extent = newExtent;
+    (void)device;
+    (void)allocator;
+    extent_ = newExtent;
     // Froxel grid size is fixed, no need to recreate volumes
 }
 
@@ -114,7 +108,7 @@ bool FroxelSystem::createScatteringVolume() {
 
     // Create both buffers for ping-pong
     for (int i = 0; i < 2; i++) {
-        if (!ManagedImage::create(allocator, *reinterpret_cast<const VkImageCreateInfo*>(&imageInfo),
+        if (!ManagedImage::create(initInfo_.allocator, *reinterpret_cast<const VkImageCreateInfo*>(&imageInfo),
                                   allocInfo, scatteringVolumes_[i])) {
             SDL_Log("Failed to create scattering volume %d", i);
             return false;
@@ -132,7 +126,7 @@ bool FroxelSystem::createScatteringVolume() {
                 .setLayerCount(1));
 
         try {
-            scatteringVolumeViews_[i].emplace(*raiiDevice_, viewInfo);
+            scatteringVolumeViews_[i].emplace(*initInfo_.raiiDevice, viewInfo);
         } catch (const std::exception& e) {
             SDL_Log("Failed to create scattering volume view %d: %s", i, e.what());
             return false;
@@ -159,7 +153,7 @@ bool FroxelSystem::createIntegratedVolume() {
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (!ManagedImage::create(allocator, *reinterpret_cast<const VkImageCreateInfo*>(&imageInfo),
+    if (!ManagedImage::create(initInfo_.allocator, *reinterpret_cast<const VkImageCreateInfo*>(&imageInfo),
                               allocInfo, integratedVolume_)) {
         SDL_Log("Failed to create integrated volume");
         return false;
@@ -177,7 +171,7 @@ bool FroxelSystem::createIntegratedVolume() {
             .setLayerCount(1));
 
     try {
-        integratedVolumeView_.emplace(*raiiDevice_, viewInfo);
+        integratedVolumeView_.emplace(*initInfo_.raiiDevice, viewInfo);
     } catch (const std::exception& e) {
         SDL_Log("Failed to create integrated volume view: %s", e.what());
         return false;
@@ -187,7 +181,7 @@ bool FroxelSystem::createIntegratedVolume() {
 }
 
 bool FroxelSystem::createSampler() {
-    auto sampler = SamplerFactory::createSamplerLinearClampLimitedMip(*raiiDevice_, 0.0f);
+    auto sampler = SamplerFactory::createSamplerLinearClampLimitedMip(*initInfo_.raiiDevice, 0.0f);
     if (!sampler) {
         SDL_Log("Failed to create volume sampler");
         return false;
@@ -204,7 +198,7 @@ bool FroxelSystem::createDescriptorSetLayout() {
     // 4: Light buffer (storage buffer)
     // 5: Previous scattering volume (storage image)
 
-    VkDescriptorSetLayout rawLayout = DescriptorManager::LayoutBuilder(device)
+    VkDescriptorSetLayout rawLayout = DescriptorManager::LayoutBuilder(initInfo_.device)
         .addStorageImage(VK_SHADER_STAGE_COMPUTE_BIT)            // 0: Scattering volume
         .addStorageImage(VK_SHADER_STAGE_COMPUTE_BIT)            // 1: Integrated volume
         .addUniformBuffer(VK_SHADER_STAGE_COMPUTE_BIT)           // 2: Uniform buffer
@@ -217,9 +211,9 @@ bool FroxelSystem::createDescriptorSetLayout() {
         SDL_Log("Failed to create froxel descriptor set layout");
         return false;
     }
-    froxelDescriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
+    froxelDescriptorSetLayout_.emplace(*initInfo_.raiiDevice, rawLayout);
 
-    auto layoutOpt = PipelineLayoutBuilder(*raiiDevice_)
+    auto layoutOpt = PipelineLayoutBuilder(*initInfo_.raiiDevice)
         .addDescriptorSetLayout(**froxelDescriptorSetLayout_)
         .build();
     if (!layoutOpt) {
@@ -233,8 +227,8 @@ bool FroxelSystem::createDescriptorSetLayout() {
 
 bool FroxelSystem::createUniformBuffers() {
     return BufferUtils::PerFrameBufferBuilder()
-        .setAllocator(allocator)
-        .setFrameCount(framesInFlight)
+        .setAllocator(initInfo_.allocator)
+        .setFrameCount(initInfo_.framesInFlight)
         .setSize(sizeof(FroxelUniforms))
         .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
         .build(uniformBuffers);
@@ -242,19 +236,19 @@ bool FroxelSystem::createUniformBuffers() {
 
 bool FroxelSystem::createDescriptorSets() {
     // Allocate froxel descriptor sets using managed pool
-    froxelDescriptorSets = descriptorPool->allocate(**froxelDescriptorSetLayout_, framesInFlight);
-    if (froxelDescriptorSets.size() != framesInFlight) {
+    froxelDescriptorSets = initInfo_.descriptorPool->allocate(**froxelDescriptorSetLayout_, initInfo_.framesInFlight);
+    if (froxelDescriptorSets.size() != initInfo_.framesInFlight) {
         SDL_Log("Failed to allocate froxel descriptor sets");
         return false;
     }
 
-    for (uint32_t i = 0; i < framesInFlight; i++) {
-        DescriptorManager::SetWriter(device, froxelDescriptorSets[i])
+    for (uint32_t i = 0; i < initInfo_.framesInFlight; i++) {
+        DescriptorManager::SetWriter(initInfo_.device, froxelDescriptorSets[i])
             .writeStorageImage(0, **scatteringVolumeViews_[0])  // Current scattering volume (write target)
             .writeStorageImage(1, **integratedVolumeView_)      // Integrated volume
             .writeBuffer(2, uniformBuffers.buffers[i], 0, sizeof(FroxelUniforms))
-            .writeImage(3, shadowMapView, shadowSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
-            .writeBuffer(4, lightBuffers[i], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+            .writeImage(3, initInfo_.shadowMapView, initInfo_.shadowSampler, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
+            .writeBuffer(4, initInfo_.lightBuffers[i], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
             .writeStorageImage(5, **scatteringVolumeViews_[1])  // History scattering volume (read for temporal)
             .update();
     }
@@ -263,15 +257,15 @@ bool FroxelSystem::createDescriptorSets() {
 }
 
 bool FroxelSystem::createFroxelUpdatePipeline() {
-    return ComputePipelineBuilder(*raiiDevice_)
-        .setShader(shaderPath + "/froxel_update.comp.spv")
+    return ComputePipelineBuilder(*initInfo_.raiiDevice)
+        .setShader(initInfo_.shaderPath + "/froxel_update.comp.spv")
         .setPipelineLayout(**froxelPipelineLayout_)
         .buildInto(froxelUpdatePipeline_);
 }
 
 bool FroxelSystem::createIntegrationPipeline() {
-    return ComputePipelineBuilder(*raiiDevice_)
-        .setShader(shaderPath + "/froxel_integrate.comp.spv")
+    return ComputePipelineBuilder(*initInfo_.raiiDevice)
+        .setShader(initInfo_.shaderPath + "/froxel_integrate.comp.spv")
         .setPipelineLayout(**froxelPipelineLayout_)
         .buildInto(integrationPipeline_);
 }
@@ -327,7 +321,7 @@ void FroxelSystem::recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,
     frameCounter++;
 
     // Update descriptor sets with correct volume bindings for this frame
-    DescriptorManager::SetWriter(device, froxelDescriptorSets[frameIndex])
+    DescriptorManager::SetWriter(initInfo_.device, froxelDescriptorSets[frameIndex])
         .writeStorageImage(0, **scatteringVolumeViews_[currentVolumeIdx])  // Current scattering volume (write)
         .writeStorageImage(5, **scatteringVolumeViews_[historyVolumeIdx])  // History scattering volume (read)
         .update();

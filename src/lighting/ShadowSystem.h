@@ -30,10 +30,6 @@ struct alignas(16) ShadowPushConstants {
 
 class ShadowSystem {
 public:
-    // Passkey for controlled construction via make_unique
-    struct ConstructToken { explicit ConstructToken() = default; };
-    explicit ShadowSystem(ConstructToken) {}
-
     // Configuration for shadow system initialization
     struct InitInfo {
         const vk::raii::Device* raiiDevice = nullptr;  // For RAII resource creation
@@ -45,6 +41,10 @@ public:
         std::string shaderPath;
         uint32_t framesInFlight;
     };
+
+    // Passkey for controlled construction via make_unique
+    struct ConstructToken { explicit ConstructToken() = default; };
+    ShadowSystem(ConstructToken, const InitInfo& info);
 
     /**
      * Factory: Create and initialize shadow system.
@@ -136,9 +136,6 @@ public:
 
 
 private:
-    bool initInternal(const InitInfo& info);
-    void cleanup();
-
     // CSM creation methods
     bool createShadowResources();
     bool createShadowRenderPass();
@@ -176,15 +173,7 @@ private:
     void calculateCascadeSplits(float nearClip, float farClip, float lambda, std::vector<float>& splits);
     glm::mat4 calculateCascadeMatrix(const glm::vec3& lightDir, const Camera& camera, float nearSplit, float farSplit);
 
-    // Vulkan handles (not owned)
-    const vk::raii::Device* raiiDevice = nullptr;
-    VkDevice device = VK_NULL_HANDLE;
-    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-    VmaAllocator allocator = VK_NULL_HANDLE;
-    VkDescriptorSetLayout mainDescriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout skinnedDescriptorSetLayout = VK_NULL_HANDLE;
-    std::string shaderPath;
-    uint32_t framesInFlight = 0;
+    const InitInfo initInfo_;
 
     // CSM shadow map resources
     static constexpr uint32_t SHADOW_MAP_SIZE = 2048;
@@ -243,4 +232,6 @@ private:
         uint32_t frameIndex,
         uint32_t cascadeIndex,
         const std::vector<Renderable>& sceneObjects);
+
+    bool initialized_ = false;
 };
