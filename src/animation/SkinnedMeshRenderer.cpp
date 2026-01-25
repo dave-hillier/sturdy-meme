@@ -124,7 +124,6 @@ bool SkinnedMeshRenderer::createBoneMatricesBuffers() {
     // Query device properties for minimum uniform buffer offset alignment
     VkPhysicalDeviceProperties props;
     VkPhysicalDevice physDevice = VK_NULL_HANDLE;
-    vmaGetAllocatorInfo(allocator, nullptr);
 
     // Get physical device from VMA allocator info
     VmaAllocatorInfo allocatorInfo;

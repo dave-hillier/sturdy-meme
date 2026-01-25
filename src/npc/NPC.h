@@ -68,6 +68,15 @@ struct NPCTransform {
 
 // Core NPC data structure
 struct NPC {
+    // Special member functions declared here, defined in NPC.cpp
+    // (required because unique_ptr<BehaviorTree> needs complete type for deletion)
+    NPC() = default;
+    ~NPC();
+    NPC(NPC&&) noexcept;
+    NPC& operator=(NPC&&) noexcept;
+    NPC(const NPC&) = delete;
+    NPC& operator=(const NPC&) = delete;
+
     // Identification
     NPCID id = INVALID_NPC_ID;
     std::string name;

@@ -5,10 +5,11 @@
 #include "animation/AnimatedCharacter.h"
 #include "animation/SkinnedMeshRenderer.h"
 #include "animation/Animation.h"
-#include "animation/GLTFLoader.h"
+#include "loaders/GLTFLoader.h"
 #include <SDL3/SDL_log.h>
 #include <algorithm>
 #include <sstream>
+#include <iomanip>
 #include <cmath>
 
 NPCID NPCManager::spawn(const NPCSpawnInfo& info) {

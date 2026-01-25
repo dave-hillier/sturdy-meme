@@ -248,6 +248,7 @@ set(SOURCES
     src/debug/DebugLineSystem.cpp
     src/debug/RoadRiverVisualization.cpp
     # NPC (Behavior Tree AI)
+    src/npc/NPC.cpp
     src/npc/NPCPerception.cpp
     src/npc/NPCManager.cpp
 )

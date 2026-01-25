@@ -1,6 +1,7 @@
 #pragma once
 
 #include "NPC.h"
+#include <vulkan/vulkan.h>
 #include <vector>
 #include <memory>
 #include <functional>
