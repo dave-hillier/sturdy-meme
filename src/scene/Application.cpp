@@ -97,100 +97,50 @@ bool Application::init(const std::string& title, int width, int height) {
         }
     }
 
-    // Create and show loading screen while assets load asynchronously
+    // Create loading screen renderer - kept alive during full renderer initialization
+    std::unique_ptr<LoadingRenderer> loadingRenderer;
     {
         INIT_PROFILE_PHASE("LoadingScreen");
         LoadingRenderer::InitInfo loadingInfo{};
         loadingInfo.vulkanContext = vulkanContext.get();
         loadingInfo.shaderPath = resourcePath + "/shaders";
 
-        auto loadingRenderer = LoadingRenderer::create(loadingInfo);
+        loadingRenderer = LoadingRenderer::create(loadingInfo);
         if (loadingRenderer) {
-            // Create async job queue with worker threads
-            auto jobQueue = Loading::LoadJobQueue::create(2);  // 2 worker threads
-
-            if (jobQueue) {
-                // Queue texture loads to run in parallel during loading screen
-                // These demonstrate the async loading pattern - resources are loaded
-                // to CPU memory on background threads while loading screen animates
-                std::vector<Loading::LoadJob> jobs;
-
-                // Queue scene textures (priority 0 = highest)
-                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
-                    "crate_diffuse", resourcePath + "/assets/textures/crates/crate1/crate1_diffuse.png", true, 0));
-                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
-                    "crate_normal", resourcePath + "/assets/textures/crates/crate1/crate1_normal.png", false, 0));
-
-                // Queue grass textures
-                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
-                    "grass_diffuse", resourcePath + "/assets/textures/grass/grass/grass01.jpg", true, 1));
-                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
-                    "grass_normal", resourcePath + "/assets/textures/grass/grass/grass01_n.jpg", false, 1));
-
-                // Queue metal textures
-                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
-                    "metal_diffuse", resourcePath + "/assets/textures/industrial/metal_1.jpg", true, 1));
-                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
-                    "metal_normal", resourcePath + "/assets/textures/industrial/metal_1_norm.jpg", false, 1));
-
-                // Queue rock textures
-                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
-                    "rock_diffuse", resourcePath + "/assets/textures/industrial/concrete_1.jpg", true, 2));
-                jobs.push_back(Loading::LoadJobFactory::createTextureJob(
-                    "rock_normal", resourcePath + "/assets/textures/industrial/concrete_1_norm.jpg", false, 2));
-
-                // Set total job count for progress tracking
-                jobQueue->setTotalJobs(static_cast<uint32_t>(jobs.size()));
-                jobQueue->submitBatch(std::move(jobs));
-
-                // Run loading loop - renders loading screen while jobs complete
-                while (!jobQueue->isComplete()) {
-                    // Update progress display
-                    Loading::LoadProgress progress = jobQueue->getProgress();
-                    loadingRenderer->setProgress(progress.getProgress());
-
-                    // Render loading screen frame
-                    loadingRenderer->render();
-
-                    // Process completed jobs (just consume them for now - Renderer
-                    // will reload these textures during its init phase)
-                    auto completed = jobQueue->getCompletedJobs();
-                    for (auto& result : completed) {
-                        if (result.success) {
-                            SDL_Log("Async load complete: %s (%s)",
-                                   result.jobId.c_str(), result.phase.c_str());
-                        }
-                    }
-
-                    // Keep window responsive
-                    SDL_PumpEvents();
-
-                    // Small sleep to avoid spinning too fast
-                    SDL_Delay(1);
-                }
-
-                SDL_Log("Async loading complete: %llu bytes loaded",
-                       static_cast<unsigned long long>(jobQueue->getProgress().bytesLoaded));
-            } else {
-                // Fallback: just show loading screen for a bit
-                for (int i = 0; i < 30; ++i) {
-                    loadingRenderer->render();
-                    SDL_PumpEvents();
-                }
-            }
-
-            loadingRenderer->cleanup();
+            // Show initial loading screen while we start initialization
+            loadingRenderer->setProgress(0.0f);
+            loadingRenderer->render();
+            SDL_PumpEvents();
         } else {
-            SDL_Log("Warning: LoadingRenderer creation failed, skipping loading screen");
+            SDL_Log("Warning: LoadingRenderer creation failed, initialization will proceed without visual feedback");
         }
     }
 
-    // Create full renderer (takes ownership of vulkanContext with device already initialized)
+    // Create full renderer with progress callback to update loading screen
+    // The loading screen stays visible and animated during subsystem initialization
     Renderer::InitInfo rendererInfo{};
     rendererInfo.window = window;
     rendererInfo.resourcePath = resourcePath;
     rendererInfo.vulkanContext = std::move(vulkanContext);  // Transfer ownership
+
+    // Progress callback renders loading screen during initialization
+    if (loadingRenderer) {
+        rendererInfo.progressCallback = [&loadingRenderer](float progress, const char* phase) {
+            loadingRenderer->setProgress(progress);
+            loadingRenderer->render();
+            SDL_PumpEvents();
+            SDL_Delay(1);  // Small yield to keep window responsive
+        };
+    }
+
     renderer_ = Renderer::create(rendererInfo);
+
+    // Cleanup loading renderer now that full renderer is ready
+    if (loadingRenderer) {
+        loadingRenderer->cleanup();
+        loadingRenderer.reset();
+    }
+
     if (!renderer_) {
         SDL_Log("Failed to initialize renderer");
         SDL_DestroyWindow(window);

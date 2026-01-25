@@ -101,7 +101,17 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     VkQueue graphicsQueue = vulkanContext_->getVkGraphicsQueue();
     VkFormat swapchainImageFormat = static_cast<VkFormat>(vulkanContext_->getVkSwapchainImageFormat());
 
+    // Helper to report progress (subsystem init spans 0.12 to 0.95)
+    auto reportProgress = [this](float subProgress, const char* phase) {
+        if (progressCallback_) {
+            // Map subProgress (0-1) to the subsystem range (0.12-0.95)
+            float progress = 0.12f + subProgress * 0.83f;
+            progressCallback_(progress, phase);
+        }
+    };
+
     // Initialize post-processing systems (PostProcessSystem, BloomSystem, BilateralGridSystem)
+    reportProgress(0.0f, "Post-processing systems");
     {
         INIT_PROFILE_PHASE("PostProcessing");
         auto bundle = PostProcessSystem::createWithDependencies(initCtx, vulkanContext_->getRenderPass(), swapchainImageFormat);
@@ -113,6 +123,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         systems_->setBilateralGrid(std::move(bundle->bilateralGrid));
     }
 
+    reportProgress(0.02f, "Graphics pipeline");
     {
         INIT_PROFILE_PHASE("GraphicsPipeline");
         if (!descriptorInfra_.createGraphicsPipeline(*vulkanContext_,
@@ -123,6 +134,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
 
     // Initialize skinned mesh rendering (GPU skinning for animated characters)
+    reportProgress(0.04f, "Skinned mesh renderer");
     {
         INIT_PROFILE_PHASE("SkinnedMeshRenderer");
         if (!initSkinnedMeshRenderer()) return false;
@@ -149,6 +161,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
 
     // Initialize shadow system (needs descriptor set layouts for pipeline compatibility)
+    reportProgress(0.06f, "Shadow system");
     {
         INIT_PROFILE_PHASE("ShadowSystem");
         auto shadowSystem = ShadowSystem::create(initCtx, descriptorInfra_.getVkDescriptorSetLayout(), systems_->skinnedMesh().getDescriptorSetLayout());
@@ -169,6 +182,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Get terrain config for other systems that need it
     TerrainConfig terrainConfig = TerrainFactory::buildTerrainConfig(terrainFactoryConfig);
 
+    reportProgress(0.08f, "Terrain system");
     {
         INIT_PROFILE_PHASE("TerrainSystem");
         auto terrainSystem = TerrainFactory::create(initCtx, terrainFactoryConfig);
@@ -200,6 +214,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     // Defer scene object creation until terrain is fully loaded
     sceneInfo.deferRenderables = true;
 
+    reportProgress(0.20f, "Scene manager");
     {
         INIT_PROFILE_PHASE("SceneManager");
         auto sceneManager = SceneManager::create(sceneInfo);
@@ -226,6 +241,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     if (!createSkinnedMeshRendererDescriptorSets()) return false;
 
     // Create all vegetation systems using VegetationSystemGroup factory
+    reportProgress(0.40f, "Vegetation systems");
     {
         INIT_PROFILE_PHASE("VegetationSystems");
 
@@ -350,6 +366,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
     // Initialize atmosphere subsystems (Sky, Froxel, AtmosphereLUT, CloudShadow)
     // Uses self-initializing AtmosphereSystemGroup to invert dependencies
+    reportProgress(0.65f, "Atmosphere systems");
     {
         INIT_PROFILE_PHASE("AtmosphereSubsystems");
         AtmosphereSystemGroup::CreateDeps atmosDeps{
@@ -380,6 +397,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     wiring.wireCloudShadowBindings(*systems_);
 
     // Initialize geometry systems via GeometrySystemGroup factory
+    reportProgress(0.70f, "Geometry systems");
     {
         INIT_PROFILE_PHASE("GeometrySubsystems");
         GeometrySystemGroup::CreateDeps geomDeps{
@@ -418,6 +436,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     systems_->setProfiler(Profiler::create(device, physicalDevice, MAX_FRAMES_IN_FLIGHT));
 
     // Create all water systems using WaterSystemGroup factory
+    reportProgress(0.80f, "Water systems");
     {
         INIT_PROFILE_PHASE("WaterSystems");
         WaterSystemGroup::CreateDeps waterDeps{
@@ -519,6 +538,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     }
 
     // Initialize UBO builder with system references
+    reportProgress(0.95f, "Finalizing systems");
     UBOBuilder::Systems uboSystems{};
     uboSystems.timeSystem = &systems_->time();
     uboSystems.celestialCalculator = &systems_->celestial();
@@ -533,6 +553,7 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
     uboSystems.environmentSettings = &systems_->environmentSettings();
     systems_->uboBuilder().setSystems(uboSystems);
 
+    reportProgress(1.0f, "Subsystems ready");
     return true;
 }
 

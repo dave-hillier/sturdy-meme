@@ -43,6 +43,10 @@ public:
         DescriptorPoolSizes descriptorPoolSizes = DescriptorPoolSizes::standard();
     };
 
+    // Progress callback for async loading feedback
+    // Called during initialization with progress (0.0-1.0) and phase description
+    using ProgressCallback = std::function<void(float progress, const char* phase)>;
+
     struct InitInfo {
         SDL_Window* window;
         std::string resourcePath;
@@ -52,6 +56,11 @@ public:
         // If provided, Renderer takes ownership and completes device init.
         // If nullptr, Renderer creates and fully initializes a new VulkanContext.
         std::unique_ptr<VulkanContext> vulkanContext;
+
+        // Optional: progress callback for async loading feedback
+        // When provided, renderer will call this between initialization phases
+        // to allow the caller to render a loading screen with progress updates
+        ProgressCallback progressCallback;
     };
 
     /**
@@ -238,6 +247,9 @@ private:
 
     // GUI rendering callback
     GuiRenderCallback guiRenderCallback;
+
+    // Progress callback for async loading (stored during init)
+    ProgressCallback progressCallback_;
 
     // Skinned mesh rendering
     bool initSkinnedMeshRenderer();

@@ -96,6 +96,16 @@ bool Renderer::initInternal(const InitInfo& info) {
 
     resourcePath = info.resourcePath;
     config_ = info.config;
+    progressCallback_ = info.progressCallback;
+
+    // Helper to report progress (no-op if callback not set)
+    auto reportProgress = [this](float progress, const char* phase) {
+        if (progressCallback_) {
+            progressCallback_(progress, phase);
+        }
+    };
+
+    reportProgress(0.0f, "Initializing...");
 
     // Create subsystems container
     systems_ = std::make_unique<RendererSystems>();
@@ -126,12 +136,14 @@ bool Renderer::initInternal(const InitInfo& info) {
     }
 
     // Phase 1: Core Vulkan resources (render pass, depth, framebuffers, command pool)
+    reportProgress(0.05f, "Creating Vulkan resources");
     {
         INIT_PROFILE_PHASE("CoreVulkanResources");
         if (!initCoreVulkanResources()) return false;
     }
 
     // Initialize asset registry via RenderingInfrastructure (after command pool is ready)
+    reportProgress(0.08f, "Initializing asset registry");
     {
         INIT_PROFILE_PHASE("AssetRegistry");
         renderingInfra_.initAssetRegistry(
@@ -143,6 +155,7 @@ bool Renderer::initInternal(const InitInfo& info) {
     }
 
     // Phase 2: Descriptor infrastructure (layouts, pools)
+    reportProgress(0.10f, "Creating descriptor infrastructure");
     {
         INIT_PROFILE_PHASE("DescriptorInfrastructure");
         if (!initDescriptorInfrastructure()) return false;
@@ -155,24 +168,29 @@ bool Renderer::initInternal(const InitInfo& info) {
         resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes);
 
     // Phase 3: All subsystems (terrain, grass, weather, snow, water, etc.)
+    // This is the heaviest phase, so we pass the progress callback for finer updates
+    reportProgress(0.12f, "Initializing subsystems");
     {
         INIT_PROFILE_PHASE("Subsystems");
         if (!initSubsystems(initCtx)) return false;
     }
 
     // Phase 4: Control subsystems (after systems are ready)
+    reportProgress(0.95f, "Initializing controls");
     {
         INIT_PROFILE_PHASE("ControlSubsystems");
         initControlSubsystems();
     }
 
     // Phase 5: Resize coordinator registration
+    reportProgress(0.96f, "Configuring resize handler");
     {
         INIT_PROFILE_PHASE("ResizeCoordinator");
         initResizeCoordinator();
     }
 
     // Initialize pass recorders (must be after systems_ is set up)
+    reportProgress(0.97f, "Creating pass recorders");
     {
         INIT_PROFILE_PHASE("PassRecorders");
         shadowPassRecorder_ = std::make_unique<ShadowPassRecorder>(*systems_);
@@ -192,11 +210,14 @@ bool Renderer::initInternal(const InitInfo& info) {
     SDL_Log("Pass recorders initialized");
 
     // Setup frame graph with dependencies
+    reportProgress(0.99f, "Configuring frame graph");
     {
         INIT_PROFILE_PHASE("FrameGraph");
         setupFrameGraph();
     }
     SDL_Log("Frame graph configured");
+
+    reportProgress(1.0f, "Ready");
 
     return true;
 }
