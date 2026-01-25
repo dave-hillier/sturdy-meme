@@ -213,10 +213,62 @@ npcManager.setTimeOfDay(12.0f);  // Set to noon
 | `src/npc/NPCLODSystem.h` | LOD states, needs, schedules, events |
 | `src/npc/NPC.h` | Core NPC data structure |
 | `src/npc/NPCManager.h/cpp` | NPC lifecycle and update orchestration |
+| `src/npc/NPCRenderData.h` | Thread-safe render data structures |
 | `src/npc/HostilityState.h` | Hostility levels and triggers |
 | `src/npc/NPCPerception.h` | Sight and hearing perception |
 | `src/npc/BehaviorTree.h` | Behavior tree implementation |
 | `src/npc/NPCBehaviorTrees.h` | Pre-built behavior trees |
+
+## Threading Architecture
+
+The NPC system is designed to support multi-threaded execution where simulation
+runs independently of rendering. This enables:
+
+- Future server-side NPC processing
+- Background NPC updates while rendering proceeds
+- Parallel simulation across multiple cores
+
+### Data Flow
+
+```
++------------------+       +-------------------+       +------------------+
+|  Simulation      |       |   NPCRenderData   |       |   Render Thread  |
+|  Thread          |  -->  |   (Thread-safe    |  -->  |                  |
+|                  |       |    snapshot)      |       |                  |
+| - update()       |       | - instances[]     |       | - renderWithData |
+| - updateNeeds    |       | - tintColors      |       |                  |
+| - updateSchedule |       | - modelMatrices   |       |                  |
++------------------+       +-------------------+       +------------------+
+```
+
+### Usage
+
+**Single-threaded (current):**
+```cpp
+npcManager.update(deltaTime, playerPos, physics);
+npcManager.updateAnimations(deltaTime, renderer, frameIndex);
+npcManager.render(cmd, frameIndex, renderer);
+```
+
+**Multi-threaded (future):**
+```cpp
+// Simulation thread
+npcManager.update(deltaTime, playerPos, physics);
+NPCRenderData renderData;
+npcManager.generateRenderData(renderData);
+
+// Render thread (with renderData passed safely)
+npcManager.updateAnimations(deltaTime, renderer, frameIndex);
+npcManager.renderWithData(cmd, frameIndex, renderer, renderData);
+```
+
+### Key Types
+
+| Type | Purpose |
+|------|---------|
+| `NPCRenderInstance` | Per-NPC render state (transform, tint, bone slot) |
+| `NPCRenderData` | Snapshot of all NPCs for render thread |
+| `NPCRenderConfig` | Rendering configuration (scale, debug flags) |
 
 ## Current State vs Target State
 
@@ -233,6 +285,8 @@ npcManager.setTimeOfDay(12.0f);  // Set to noon
 | Hostility tinting | Done | Color-coded by hostility |
 | Physics integration | Done | Real NPCs only |
 | Perception (sight/hearing) | Done | Real NPCs only |
+| Thread-safe render data | Done | NPCRenderData for decoupled rendering |
+| Player PBR matching | Done | NPCs use player's material properties |
 
 ### Target State (Future Enhancements)
 
