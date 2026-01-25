@@ -88,16 +88,26 @@ void HDRPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float tim
     recordSceneObjects(cmd, frameIndex);
     resources_.profiler->endGpuZone(cmd, "HDR:SceneObjects");
 
-    // Draw skinned character with GPU skinning
+    // Draw skinned characters with GPU skinning (player + NPCs)
     resources_.profiler->beginGpuZone(cmd, "HDR:SkinnedChar");
     {
         SceneBuilder& sceneBuilder = resources_.scene->getSceneBuilder();
+        const auto& sceneObjects = sceneBuilder.getRenderables();
+
+        // Draw player character
         if (sceneBuilder.hasCharacter()) {
-            const auto& sceneObjects = sceneBuilder.getRenderables();
             size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
             if (playerIndex < sceneObjects.size()) {
                 const Renderable& playerObj = sceneObjects[playerIndex];
                 resources_.skinnedMesh->record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
+            }
+        }
+
+        // Draw NPC characters
+        for (auto& npc : sceneBuilder.getNPCs()) {
+            if (npc.character && npc.renderableIndex < sceneObjects.size()) {
+                const Renderable& npcObj = sceneObjects[npc.renderableIndex];
+                resources_.skinnedMesh->record(cmd, frameIndex, npcObj, *npc.character);
             }
         }
     }
@@ -205,12 +215,22 @@ void HDRPassRecorder::recordSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
         resources_.profiler->beginGpuZone(cmd, "HDR:SkinnedChar");
         {
             SceneBuilder& sceneBuilder = resources_.scene->getSceneBuilder();
+            const auto& sceneObjects = sceneBuilder.getRenderables();
+
+            // Draw player character
             if (sceneBuilder.hasCharacter()) {
-                const auto& sceneObjects = sceneBuilder.getRenderables();
                 size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
                 if (playerIndex < sceneObjects.size()) {
                     const Renderable& playerObj = sceneObjects[playerIndex];
                     resources_.skinnedMesh->record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
+                }
+            }
+
+            // Draw NPC characters
+            for (auto& npc : sceneBuilder.getNPCs()) {
+                if (npc.character && npc.renderableIndex < sceneObjects.size()) {
+                    const Renderable& npcObj = sceneObjects[npc.renderableIndex];
+                    resources_.skinnedMesh->record(cmd, frameIndex, npcObj, *npc.character);
                 }
             }
         }
@@ -297,9 +317,24 @@ void HDRPassRecorder::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameInde
     MaterialId lastMaterialId = INVALID_MATERIAL_ID;
     VkDescriptorSet currentDescSet = VK_NULL_HANDLE;
 
+    // Build set of NPC indices to skip (rendered with GPU skinning)
+    const auto& npcs = resources_.scene->getSceneBuilder().getNPCs();
+
     for (size_t i : sortedIndices) {
         // Skip player character (rendered separately with GPU skinning)
         if (hasCharacter && i == playerIndex) {
+            continue;
+        }
+
+        // Skip NPC characters (rendered separately with GPU skinning)
+        bool isNPC = false;
+        for (const auto& npc : npcs) {
+            if (i == npc.renderableIndex) {
+                isNPC = true;
+                break;
+            }
+        }
+        if (isNPC) {
             continue;
         }
 

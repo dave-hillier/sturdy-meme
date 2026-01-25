@@ -604,6 +604,11 @@ void Application::run() {
             renderer_->getCommandPool(), renderer_->getVulkanContext().getVkGraphicsQueue(),
             movementSpeed, isGrounded, isJumping);
 
+        // Update NPC animations
+        renderer_->getSystems().scene().getSceneBuilder().updateNPCs(
+            deltaTime, renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getVkDevice(),
+            renderer_->getCommandPool(), renderer_->getVulkanContext().getVkGraphicsQueue());
+
         // Update camera and player based on mode
         if (input.isThirdPersonMode()) {
             camera.setThirdPersonTarget(playerMovement.getFocusPoint(playerTransform.position));
