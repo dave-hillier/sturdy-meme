@@ -432,13 +432,20 @@ bool Renderer::render(const Camera& camera) {
     systems_->profiler().beginCpuZone("Wait:AcquireImage");
     auto acquireStart = std::chrono::high_resolution_clock::now();
     uint32_t imageIndex;
-    VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX,
+    // Use finite timeout (100ms) to prevent freezing when surface becomes unavailable
+    // (e.g., macOS screen lock). This allows the event loop to continue processing.
+    constexpr uint64_t acquireTimeoutNs = 100'000'000; // 100ms in nanoseconds
+    VkResult result = vkAcquireNextImageKHR(device, swapchain, acquireTimeoutNs,
                                             frameSync_.currentImageAvailableSemaphore(), VK_NULL_HANDLE, &imageIndex);
     auto acquireEnd = std::chrono::high_resolution_clock::now();
     qsDiag.acquireImageTimeMs = std::chrono::duration<float, std::milli>(acquireEnd - acquireStart).count();
     systems_->profiler().endCpuZone("Wait:AcquireImage");
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+    if (result == VK_TIMEOUT || result == VK_NOT_READY) {
+        // Timeout acquiring image - surface may be unavailable (e.g., macOS screen lock)
+        // Return gracefully to allow event loop to continue processing
+        return false;
+    } else if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         handleResize();
         return false;
     } else if (result == VK_ERROR_SURFACE_LOST_KHR) {

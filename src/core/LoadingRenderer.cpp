@@ -310,12 +310,18 @@ bool LoadingRenderer::render() {
     device.resetFences(**inFlightFence_);
 
     // Acquire swapchain image
+    // Use finite timeout (100ms) to prevent freezing when surface becomes unavailable
+    // (e.g., macOS screen lock). This allows the event loop to continue processing.
+    constexpr uint64_t acquireTimeoutNs = 100'000'000; // 100ms in nanoseconds
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(rawDevice, ctx_->get().getVkSwapchain(),
-                                            UINT64_MAX, **imageAvailableSemaphore_,
+                                            acquireTimeoutNs, **imageAvailableSemaphore_,
                                             VK_NULL_HANDLE, &imageIndex);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+    if (result == VK_TIMEOUT || result == VK_NOT_READY) {
+        // Timeout acquiring image - surface may be unavailable (e.g., macOS screen lock)
+        return false;
+    } else if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         // Need to recreate swapchain - skip this frame
         return false;
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {

@@ -56,12 +56,19 @@ RendererCore::FrameBeginResult RendererCore::acquireSwapchainImage() {
     VkSwapchainKHR swapchain = vulkanContext_->getVkSwapchain();
 
     uint32_t imageIndex;
+    // Use finite timeout (100ms) to prevent freezing when surface becomes unavailable
+    // (e.g., macOS screen lock). This allows the event loop to continue processing.
+    constexpr uint64_t acquireTimeoutNs = 100'000'000; // 100ms in nanoseconds
     VkResult vkResult = vkAcquireNextImageKHR(
-        device, swapchain, UINT64_MAX,
+        device, swapchain, acquireTimeoutNs,
         frameSync_->currentImageAvailableSemaphore(),
         VK_NULL_HANDLE, &imageIndex);
 
-    if (vkResult == VK_ERROR_OUT_OF_DATE_KHR) {
+    if (vkResult == VK_TIMEOUT || vkResult == VK_NOT_READY) {
+        // Timeout acquiring image - surface may be unavailable (e.g., macOS screen lock)
+        result.error = FrameResult::Skipped;
+        return result;
+    } else if (vkResult == VK_ERROR_OUT_OF_DATE_KHR) {
         resizeNeeded_ = true;
         result.error = FrameResult::SwapchainOutOfDate;
         return result;
