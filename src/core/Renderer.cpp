@@ -8,6 +8,7 @@
 #include "core/FrameUpdater.h"
 #include "core/FrameDataBuilder.h"
 #include "core/updaters/UBOUpdater.h"
+#include "core/loading/AsyncSystemLoader.h"
 #include "interfaces/IPlayerControl.h"
 #include "UBOs.h"
 #include "FrameData.h"
@@ -53,11 +54,15 @@
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
+#include "DisplacementSystem.h"
 #include "CullCommon.h"  // For extractFrustumPlanes
 // Water
 #include "WaterSystem.h"
 #include "WaterTileCull.h"
 #include "WaterGBuffer.h"
+#include "WaterDisplacement.h"
+#include "FlowMapGenerator.h"
+#include "FoamBuffer.h"
 #include "SSRSystem.h"
 // Post-processing
 #include "BilateralGridSystem.h"
@@ -66,6 +71,21 @@
 // Weather
 #include "WeatherSystem.h"
 #include "LeafSystem.h"
+// System groups for async initialization
+#include "SnowSystemGroup.h"
+#include "VegetationSystemGroup.h"
+#include "AtmosphereSystemGroup.h"
+#include "WaterSystemGroup.h"
+#include "GeometrySystemGroup.h"
+// Additional systems for async init
+#include "CoreResources.h"
+#include "SystemWiring.h"
+#include "DeferredTerrainObjects.h"
+#include "TerrainFactory.h"
+#include "ErosionDataLoader.h"
+#include "RoadNetworkLoader.h"
+#include "RoadRiverVisualization.h"
+#include "ScatterSystemFactory.h"
 
 #include <SDL3/SDL_vulkan.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -81,11 +101,22 @@
 
 std::unique_ptr<Renderer> Renderer::create(const InitInfo& info) {
     auto instance = std::make_unique<Renderer>(ConstructToken{});
-    if (!instance->initInternal(info)) {
-        return nullptr;
+
+    if (info.asyncInit) {
+        // Async initialization path - starts background loading
+        if (!instance->initInternalAsync(info)) {
+            return nullptr;
+        }
+    } else {
+        // Synchronous initialization path (original behavior)
+        if (!instance->initInternal(info)) {
+            return nullptr;
+        }
     }
     return instance;
 }
+
+Renderer::Renderer(ConstructToken) {}
 
 Renderer::~Renderer() {
     cleanup();
@@ -884,3 +915,753 @@ bool Renderer::createSkinnedMeshRendererDescriptorSets() {
 
 // Resource access
 DescriptorManager::Pool* Renderer::getDescriptorPool() { return descriptorInfra_.getDescriptorPool(); }
+
+// ===== Async Initialization Implementation =====
+
+bool Renderer::initInternalAsync(const InitInfo& info) {
+    INIT_PROFILE_PHASE("Renderer");
+
+    resourcePath = info.resourcePath;
+    config_ = info.config;
+    progressCallback_ = info.progressCallback;
+
+    // Helper to report progress
+    auto reportProgress = [this](float progress, const char* phase) {
+        if (progressCallback_) {
+            progressCallback_(progress, phase);
+        }
+    };
+
+    reportProgress(0.0f, "Initializing...");
+
+    // Create subsystems container
+    systems_ = std::make_unique<RendererSystems>();
+
+    // Initialize Vulkan context (must be synchronous - needed for everything else)
+    {
+        INIT_PROFILE_PHASE("VulkanContext");
+        if (info.vulkanContext) {
+            vulkanContext_ = std::move(const_cast<std::unique_ptr<VulkanContext>&>(info.vulkanContext));
+            if (!vulkanContext_->isDeviceReady()) {
+                if (!vulkanContext_->initDevice(info.window)) {
+                    SDL_Log("Failed to complete Vulkan device initialization");
+                    return false;
+                }
+            }
+        } else {
+            vulkanContext_ = std::make_unique<VulkanContext>();
+            if (!vulkanContext_->init(info.window)) {
+                SDL_Log("Failed to initialize Vulkan context");
+                return false;
+            }
+        }
+    }
+
+    // Phase 1: Core Vulkan resources (synchronous - quick)
+    reportProgress(0.05f, "Creating Vulkan resources");
+    {
+        INIT_PROFILE_PHASE("CoreVulkanResources");
+        if (!initCoreVulkanResources()) return false;
+    }
+
+    // Initialize asset registry (synchronous - quick)
+    reportProgress(0.08f, "Initializing asset registry");
+    {
+        INIT_PROFILE_PHASE("AssetRegistry");
+        renderingInfra_.initAssetRegistry(
+            vulkanContext_->getVkDevice(),
+            vulkanContext_->getVkPhysicalDevice(),
+            vulkanContext_->getAllocator(),
+            vulkanContext_->getCommandPool(),
+            vulkanContext_->getVkGraphicsQueue());
+    }
+
+    // Phase 2: Descriptor infrastructure (synchronous - quick)
+    reportProgress(0.10f, "Creating descriptor infrastructure");
+    {
+        INIT_PROFILE_PHASE("DescriptorInfrastructure");
+        if (!initDescriptorInfrastructure()) return false;
+    }
+
+    // Build InitContext for subsystem initialization and store for async access
+    asyncInitContext_ = InitContext::build(
+        *vulkanContext_, vulkanContext_->getCommandPool(), descriptorInfra_.getDescriptorPool(),
+        resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes);
+
+    // Phase 3: Start async subsystem initialization
+    reportProgress(0.12f, "Starting async subsystem loading");
+    asyncInitComplete_ = false;
+    asyncInitStarted_ = true;
+
+    // Create async loader and set up tasks
+    Loading::AsyncSystemLoader::InitInfo loaderInfo;
+    loaderInfo.vulkanContext = vulkanContext_.get();
+    loaderInfo.loadingRenderer = nullptr;  // We handle rendering separately
+    loaderInfo.workerCount = 0;  // Auto-detect
+
+    asyncLoader_ = Loading::AsyncSystemLoader::create(loaderInfo);
+    if (!asyncLoader_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create AsyncSystemLoader");
+        // Fall back to synchronous initialization
+        if (!initSubsystems(asyncInitContext_)) return false;
+        asyncInitComplete_ = true;
+    } else {
+        // Start async subsystem initialization
+        if (!initSubsystemsAsync()) {
+            return false;
+        }
+        asyncLoader_->start();
+    }
+
+    return true;
+}
+
+bool Renderer::pollAsyncInit() {
+    if (asyncInitComplete_) {
+        return true;  // Already complete
+    }
+
+    if (!asyncLoader_) {
+        asyncInitComplete_ = true;
+        return true;
+    }
+
+    // Poll for completed tasks
+    asyncLoader_->pollCompletions();
+
+    // Update progress callback
+    if (progressCallback_) {
+        auto progress = asyncLoader_->getProgress();
+        // Map 0.0-1.0 to 0.12-0.95 (subsystem init range)
+        float mappedProgress = 0.12f + progress.progress * 0.83f;
+        progressCallback_(mappedProgress, progress.currentPhase.c_str());
+    }
+
+    // Check if all tasks are complete
+    if (asyncLoader_->isComplete()) {
+        if (asyncLoader_->hasError()) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                        "Async init failed: %s", asyncLoader_->getErrorMessage().c_str());
+            asyncInitComplete_ = true;
+            return false;  // Indicate failure
+        }
+
+        // Finalize initialization (quick synchronous steps)
+        SDL_Log("Async subsystem loading complete, finalizing...");
+
+        // Phase 4: Control subsystems
+        if (progressCallback_) progressCallback_(0.95f, "Initializing controls");
+        {
+            INIT_PROFILE_PHASE("ControlSubsystems");
+            initControlSubsystems();
+        }
+
+        // Phase 5: Resize coordinator
+        if (progressCallback_) progressCallback_(0.96f, "Configuring resize handler");
+        {
+            INIT_PROFILE_PHASE("ResizeCoordinator");
+            initResizeCoordinator();
+        }
+
+        // Initialize pass recorders
+        if (progressCallback_) progressCallback_(0.97f, "Creating pass recorders");
+        {
+            INIT_PROFILE_PHASE("PassRecorders");
+            shadowPassRecorder_ = std::make_unique<ShadowPassRecorder>(*systems_);
+            ShadowPassRecorder::Config shadowConfig;
+            shadowConfig.terrainEnabled = terrainEnabled;
+            shadowConfig.perfToggles = &perfToggles;
+            shadowPassRecorder_->setConfig(shadowConfig);
+
+            hdrPassRecorder_ = std::make_unique<HDRPassRecorder>(*systems_);
+            HDRPassRecorder::Config hdrConfig;
+            hdrConfig.terrainEnabled = terrainEnabled;
+            hdrConfig.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
+            hdrConfig.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
+            hdrConfig.lastViewProj = &lastViewProj;
+            hdrPassRecorder_->setConfig(hdrConfig);
+        }
+        SDL_Log("Pass recorders initialized");
+
+        // Setup frame graph
+        if (progressCallback_) progressCallback_(0.99f, "Configuring frame graph");
+        {
+            INIT_PROFILE_PHASE("FrameGraph");
+            setupFrameGraph();
+        }
+        SDL_Log("Frame graph configured");
+
+        if (progressCallback_) progressCallback_(1.0f, "Ready");
+
+        // Clean up async loader
+        asyncLoader_->shutdown();
+        asyncLoader_.reset();
+
+        asyncInitComplete_ = true;
+        SDL_Log("Async initialization complete");
+    }
+
+    return asyncInitComplete_;
+}
+
+bool Renderer::initSubsystemsAsync() {
+    // This method sets up async tasks for heavy subsystem initialization
+    // Tasks declare dependencies to ensure correct initialization order
+    //
+    // Initialization Tiers:
+    // Tier 0 (Core): PostProcess, Pipeline, SkinnedMesh, GlobalBuffers, Shadow
+    //   - Must be synchronous (GPU-heavy, provides render passes)
+    // Tier 1: Terrain
+    //   - Depends on Tier 0 (needs HDR/shadow render passes)
+    //   - Heavy: heightmap loading, tile generation
+    // Tier 2a: Scene
+    //   - Depends on Terrain (needs height queries)
+    //   - Heavy: texture loading, mesh loading
+    // Tier 2b: Snow/Weather (parallel with Scene)
+    //   - Depends on Tier 0 only
+    // Tier 3: Vegetation
+    //   - Depends on Terrain (needs height queries)
+    //   - Heavy: tree generation, rock mesh generation
+    // Tier 4: Atmosphere (parallel with Vegetation)
+    //   - Depends on Tier 0 only
+    // Tier 5: Water, Geometry
+    //   - Depends on Terrain
+    // Tier 6: Wiring and finalization
+
+    VkDevice device = vulkanContext_->getVkDevice();
+    VmaAllocator allocator = vulkanContext_->getAllocator();
+    VkPhysicalDevice physicalDevice = vulkanContext_->getVkPhysicalDevice();
+    VkQueue graphicsQueue = vulkanContext_->getVkGraphicsQueue();
+    VkFormat swapchainImageFormat = static_cast<VkFormat>(vulkanContext_->getVkSwapchainImageFormat());
+
+    // Use member asyncInitContext_ - it persists for the lifetime of async tasks
+    const InitContext* ctxPtr = &asyncInitContext_;
+
+    // ========== TASK: Core Systems (Tier 0) ==========
+    // Must run first - creates render passes and core GPU resources
+    {
+        Loading::SystemInitTask task;
+        task.id = "core";
+        task.displayName = "Core GPU systems";
+        task.weight = 0.1f;
+        task.cpuWork = nullptr;  // All GPU work
+        task.gpuWork = [this, ctxPtr, swapchainImageFormat]() -> bool {
+            auto reportProgress = [this](float p, const char* phase) {
+                if (progressCallback_) progressCallback_(0.12f + p * 0.08f, phase);
+            };
+
+            // PostProcess (creates HDR render pass - needed by almost everything)
+            reportProgress(0.0f, "Post-processing systems");
+            {
+                INIT_PROFILE_PHASE("PostProcessing");
+                auto bundle = PostProcessSystem::createWithDependencies(*ctxPtr, vulkanContext_->getRenderPass(), swapchainImageFormat);
+                if (!bundle) return false;
+                systems_->setPostProcess(std::move(bundle->postProcess));
+                systems_->setBloom(std::move(bundle->bloom));
+                systems_->setBilateralGrid(std::move(bundle->bilateralGrid));
+            }
+
+            // Graphics pipeline
+            reportProgress(0.2f, "Graphics pipeline");
+            {
+                INIT_PROFILE_PHASE("GraphicsPipeline");
+                if (!descriptorInfra_.createGraphicsPipeline(*vulkanContext_,
+                        systems_->postProcess().getHDRRenderPass(), resourcePath)) {
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create graphics pipeline");
+                    return false;
+                }
+            }
+
+            // Skinned mesh renderer
+            reportProgress(0.4f, "Skinned mesh renderer");
+            {
+                INIT_PROFILE_PHASE("SkinnedMeshRenderer");
+                if (!initSkinnedMeshRenderer()) return false;
+            }
+
+            // Global buffer manager
+            reportProgress(0.6f, "Global buffers");
+            {
+                INIT_PROFILE_PHASE("GlobalBufferManager");
+                auto globalBuffers = GlobalBufferManager::create(vulkanContext_->getAllocator(),
+                    vulkanContext_->getVkPhysicalDevice(), MAX_FRAMES_IN_FLIGHT);
+                if (!globalBuffers) {
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GlobalBufferManager");
+                    return false;
+                }
+                systems_->setGlobalBuffers(std::move(globalBuffers));
+            }
+
+            // Initialize light buffers
+            for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+                LightBuffer emptyBuffer{};
+                emptyBuffer.lightCount = glm::uvec4(0, 0, 0, 0);
+                systems_->globalBuffers().updateLightBuffer(i, emptyBuffer);
+            }
+
+            // Shadow system
+            reportProgress(0.8f, "Shadow system");
+            {
+                INIT_PROFILE_PHASE("ShadowSystem");
+                auto shadowSystem = ShadowSystem::create(*ctxPtr,
+                    descriptorInfra_.getVkDescriptorSetLayout(),
+                    systems_->skinnedMesh().getDescriptorSetLayout());
+                if (!shadowSystem) return false;
+                systems_->setShadow(std::move(shadowSystem));
+            }
+
+            reportProgress(1.0f, "Core systems ready");
+            return true;
+        };
+        asyncLoader_->addTask(std::move(task));
+    }
+
+    // ========== TASK: Terrain System (Tier 1) ==========
+    // Heavy: heightmap loading, tile cache initialization
+    {
+        Loading::SystemInitTask task;
+        task.id = "terrain";
+        task.displayName = "Terrain system";
+        task.dependencies = {"core"};
+        task.weight = 0.15f;
+        task.cpuWork = nullptr;  // TerrainFactory handles internal threading
+        task.gpuWork = [this, ctxPtr]() -> bool {
+            if (progressCallback_) progressCallback_(0.20f, "Terrain system");
+            INIT_PROFILE_PHASE("TerrainSystem");
+
+            TerrainFactory::Config terrainFactoryConfig{};
+            terrainFactoryConfig.hdrRenderPass = systems_->postProcess().getHDRRenderPass();
+            terrainFactoryConfig.shadowRenderPass = systems_->shadow().getShadowRenderPass();
+            terrainFactoryConfig.shadowMapSize = systems_->shadow().getShadowMapSize();
+            terrainFactoryConfig.resourcePath = resourcePath;
+
+            auto terrainSystem = TerrainFactory::create(*ctxPtr, terrainFactoryConfig);
+            if (!terrainSystem) return false;
+            systems_->setTerrain(std::move(terrainSystem));
+            return true;
+        };
+        asyncLoader_->addTask(std::move(task));
+    }
+
+    // ========== TASK: Snow/Weather Systems (Tier 2b - parallel with scene) ==========
+    {
+        Loading::SystemInitTask task;
+        task.id = "snow_weather";
+        task.displayName = "Snow and weather";
+        task.dependencies = {"core"};
+        task.weight = 0.05f;
+        task.cpuWork = nullptr;
+        task.gpuWork = [this, ctxPtr]() -> bool {
+            if (progressCallback_) progressCallback_(0.28f, "Snow and weather systems");
+            INIT_PROFILE_PHASE("SnowWeather");
+
+            VkRenderPass hdrRenderPass = systems_->postProcess().getHDRRenderPass();
+            SnowSystemGroup::CreateDeps snowDeps{*ctxPtr, hdrRenderPass};
+            auto snowBundle = SnowSystemGroup::createAll(snowDeps);
+            if (!snowBundle) return false;
+
+            systems_->setSnowMask(std::move(snowBundle->snowMask));
+            systems_->setVolumetricSnow(std::move(snowBundle->volumetricSnow));
+            systems_->setWeather(std::move(snowBundle->weather));
+            systems_->setLeaf(std::move(snowBundle->leaf));
+            return true;
+        };
+        asyncLoader_->addTask(std::move(task));
+    }
+
+    // ========== TASK: Scene Manager (Tier 2a) ==========
+    // Heavy: texture loading, mesh loading, material setup
+    {
+        Loading::SystemInitTask task;
+        task.id = "scene";
+        task.displayName = "Scene manager";
+        task.dependencies = {"terrain", "snow_weather"};
+        task.weight = 0.15f;
+        task.cpuWork = nullptr;  // SceneManager handles internal asset loading
+        task.gpuWork = [this, ctxPtr]() -> bool {
+            if (progressCallback_) progressCallback_(0.32f, "Scene manager");
+            INIT_PROFILE_PHASE("SceneManager");
+
+            const float halfTerrain = 8192.0f;
+            SceneBuilder::InitInfo sceneInfo{};
+            sceneInfo.allocator = vulkanContext_->getAllocator();
+            sceneInfo.device = vulkanContext_->getVkDevice();
+            sceneInfo.commandPool = vulkanContext_->getCommandPool();
+            sceneInfo.graphicsQueue = vulkanContext_->getVkGraphicsQueue();
+            sceneInfo.physicalDevice = vulkanContext_->getVkPhysicalDevice();
+            sceneInfo.resourcePath = resourcePath;
+            sceneInfo.assetRegistry = &renderingInfra_.assetRegistry();
+            sceneInfo.getTerrainHeight = [this](float x, float z) {
+                return systems_->terrain().getHeightAt(x, z);
+            };
+            sceneInfo.sceneOrigin = glm::vec2(9200.0f - halfTerrain, 3000.0f - halfTerrain);
+            sceneInfo.deferRenderables = true;
+
+            auto sceneManager = SceneManager::create(sceneInfo);
+            if (!sceneManager) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SceneManager");
+                return false;
+            }
+            systems_->setScene(std::move(sceneManager));
+
+            // Create descriptor sets (needs scene and snow)
+            if (!createDescriptorSets()) return false;
+            if (!createSkinnedMeshRendererDescriptorSets()) return false;
+
+            return true;
+        };
+        asyncLoader_->addTask(std::move(task));
+    }
+
+    // ========== TASK: Vegetation Systems (Tier 3) ==========
+    // Heavy: tree generation, rock mesh generation
+    {
+        Loading::SystemInitTask task;
+        task.id = "vegetation";
+        task.displayName = "Vegetation systems";
+        task.dependencies = {"scene"};
+        task.weight = 0.2f;
+        task.cpuWork = nullptr;  // VegetationSystemGroup handles internal threading for trees
+        task.gpuWork = [this, ctxPtr]() -> bool {
+            if (progressCallback_) progressCallback_(0.45f, "Vegetation systems");
+            INIT_PROFILE_PHASE("VegetationSystems");
+
+            CoreResources core = CoreResources::collect(
+                systems_->postProcess(), systems_->shadow(), systems_->terrain(), MAX_FRAMES_IN_FLIGHT);
+
+            const float halfTerrain = 8192.0f;
+            glm::vec2 sceneOrigin(9200.0f - halfTerrain, 3000.0f - halfTerrain);
+
+            ScatterSystemFactory::RockConfig rockConfig{};
+            rockConfig.rockVariations = 6;
+            rockConfig.rocksPerVariation = 10;
+            rockConfig.minRadius = 0.4f;
+            rockConfig.maxRadius = 2.0f;
+            rockConfig.placementRadius = 100.0f;
+            rockConfig.placementCenter = sceneOrigin;
+            rockConfig.minDistanceBetween = 4.0f;
+            rockConfig.roughness = 0.35f;
+            rockConfig.asymmetry = 0.3f;
+            rockConfig.subdivisions = 3;
+            rockConfig.materialRoughness = 0.75f;
+            rockConfig.materialMetallic = 0.0f;
+
+            VegetationSystemGroup::CreateDeps vegDeps{
+                *ctxPtr,
+                core.hdr.renderPass,
+                core.shadow.renderPass,
+                core.shadow.mapSize,
+                core.terrain.size,
+                core.terrain.getHeightAt,
+                rockConfig
+            };
+
+            auto vegBundle = VegetationSystemGroup::createAll(vegDeps);
+            if (!vegBundle) return false;
+
+            systems_->setWind(std::move(vegBundle->wind));
+            systems_->setDisplacement(std::move(vegBundle->displacement));
+            systems_->setGrass(std::move(vegBundle->grass));
+            systems_->setRocks(std::move(vegBundle->rocks));
+            systems_->setTree(std::move(vegBundle->tree));
+            systems_->setTreeRenderer(std::move(vegBundle->treeRenderer));
+            if (vegBundle->treeLOD) systems_->setTreeLOD(std::move(vegBundle->treeLOD));
+            if (vegBundle->impostorCull) systems_->setImpostorCull(std::move(vegBundle->impostorCull));
+
+            return true;
+        };
+        asyncLoader_->addTask(std::move(task));
+    }
+
+    // ========== TASK: Atmosphere Systems (Tier 4 - parallel with vegetation) ==========
+    {
+        Loading::SystemInitTask task;
+        task.id = "atmosphere";
+        task.displayName = "Atmosphere systems";
+        task.dependencies = {"scene"};
+        task.weight = 0.1f;
+        task.cpuWork = nullptr;
+        task.gpuWork = [this, ctxPtr]() -> bool {
+            if (progressCallback_) progressCallback_(0.60f, "Atmosphere systems");
+            INIT_PROFILE_PHASE("AtmosphereSubsystems");
+
+            CoreResources core = CoreResources::collect(
+                systems_->postProcess(), systems_->shadow(), systems_->terrain(), MAX_FRAMES_IN_FLIGHT);
+
+            AtmosphereSystemGroup::CreateDeps atmosDeps{
+                *ctxPtr,
+                core.hdr.renderPass,
+                core.shadow.cascadeView,
+                core.shadow.sampler,
+                systems_->globalBuffers().lightBuffers.buffers
+            };
+            auto atmosBundle = AtmosphereSystemGroup::createAll(atmosDeps);
+            if (!atmosBundle) return false;
+
+            systems_->setSky(std::move(atmosBundle->sky));
+            systems_->setFroxel(std::move(atmosBundle->froxel));
+            systems_->setAtmosphereLUT(std::move(atmosBundle->atmosphereLUT));
+            systems_->setCloudShadow(std::move(atmosBundle->cloudShadow));
+
+            AtmosphereSystemGroup::wireToPostProcess(systems_->froxel(), systems_->postProcess());
+            return true;
+        };
+        asyncLoader_->addTask(std::move(task));
+    }
+
+    // ========== TASK: Water Systems (Tier 5) ==========
+    {
+        Loading::SystemInitTask task;
+        task.id = "water";
+        task.displayName = "Water systems";
+        task.dependencies = {"vegetation", "atmosphere"};
+        task.weight = 0.1f;
+        task.cpuWork = nullptr;
+        task.gpuWork = [this, ctxPtr]() -> bool {
+            if (progressCallback_) progressCallback_(0.75f, "Water systems");
+            INIT_PROFILE_PHASE("WaterSystems");
+
+            CoreResources core = CoreResources::collect(
+                systems_->postProcess(), systems_->shadow(), systems_->terrain(), MAX_FRAMES_IN_FLIGHT);
+
+            WaterSystemGroup::CreateDeps waterDeps{
+                *ctxPtr,
+                core.hdr.renderPass,
+                65536.0f,
+                resourcePath
+            };
+
+            auto waterBundle = WaterSystemGroup::createAll(waterDeps);
+            if (!waterBundle) return false;
+
+            systems_->setWater(std::move(waterBundle->system));
+            systems_->setFlowMap(std::move(waterBundle->flowMap));
+            systems_->setWaterDisplacement(std::move(waterBundle->displacement));
+            systems_->setFoam(std::move(waterBundle->foam));
+            systems_->setSSR(std::move(waterBundle->ssr));
+            if (waterBundle->tileCull) systems_->setWaterTileCull(std::move(waterBundle->tileCull));
+            if (waterBundle->gBuffer) systems_->setWaterGBuffer(std::move(waterBundle->gBuffer));
+
+            // Configure water subsystems
+            TerrainFactory::Config terrainFactoryConfig{};
+            terrainFactoryConfig.resourcePath = resourcePath;
+            TerrainConfig terrainConfig = TerrainFactory::buildTerrainConfig(terrainFactoryConfig);
+
+            if (!WaterSystemGroup::configureSubsystems(*systems_, terrainConfig)) return false;
+            if (!WaterSystemGroup::createDescriptorSets(*systems_,
+                    systems_->globalBuffers().uniformBuffers.buffers,
+                    sizeof(UniformBufferObject), systems_->shadow(), systems_->terrain(),
+                    systems_->postProcess(), vulkanContext_->getDepthSampler())) return false;
+
+            return true;
+        };
+        asyncLoader_->addTask(std::move(task));
+    }
+
+    // ========== TASK: Geometry & Finalization (Tier 6) ==========
+    {
+        Loading::SystemInitTask task;
+        task.id = "finalize";
+        task.displayName = "Finalizing systems";
+        task.dependencies = {"water"};
+        task.weight = 0.15f;
+        task.cpuWork = nullptr;
+        task.gpuWork = [this, ctxPtr]() -> bool {
+            if (progressCallback_) progressCallback_(0.85f, "Finalizing systems");
+
+            VkDevice device = vulkanContext_->getVkDevice();
+            CoreResources core = CoreResources::collect(
+                systems_->postProcess(), systems_->shadow(), systems_->terrain(), MAX_FRAMES_IN_FLIGHT);
+            const float halfTerrain = 8192.0f;
+            glm::vec2 sceneOrigin(9200.0f - halfTerrain, 3000.0f - halfTerrain);
+
+            // System wiring
+            SystemWiring wiring(device, MAX_FRAMES_IN_FLIGHT);
+            wiring.wireTerrainDescriptors(*systems_);
+
+            // Deferred terrain objects
+            {
+                DeferredTerrainObjects::Config deferredConfig;
+                deferredConfig.resourcePath = resourcePath;
+                deferredConfig.terrainSize = core.terrain.size;
+                deferredConfig.getTerrainHeight = core.terrain.getHeightAt;
+                deferredConfig.sceneOrigin = sceneOrigin;
+                deferredConfig.forestCenter = glm::vec2(sceneOrigin.x + 200.0f, sceneOrigin.y + 100.0f);
+                deferredConfig.forestRadius = 80.0f;
+                deferredConfig.maxTrees = 500;
+                deferredConfig.uniformBuffers = systems_->globalBuffers().uniformBuffers.buffers;
+                deferredConfig.shadowView = systems_->shadow().getShadowImageView();
+                deferredConfig.shadowSampler = systems_->shadow().getShadowSampler();
+                deferredConfig.device = device;
+                deferredConfig.allocator = vulkanContext_->getAllocator();
+                deferredConfig.commandPool = vulkanContext_->getCommandPool();
+                deferredConfig.graphicsQueue = vulkanContext_->getVkGraphicsQueue();
+                deferredConfig.physicalDevice = vulkanContext_->getVkPhysicalDevice();
+                deferredConfig.descriptorPool = descriptorInfra_.getDescriptorPool();
+                deferredConfig.descriptorSetLayout = descriptorInfra_.getVkDescriptorSetLayout();
+                deferredConfig.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+
+                auto deferredObjects = DeferredTerrainObjects::create(deferredConfig);
+                if (deferredObjects) {
+                    systems_->setDeferredTerrainObjects(std::move(deferredObjects));
+                }
+            }
+
+            // Common bindings function for descriptor sets
+            auto getCommonBindings = [this](uint32_t frameIndex) -> MaterialDescriptorFactory::CommonBindings {
+                MaterialDescriptorFactory::CommonBindings common{};
+                common.uniformBuffer = systems_->globalBuffers().uniformBuffers.buffers[frameIndex];
+                common.uniformBufferSize = sizeof(UniformBufferObject);
+                common.shadowMapView = systems_->shadow().getShadowImageView();
+                common.shadowMapSampler = systems_->shadow().getShadowSampler();
+                common.lightBuffer = systems_->globalBuffers().lightBuffers.buffers[frameIndex];
+                common.lightBufferSize = sizeof(LightBuffer);
+                common.emissiveMapView = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getImageView();
+                common.emissiveMapSampler = systems_->scene().getSceneBuilder().getDefaultEmissiveMap()->getSampler();
+                common.pointShadowView = systems_->shadow().getPointShadowArrayView(frameIndex);
+                common.pointShadowSampler = systems_->shadow().getPointShadowSampler();
+                common.spotShadowView = systems_->shadow().getSpotShadowArrayView(frameIndex);
+                common.spotShadowSampler = systems_->shadow().getSpotShadowSampler();
+                common.snowMaskView = systems_->snowMask().getSnowMaskView();
+                common.snowMaskSampler = systems_->snowMask().getSnowMaskSampler();
+                common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture()->getImageView();
+                common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture()->getSampler();
+                return common;
+            };
+
+            // Create rocks descriptor sets
+            if (!systems_->rocks().createDescriptorSets(
+                    device, *descriptorInfra_.getDescriptorPool(),
+                    descriptorInfra_.getVkDescriptorSetLayout(),
+                    MAX_FRAMES_IN_FLIGHT, getCommonBindings)) {
+                return false;
+            }
+
+            if (systems_->deferredTerrainObjects()) {
+                systems_->deferredTerrainObjects()->setCommonBindingsFunc(getCommonBindings);
+            }
+
+            // Wire remaining systems
+            wiring.wireSnowSystems(*systems_);
+            wiring.wireLeafDescriptors(*systems_);
+            wiring.wireWeatherDescriptors(*systems_);
+            wiring.wireGrassDescriptors(*systems_);
+            wiring.wireFroxelToWeather(*systems_);
+            wiring.wireCloudShadowToTerrain(*systems_);
+            wiring.wireCloudShadowBindings(*systems_);
+
+            // Geometry systems
+            {
+                INIT_PROFILE_PHASE("GeometrySubsystems");
+                GeometrySystemGroup::CreateDeps geomDeps{
+                    *ctxPtr,
+                    core.hdr.renderPass,
+                    systems_->globalBuffers().uniformBuffers.buffers,
+                    resourcePath,
+                    core.terrain.getHeightAt
+                };
+                auto geomBundle = GeometrySystemGroup::createAll(geomDeps);
+                if (!geomBundle) return false;
+                systems_->setCatmullClark(std::move(geomBundle->catmullClark));
+            }
+
+            // Sky descriptor sets
+            if (!systems_->sky().createDescriptorSets(
+                    systems_->globalBuffers().uniformBuffers.buffers,
+                    sizeof(UniformBufferObject), systems_->atmosphereLUT())) return false;
+
+            // Hi-Z system
+            auto hiZSystem = HiZSystem::create(*ctxPtr, vulkanContext_->getDepthFormat());
+            if (hiZSystem) {
+                systems_->setHiZ(std::move(hiZSystem));
+                systems_->hiZ().setDepthBuffer(core.hdr.depthView, vulkanContext_->getDepthSampler());
+                systems_->hiZ().gatherObjects(systems_->scene().getRenderables(),
+                                              systems_->rocks().getSceneObjects());
+            }
+
+            // Profiler
+            systems_->setProfiler(Profiler::create(device, vulkanContext_->getVkPhysicalDevice(), MAX_FRAMES_IN_FLIGHT));
+
+            // Wire caustics
+            wiring.wireCausticsToTerrain(*systems_);
+
+            // Sync objects
+            if (!createSyncObjects()) return false;
+
+            // RendererCore
+            {
+                RendererCore::InitParams coreParams;
+                coreParams.vulkanContext = vulkanContext_.get();
+                coreParams.frameGraph = &renderingInfra_.frameGraph();
+                coreParams.frameSync = &frameSync_;
+                if (!rendererCore_.init(coreParams)) {
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize RendererCore");
+                    return false;
+                }
+            }
+
+            // Debug line system
+            auto debugLineSystem = DebugLineSystem::create(*ctxPtr, core.hdr.renderPass);
+            if (!debugLineSystem) return false;
+            systems_->setDebugLineSystem(std::move(debugLineSystem));
+
+            // Road/river data
+            {
+                std::string terrainDataPath = resourcePath + "/terrain_data";
+                std::string roadsSubdir = terrainDataPath + "/roads";
+                std::string roadsPath = roadsSubdir + "/roads.geojson";
+                std::string roadsPathAlt = terrainDataPath + "/roads.geojson";
+
+                if (systems_->roadData().loadFromGeoJson(roadsPath)) {
+                    SDL_Log("Loaded road network from %s", roadsPath.c_str());
+                } else if (systems_->roadData().loadFromGeoJson(roadsPathAlt)) {
+                    SDL_Log("Loaded road network from %s", roadsPathAlt.c_str());
+                }
+
+                std::string watershedPath = terrainDataPath + "/watershed";
+                ErosionLoadConfig erosionConfig{};
+                erosionConfig.cacheDirectory = watershedPath;
+                erosionConfig.seaLevel = 0.0f;
+                if (systems_->erosionData().loadFromCache(erosionConfig)) {
+                    SDL_Log("Loaded water placement data from %s", watershedPath.c_str());
+                }
+
+                auto& vis = systems_->roadRiverVis();
+                vis.setWaterData(&systems_->erosionData().getWaterData());
+                vis.setRoadNetwork(&systems_->roadData().getRoadNetwork());
+                vis.setTerrainTileCache(systems_->terrain().getTileCache());
+
+                RoadRiverVisConfig visConfig{};
+                visConfig.showRivers = true;
+                visConfig.showRoads = true;
+                visConfig.coneRadius = 0.5f;
+                visConfig.coneLength = 2.0f;
+                visConfig.heightAboveGround = 1.0f;
+                visConfig.riverConeSpacing = 50.0f;
+                visConfig.roadConeSpacing = 50.0f;
+                vis.setConfig(visConfig);
+            }
+
+            // UBO builder
+            UBOBuilder::Systems uboSystems{};
+            uboSystems.timeSystem = &systems_->time();
+            uboSystems.celestialCalculator = &systems_->celestial();
+            uboSystems.shadowSystem = &systems_->shadow();
+            uboSystems.windSystem = &systems_->wind();
+            uboSystems.atmosphereLUTSystem = &systems_->atmosphereLUT();
+            uboSystems.froxelSystem = &systems_->froxel();
+            uboSystems.sceneManager = &systems_->scene();
+            uboSystems.snowMaskSystem = &systems_->snowMask();
+            uboSystems.volumetricSnowSystem = &systems_->volumetricSnow();
+            uboSystems.cloudShadowSystem = &systems_->cloudShadow();
+            uboSystems.environmentSettings = &systems_->environmentSettings();
+            systems_->uboBuilder().setSystems(uboSystems);
+
+            if (progressCallback_) progressCallback_(0.95f, "Systems ready");
+            return true;
+        };
+        asyncLoader_->addTask(std::move(task));
+    }
+
+    return true;
+}

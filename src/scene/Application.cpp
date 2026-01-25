@@ -122,6 +122,7 @@ bool Application::init(const std::string& title, int width, int height) {
     rendererInfo.window = window;
     rendererInfo.resourcePath = resourcePath;
     rendererInfo.vulkanContext = std::move(vulkanContext);  // Transfer ownership
+    rendererInfo.asyncInit = true;  // Enable async subsystem loading
 
     // Progress callback renders loading screen during initialization
     if (loadingRenderer) {
@@ -134,6 +135,37 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     renderer_ = Renderer::create(rendererInfo);
+
+    // If async init is enabled, poll for completion while rendering loading screen
+    if (renderer_ && !renderer_->isAsyncInitComplete()) {
+        SDL_Log("Async initialization started, running loading loop...");
+
+        while (!renderer_->pollAsyncInit()) {
+            // Render loading screen
+            if (loadingRenderer) {
+                loadingRenderer->render();
+            }
+
+            // Keep window responsive
+            SDL_PumpEvents();
+
+            // Check for quit events during loading
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_EVENT_QUIT) {
+                    SDL_Log("Quit requested during loading");
+                    if (loadingRenderer) {
+                        loadingRenderer->cleanup();
+                    }
+                    return false;
+                }
+            }
+
+            SDL_Delay(1);  // Small yield
+        }
+
+        SDL_Log("Async initialization complete");
+    }
 
     // Cleanup loading renderer now that full renderer is ready
     if (loadingRenderer) {

@@ -83,6 +83,7 @@ set(SOURCES
     src/core/LoadingRenderer.cpp
     src/core/loading/LoadJobQueue.cpp
     src/core/loading/AsyncStartupLoader.cpp
+    src/core/loading/AsyncSystemLoader.cpp
     src/core/loading/LoadJobFactory.cpp
     src/core/Mesh.cpp
     src/core/SingleBuffer.cpp
