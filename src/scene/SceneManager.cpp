@@ -1,4 +1,7 @@
 #include "SceneManager.h"
+#include "VulkanContext.h"
+#include "TerrainSystem.h"
+#include "asset/AssetRegistry.h"
 #include <SDL3/SDL.h>
 
 std::unique_ptr<SceneManager> SceneManager::create(SceneBuilder::InitInfo& builderInfo) {
@@ -7,6 +10,33 @@ std::unique_ptr<SceneManager> SceneManager::create(SceneBuilder::InitInfo& build
         return nullptr;
     }
     return system;
+}
+
+std::unique_ptr<SceneManager> SceneManager::createWithDependencies(
+    VulkanContext& vulkanContext,
+    TerrainSystem& terrainSystem,
+    AssetRegistry* assetRegistry,
+    const std::string& resourcePath,
+    const glm::vec2& sceneOrigin) {
+    SceneBuilder::InitInfo sceneInfo{};
+    sceneInfo.allocator = vulkanContext.getAllocator();
+    sceneInfo.device = vulkanContext.getVkDevice();
+    sceneInfo.commandPool = vulkanContext.getCommandPool();
+    sceneInfo.graphicsQueue = vulkanContext.getVkGraphicsQueue();
+    sceneInfo.physicalDevice = vulkanContext.getVkPhysicalDevice();
+    sceneInfo.resourcePath = resourcePath;
+    sceneInfo.assetRegistry = assetRegistry;
+    sceneInfo.getTerrainHeight = [&terrainSystem](float x, float z) {
+        return terrainSystem.getHeightAt(x, z);
+    };
+    sceneInfo.sceneOrigin = sceneOrigin;
+    sceneInfo.deferRenderables = true;
+
+    auto sceneManager = SceneManager::create(sceneInfo);
+    if (!sceneManager) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SceneManager");
+    }
+    return sceneManager;
 }
 
 SceneManager::~SceneManager() {

@@ -8,6 +8,10 @@
 #include "PhysicsSystem.h"
 
 // Centralized scene management - handles visual objects, physics bodies, and lighting
+class AssetRegistry;
+class TerrainSystem;
+class VulkanContext;
+
 class SceneManager {
 public:
     // Passkey for controlled construction via make_unique
@@ -19,6 +23,12 @@ public:
      * Returns nullptr on failure.
      */
     static std::unique_ptr<SceneManager> create(SceneBuilder::InitInfo& builderInfo);
+    static std::unique_ptr<SceneManager> createWithDependencies(
+        VulkanContext& vulkanContext,
+        TerrainSystem& terrainSystem,
+        AssetRegistry* assetRegistry,
+        const std::string& resourcePath,
+        const glm::vec2& sceneOrigin);
 
 
     ~SceneManager();

@@ -108,26 +108,12 @@ std::unique_ptr<SceneManager> provideSceneManager(
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SceneManager requires a valid TerrainSystem");
         return nullptr;
     }
-
-    SceneBuilder::InitInfo sceneInfo{};
-    sceneInfo.allocator = vulkanContext.getAllocator();
-    sceneInfo.device = vulkanContext.getVkDevice();
-    sceneInfo.commandPool = vulkanContext.getCommandPool();
-    sceneInfo.graphicsQueue = vulkanContext.getVkGraphicsQueue();
-    sceneInfo.physicalDevice = vulkanContext.getVkPhysicalDevice();
-    sceneInfo.resourcePath = resourcePath;
-    sceneInfo.assetRegistry = assetRegistry;
-    sceneInfo.getTerrainHeight = [terrain = terrainSystem.get()](float x, float z) {
-        return terrain ? terrain->getHeightAt(x, z) : 0.0f;
-    };
-    sceneInfo.sceneOrigin = sceneOrigin;
-    sceneInfo.deferRenderables = true;
-
-    auto sceneManager = SceneManager::create(sceneInfo);
-    if (!sceneManager) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create SceneManager");
-    }
-    return sceneManager;
+    return SceneManager::createWithDependencies(
+        vulkanContext,
+        *terrainSystem,
+        assetRegistry,
+        resourcePath,
+        sceneOrigin);
 }
 
 CoreResources provideCoreResources(
