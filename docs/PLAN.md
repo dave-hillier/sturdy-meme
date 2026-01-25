@@ -116,8 +116,8 @@ From `FUTURE_WORK.md` - features not yet implemented:
 - Orientation lock (strafe mode)
 - Dynamic FOV during sprint
 
-### Animation - Combat & Locomotion
-Available FBX files not yet integrated:
+### Animation - Combat & Locomotion ✅
+FBX animations are integrated. Available animations include:
 - Combat attacks (sword combos, kicks)
 - Defense (block, block idle)
 - Reactions (hit, death)
@@ -186,14 +186,13 @@ Legacy code that can be removed once tested (see `TREE_RENDERING_ROADMAP.md`):
 2. **Camera smoothing** - Low effort, high polish
 
 ### Medium Priority (Quality Improvements)
-3. **Combat animations** - FBX files already exist
-4. **Painterly tree rendering** - Visual differentiation
-5. **Wet surfaces** - Weather immersion
+3. **Painterly tree rendering** - Visual differentiation
+4. **Wet surfaces** - Weather immersion
 
 ### Lower Priority (Technical Debt)
-6. **Tree rendering cleanup** - Remove legacy toggles
-7. **Atmosphere improvements** - Cloud quality
-8. **Post-processing additions** - Color grading, vignette
+5. **Tree rendering cleanup** - Remove legacy toggles
+6. **Atmosphere improvements** - Cloud quality
+7. **Post-processing additions** - Color grading, vignette
 
 ---
 
