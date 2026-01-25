@@ -495,10 +495,8 @@ bool Renderer::render(const Camera& camera) {
 
     // Begin debug line frame if not already started by physics debug
     // Physics debug calls beginFrame before render() if enabled
-    // Only call beginFrame if we haven't collected lines yet (no physics debug this frame)
-    if (!systems_->debugLine().hasLines()) {
-        systems_->debugLine().beginFrame(frameSync_.currentIndex());
-    }
+    // Always call beginFrame unconditionally to clear previous frame's lines
+    systems_->debugLine().beginFrame(frameSync_.currentIndex());
 
     // Add road/river visualization to debug lines (delegated to DebugControlSubsystem)
     systems_->debugControlSubsystem().updateRoadRiverVisualization();

@@ -1331,79 +1331,11 @@ void Application::updateNPCs(float deltaTime) {
     // Get terrain reference for height adjustment
     auto& terrain = renderer_->getSystems().terrain();
 
-    // Get debug line system for visualization
-    auto& debugLines = renderer_->getSystems().debugControl().getDebugLineSystem();
-
-    // Update NPC Y positions to match terrain height and draw debug visualization
+    // Update NPC Y positions to match terrain height
     for (auto& npc : npcManager_.getNPCs()) {
         if (!npc.isAlive()) continue;
 
         float terrainY = terrain.getHeightAt(npc.transform.position.x, npc.transform.position.z);
         npc.transform.position.y = terrainY;
-
-        // Debug visualization: draw sphere at NPC position colored by hostility
-        glm::vec4 hostilityColor;
-        switch (npc.hostility) {
-            case HostilityLevel::Friendly:
-                hostilityColor = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f);  // Green
-                break;
-            case HostilityLevel::Neutral:
-                hostilityColor = glm::vec4(1.0f, 1.0f, 0.0f, 1.0f);  // Yellow
-                break;
-            case HostilityLevel::Hostile:
-                hostilityColor = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f);  // Red
-                break;
-            case HostilityLevel::Afraid:
-                hostilityColor = glm::vec4(0.5f, 0.5f, 1.0f, 1.0f);  // Light blue
-                break;
-        }
-
-        // Draw NPC marker sphere at head height
-        glm::vec3 markerPos = npc.transform.position + glm::vec3(0.0f, 1.8f, 0.0f);
-        debugLines.addSphere(markerPos, 0.3f, hostilityColor, 8);
-
-        // Draw facing direction cone
-        glm::vec3 forward = npc.transform.forward();
-        glm::vec3 coneBase = markerPos + forward * 0.4f;
-        glm::vec3 coneTip = markerPos + forward * 1.0f;
-        debugLines.addCone(coneBase, coneTip, 0.15f, hostilityColor, 6);
-
-        // Draw awareness indicator line to player when NPC is aware
-        if (npc.perception.awareness > npc.config.detectionThreshold) {
-            // Color intensity based on awareness level
-            float intensity = npc.perception.awareness;
-            glm::vec4 awarenessColor = hostilityColor * intensity;
-            awarenessColor.a = 1.0f;
-
-            // Draw line from NPC to last known player position
-            glm::vec3 targetPos = npc.perception.canSeePlayer ? playerPos : npc.perception.lastKnownPosition;
-            targetPos.y += 1.0f;  // Player center height
-            debugLines.addLine(markerPos, targetPos, awarenessColor);
-        }
-
-        // Draw behavior state indicator (small sphere above head)
-        glm::vec3 statePos = markerPos + glm::vec3(0.0f, 0.5f, 0.0f);
-        glm::vec4 stateColor;
-        switch (npc.behaviorState) {
-            case BehaviorState::Idle:
-                stateColor = glm::vec4(0.5f, 0.5f, 0.5f, 1.0f);  // Gray
-                break;
-            case BehaviorState::Patrol:
-                stateColor = glm::vec4(0.0f, 0.5f, 1.0f, 1.0f);  // Blue
-                break;
-            case BehaviorState::Chase:
-                stateColor = glm::vec4(1.0f, 0.5f, 0.0f, 1.0f);  // Orange
-                break;
-            case BehaviorState::Attack:
-                stateColor = glm::vec4(1.0f, 0.0f, 0.5f, 1.0f);  // Magenta
-                break;
-            case BehaviorState::Flee:
-                stateColor = glm::vec4(0.0f, 1.0f, 1.0f, 1.0f);  // Cyan
-                break;
-            case BehaviorState::Return:
-                stateColor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);  // White
-                break;
-        }
-        debugLines.addSphere(statePos, 0.15f, stateColor, 6);
     }
 }

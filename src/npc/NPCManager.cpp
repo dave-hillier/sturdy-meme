@@ -378,9 +378,11 @@ void NPCManager::computeNPCBoneMatrices(NPC& npc, std::vector<glm::mat4>& outBon
 
 void NPCManager::render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRenderer& renderer) {
     if (!sharedCharacter_) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "NPCManager::render - no sharedCharacter_!");
         return;  // No shared character, can't render
     }
 
+    uint32_t renderedCount = 0;
     for (const auto& npc : npcs_) {
         if (!npc.isAlive()) {
             continue;
@@ -392,6 +394,7 @@ void NPCManager::render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRen
         }
 
         if (npc.boneSlot == 0) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "NPC %s visible but boneSlot=0!", npc.name.c_str());
             continue;  // Slot 0 reserved for player, skip unassigned NPCs
         }
 
@@ -407,6 +410,15 @@ void NPCManager::render(VkCommandBuffer cmd, uint32_t frameIndex, SkinnedMeshRen
 
         // Render NPC
         renderer.recordNPC(cmd, frameIndex, npc.boneSlot, modelMatrix, tintColor, *sharedCharacter_);
+        renderedCount++;
+    }
+
+    // Log once per second approximately (every 60 frames)
+    static uint32_t frameCounter = 0;
+    if (++frameCounter >= 60) {
+        frameCounter = 0;
+        SDL_Log("NPCManager::render - rendered %u NPCs (V=%zu B=%zu R=%zu)",
+                renderedCount, getVirtualCount(), getBulkCount(), getRealCount());
     }
 }
 
