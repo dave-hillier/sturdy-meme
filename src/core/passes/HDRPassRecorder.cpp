@@ -97,6 +97,7 @@ void HDRPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float tim
         const auto& sceneObjects = sceneBuilder.getRenderables();
 
         // Draw player character
+        // Note: Player bone matrices are updated in Renderer.cpp before command recording
         if (sceneBuilder.hasCharacter()) {
             size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
             if (playerIndex < sceneObjects.size()) {
@@ -220,6 +221,7 @@ void HDRPassRecorder::recordSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
             const auto& sceneObjects = sceneBuilder.getRenderables();
 
             // Draw player character
+            // Note: Player bone matrices are updated in Renderer.cpp before command recording
             if (sceneBuilder.hasCharacter()) {
                 size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
                 if (playerIndex < sceneObjects.size()) {

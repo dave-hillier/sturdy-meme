@@ -94,6 +94,11 @@ void NPCRenderer::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
     }
 
     // Record draw calls for each visible NPC
+    // NOTE: Currently NPCs share the player's bone matrices UBO, which causes
+    // incorrect rendering. A proper fix requires per-character bone matrix storage
+    // using dynamic UBO offsets or an SSBO. For now, NPCs will render with the
+    // player's skeleton pose.
+    // TODO: Implement per-character bone matrices (dynamic UBO offsets or SSBO)
     for (const auto& data : renderData_) {
         auto* character = currentNpcSim_->getCharacter(data.npcIndex);
         if (!character) continue;
