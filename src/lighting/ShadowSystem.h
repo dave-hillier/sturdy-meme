@@ -88,8 +88,14 @@ public:
                                   const glm::mat4& modelMatrix,
                                   const SkinnedMesh& mesh);
 
-    // Bind the skinned shadow pipeline (call once, then record multiple skinned meshes)
-    void bindSkinnedShadowPipeline(VkCommandBuffer cmd, VkDescriptorSet descriptorSet);
+    /**
+     * Bind the skinned shadow pipeline with dynamic offset for bone matrices.
+     * @param cmd Command buffer to record to
+     * @param descriptorSet Descriptor set with dynamic UBO binding for bone matrices
+     * @param boneMatrixOffset Dynamic offset to select character's bone matrices slot
+     */
+    void bindSkinnedShadowPipeline(VkCommandBuffer cmd, VkDescriptorSet descriptorSet,
+                                    uint32_t boneMatrixOffset = 0);
 
     // Shadow map accessors (vulkan-hpp)
     vk::ImageView getShadowImageView() const { return vk::ImageView(csmResources.getArrayView()); }

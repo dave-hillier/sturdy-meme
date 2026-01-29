@@ -39,6 +39,7 @@ public:
         float x, z;        // Position offset from scene origin
         float yawDegrees;  // Facing direction
         uint32_t templateIndex = 0;  // Which character template to use
+        NPCActivity activity = NPCActivity::Idle;  // Initial activity state
     };
 
     /**

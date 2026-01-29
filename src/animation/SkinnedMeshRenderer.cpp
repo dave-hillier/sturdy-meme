@@ -24,6 +24,7 @@ SkinnedMeshRenderer::~SkinnedMeshRenderer() {
 
 bool SkinnedMeshRenderer::initInternal(const InitInfo& info) {
     device = info.device;
+    physicalDevice = info.physicalDevice;
     allocator = info.allocator;
     descriptorPool = info.descriptorPool;
     renderPass = info.renderPass;
@@ -38,11 +39,16 @@ bool SkinnedMeshRenderer::initInternal(const InitInfo& info) {
         return false;
     }
 
+    if (!physicalDevice) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SkinnedMeshRenderer requires physicalDevice for dynamic UBO alignment");
+        return false;
+    }
+
     if (!createDescriptorSetLayout()) return false;
     if (!createPipeline()) return false;
     if (!createBoneMatricesBuffers()) return false;
 
-    SDL_Log("SkinnedMeshRenderer initialized");
+    SDL_Log("SkinnedMeshRenderer initialized with %u character slots", MAX_SKINNED_CHARACTERS);
     return true;
 }
 
@@ -54,7 +60,7 @@ void SkinnedMeshRenderer::cleanup() {
     pipelineLayout_.reset();
     descriptorSetLayout_.reset();
 
-    BufferUtils::destroyBuffers(allocator, boneMatricesBuffers);
+    BufferUtils::destroyBuffer(allocator, boneMatricesBuffer_);
 
     // Descriptor sets are freed when the pool is destroyed
     descriptorSets.clear();
@@ -62,11 +68,12 @@ void SkinnedMeshRenderer::cleanup() {
 
 bool SkinnedMeshRenderer::createDescriptorSetLayout() {
     // Skinned descriptor set layout:
-    // Same as main layout but with additional binding 12 for bone matrices UBO
+    // Same as main layout but with binding 12 as DYNAMIC uniform buffer for bone matrices
+    // This allows per-draw dynamic offset to select different character's bone data
     DescriptorManager::LayoutBuilder builder(device);
     addCommonBindings(builder);
-    // Add skinned-specific binding
-    builder.addBinding(Bindings::BONE_MATRICES, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT);
+    // Add skinned-specific binding as DYNAMIC UBO - enables per-draw offset selection
+    builder.addBinding(Bindings::BONE_MATRICES, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_VERTEX_BIT);
 
     VkDescriptorSetLayout rawLayout = builder.build();
     if (rawLayout == VK_NULL_HANDLE) {
@@ -75,6 +82,7 @@ bool SkinnedMeshRenderer::createDescriptorSetLayout() {
     }
     descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
 
+    SDL_Log("Created skinned descriptor layout with dynamic UBO for per-character bone matrices");
     return true;
 }
 
@@ -122,28 +130,32 @@ bool SkinnedMeshRenderer::createPipeline() {
 }
 
 bool SkinnedMeshRenderer::createBoneMatricesBuffers() {
-    if (!BufferUtils::PerFrameBufferBuilder()
+    // Create multi-slot dynamic buffer: MAX_SKINNED_CHARACTERS slots per frame
+    // Each slot holds one character's bone matrices, selected via dynamic offset at draw time
+    if (!BufferUtils::MultiSlotDynamicBufferBuilder()
             .setAllocator(allocator)
+            .setPhysicalDevice(physicalDevice)
             .setFrameCount(framesInFlight)
-            .setSize(sizeof(BoneMatricesUBO))
-            .setUsage(VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
-            .setMemoryUsage(VMA_MEMORY_USAGE_AUTO)
-            .setAllocationFlags(VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
-                               VMA_ALLOCATION_CREATE_MAPPED_BIT)
-            .build(boneMatricesBuffers)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create bone matrices buffers");
+            .setSlotsPerFrame(MAX_SKINNED_CHARACTERS)
+            .setElementSize(sizeof(BoneMatricesUBO))
+            .build(boneMatricesBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create bone matrices dynamic buffer");
         return false;
     }
 
-    // Initialize with identity matrices
-    for (size_t i = 0; i < framesInFlight; i++) {
-        BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(boneMatricesBuffers.mappedPointers[i]);
-        for (uint32_t j = 0; j < MAX_BONES; j++) {
-            ubo->bones[j] = glm::mat4(1.0f);
+    // Initialize all slots with identity matrices
+    for (uint32_t frame = 0; frame < framesInFlight; frame++) {
+        for (uint32_t slot = 0; slot < MAX_SKINNED_CHARACTERS; slot++) {
+            BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(
+                boneMatricesBuffer_.getMappedPtr(frame, slot));
+            for (uint32_t j = 0; j < MAX_BONES; j++) {
+                ubo->bones[j] = glm::mat4(1.0f);
+            }
         }
     }
 
-    SDL_Log("Created bone matrices buffers for GPU skinning");
+    SDL_Log("Created bone matrices dynamic buffer: %u slots x %u frames for GPU skinning",
+            MAX_SKINNED_CHARACTERS, framesInFlight);
     return true;
 }
 
@@ -184,9 +196,10 @@ bool SkinnedMeshRenderer::createDescriptorSets(const DescriptorResources& resour
         common.snowUboBufferSize = sizeof(SnowUBO);
         common.cloudShadowUboBuffer = gbm.cloudShadowBuffers.buffers[i];
         common.cloudShadowUboBufferSize = sizeof(CloudShadowUBO);
-        // Bone matrices
-        common.boneMatricesBuffer = boneMatricesBuffers.buffers[i];
-        common.boneMatricesBufferSize = sizeof(BoneMatricesUBO);
+        // Bone matrices - use full buffer, dynamic offset selects per-character slot
+        // The descriptor points to the entire buffer; actual slot is selected at bind time
+        common.boneMatricesBuffer = boneMatricesBuffer_.buffer;
+        common.boneMatricesBufferSize = boneMatricesBuffer_.getAlignedSlotSize();
         // Placeholder texture for unused PBR bindings
         common.placeholderTextureView = resources.whiteTextureView;
         common.placeholderTextureSampler = resources.whiteTextureSampler;
@@ -201,7 +214,7 @@ bool SkinnedMeshRenderer::createDescriptorSets(const DescriptorResources& resour
         factory.writeSkinnedDescriptorSet(descriptorSets[i], common, mat);
     }
 
-    SDL_Log("Created skinned descriptor sets for GPU skinning");
+    SDL_Log("Created skinned descriptor sets with dynamic bone matrices for GPU skinning");
     return true;
 }
 
@@ -212,8 +225,14 @@ void SkinnedMeshRenderer::updateCloudShadowBinding(VkImageView cloudShadowView, 
     }
 }
 
-void SkinnedMeshRenderer::updateBoneMatrices(uint32_t frameIndex, AnimatedCharacter* character) {
-    BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(boneMatricesBuffers.mappedPointers[frameIndex]);
+void SkinnedMeshRenderer::updateBoneMatrices(uint32_t frameIndex, uint32_t slotIndex, AnimatedCharacter* character) {
+    if (slotIndex >= MAX_SKINNED_CHARACTERS) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Bone matrix slot %u exceeds max %u", slotIndex, MAX_SKINNED_CHARACTERS);
+        return;
+    }
+
+    BoneMatricesUBO* ubo = static_cast<BoneMatricesUBO*>(
+        boneMatricesBuffer_.getMappedPtr(frameIndex, slotIndex));
 
     if (!character) {
         // Ensure identity matrices when no character to prevent garbage data
@@ -227,7 +246,7 @@ void SkinnedMeshRenderer::updateBoneMatrices(uint32_t frameIndex, AnimatedCharac
     std::vector<glm::mat4> boneMatrices;
     character->computeBoneMatrices(boneMatrices);
 
-    // Copy to mapped buffer
+    // Copy to mapped buffer slot
     size_t numBones = std::min(boneMatrices.size(), static_cast<size_t>(MAX_BONES));
     for (size_t i = 0; i < numBones; i++) {
         ubo->bones[i] = boneMatrices[i];
@@ -238,7 +257,7 @@ void SkinnedMeshRenderer::updateBoneMatrices(uint32_t frameIndex, AnimatedCharac
     }
 }
 
-void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
+void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slotIndex,
                                   const Renderable& playerObj, AnimatedCharacter& character) {
     vk::CommandBuffer vkCmd(cmd);
 
@@ -260,10 +279,16 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
         .setExtent({extent.width, extent.height});
     vkCmd.setScissor(0, scissor);
 
-    // Bind skinned descriptor set
+    // Calculate dynamic offset to select this character's bone matrix slot
+    // This is the key fix: each character gets its own slot in the buffer,
+    // selected at draw time via dynamic offset instead of updating descriptors
+    uint32_t dynamicOffset = boneMatricesBuffer_.getDynamicOffset(frameIndex, slotIndex);
+
+    // Bind skinned descriptor set with dynamic offset for bone matrices
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                              **pipelineLayout_, 0,
-                             vk::DescriptorSet(descriptorSets[frameIndex]), {});
+                             vk::DescriptorSet(descriptorSets[frameIndex]),
+                             dynamicOffset);
 
     // Push constants
     PushConstants push{};
@@ -292,13 +317,13 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex,
     DIAG_RECORD_DRAW();
 }
 
-void SkinnedMeshRenderer::recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex,
+void SkinnedMeshRenderer::recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slotIndex,
                                          const Renderable& playerObj, AnimatedCharacter& character,
                                          const CharacterLODMesh& lodMesh) {
     // Validate LOD mesh
     if (!lodMesh.isValid()) {
         // Fallback to normal record
-        record(cmd, frameIndex, playerObj, character);
+        record(cmd, frameIndex, slotIndex, playerObj, character);
         return;
     }
 
@@ -322,10 +347,14 @@ void SkinnedMeshRenderer::recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex
         .setExtent({extent.width, extent.height});
     vkCmd.setScissor(0, scissor);
 
-    // Bind skinned descriptor set
+    // Calculate dynamic offset to select this character's bone matrix slot
+    uint32_t dynamicOffset = boneMatricesBuffer_.getDynamicOffset(frameIndex, slotIndex);
+
+    // Bind skinned descriptor set with dynamic offset for bone matrices
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                              **pipelineLayout_, 0,
-                             vk::DescriptorSet(descriptorSets[frameIndex]), {});
+                             vk::DescriptorSet(descriptorSets[frameIndex]),
+                             dynamicOffset);
 
     // Push constants
     PushConstants push{};

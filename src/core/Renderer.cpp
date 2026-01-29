@@ -533,12 +533,14 @@ bool Renderer::render(const Camera& camera) {
         systems_->profiler().endCpuZone("UniformUpdates:UBO");
     }
 
-    // Update bone matrices for GPU skinning
+    // Update bone matrices for GPU skinning (player uses slot 0)
     {
         systems_->profiler().beginCpuZone("UniformUpdates:Bones");
         SceneBuilder& sceneBuilder = systems_->scene().getSceneBuilder();
         AnimatedCharacter* character = sceneBuilder.hasCharacter() ? &sceneBuilder.getAnimatedCharacter() : nullptr;
-        systems_->skinnedMesh().updateBoneMatrices(frameSync_.currentIndex(), character);
+        // Slot 0 is reserved for the player character
+        constexpr uint32_t PLAYER_BONE_SLOT = 0;
+        systems_->skinnedMesh().updateBoneMatrices(frameSync_.currentIndex(), PLAYER_BONE_SLOT, character);
         // Track bone SSBO bandwidth (128 bones * mat4)
         bandwidthCounter.recordSsboUpdate(128 * sizeof(glm::mat4));
         systems_->profiler().endCpuZone("UniformUpdates:Bones");
@@ -829,6 +831,7 @@ void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
 bool Renderer::initSkinnedMeshRenderer() {
     SkinnedMeshRenderer::InitInfo info{};
     info.device = vulkanContext_->getVkDevice();
+    info.physicalDevice = vulkanContext_->getVkPhysicalDevice();  // For dynamic UBO alignment
     info.raiiDevice = &vulkanContext_->getRaiiDevice();
     info.allocator = vulkanContext_->getAllocator();
     info.descriptorPool = descriptorInfra_.getDescriptorPool();

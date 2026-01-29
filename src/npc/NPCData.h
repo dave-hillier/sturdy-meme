@@ -12,6 +12,13 @@ enum class NPCLODLevel : uint8_t {
     Real = 2      // <25m: Full animation every frame
 };
 
+// NPC activity states for animation variety
+enum class NPCActivity : uint8_t {
+    Idle = 0,       // Standing still
+    Walking = 1,    // Slow movement (walk animation)
+    Running = 2     // Fast movement (run animation)
+};
+
 // Animation playback state per-NPC
 // Minimal state needed to continue animation from any point
 struct AnimationPlaybackState {
@@ -20,6 +27,7 @@ struct AnimationPlaybackState {
     float playbackSpeed = 1.0f;    // Speed multiplier
     float blendWeight = 1.0f;      // Blend weight for transitions
     bool looping = true;           // Whether to loop at end
+    NPCActivity activity = NPCActivity::Idle;  // Current activity state
 };
 
 // Structure-of-Arrays for NPC data

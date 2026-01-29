@@ -48,6 +48,11 @@ void NPCRenderer::prepare(uint32_t frameIndex,
     // Reserve space for render data
     renderData_.reserve(npcCount);
 
+    // Bone slot allocation: slot 0 is reserved for player, NPCs use slots 1+
+    // Max slots available = SkinnedMeshRenderer::getMaxSlots() - 1
+    uint32_t nextBoneSlot = 1;  // Start at 1 (slot 0 reserved for player)
+    const uint32_t maxSlots = SkinnedMeshRenderer::getMaxSlots();
+
     // Build render data for each visible NPC
     for (size_t i = 0; i < npcCount; ++i) {
         // Skip Virtual LOD NPCs (not rendered)
@@ -62,8 +67,16 @@ void NPCRenderer::prepare(uint32_t frameIndex,
         }
 
         // Skip NPCs without valid character
-        if (!npcSim.getCharacter(i)) {
+        auto* character = npcSim.getCharacter(i);
+        if (!character) {
             continue;
+        }
+
+        // Check if we have slots available
+        if (nextBoneSlot >= maxSlots) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "NPCRenderer: Exceeded max character slots (%u), skipping remaining NPCs", maxSlots);
+            break;
         }
 
         // Future: Add frustum culling here
@@ -75,8 +88,13 @@ void NPCRenderer::prepare(uint32_t frameIndex,
         data.npcIndex = i;
         data.renderableIndex = renderableIndex;
         data.lodLevel = npcData.lodLevels[i];
+        data.boneSlot = nextBoneSlot;
+
+        // Update bone matrices for this NPC in its assigned slot
+        skinnedMeshRenderer_->updateBoneMatrices(frameIndex, nextBoneSlot, character);
 
         renderData_.push_back(data);
+        nextBoneSlot++;
     }
 
     visibleNPCCount_ = renderData_.size();
@@ -93,12 +111,13 @@ void NPCRenderer::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
         return;
     }
 
-    // Record draw calls for each visible NPC
+    // Record draw calls for each visible NPC using their assigned bone slot
+    // The dynamic offset in bindDescriptorSets selects the correct bone matrices
     for (const auto& data : renderData_) {
         auto* character = currentNpcSim_->getCharacter(data.npcIndex);
         if (!character) continue;
 
         const Renderable& npcObj = (*currentSceneObjects_)[data.renderableIndex];
-        skinnedMeshRenderer_->record(cmd, frameIndex, npcObj, *character);
+        skinnedMeshRenderer_->record(cmd, frameIndex, data.boneSlot, npcObj, *character);
     }
 }

@@ -46,10 +46,12 @@ size_t NPCSimulation::spawnNPCs(const std::vector<NPCSpawnInfo>& spawnPoints) {
 
     std::string characterPath = resourcePath_ + "/assets/characters/fbx/Y Bot.fbx";
 
-    // Additional animation files to load
+    // Additional animation files to load (same as player character)
     std::vector<std::string> additionalAnimations = {
-        resourcePath_ + "/assets/animations/Walk Forward.fbx",
-        resourcePath_ + "/assets/animations/Running.fbx"
+        resourcePath_ + "/assets/characters/fbx/ss_idle.fbx",
+        resourcePath_ + "/assets/characters/fbx/ss_walk.fbx",
+        resourcePath_ + "/assets/characters/fbx/ss_run.fbx",
+        resourcePath_ + "/assets/characters/fbx/ss_jump.fbx"
     };
 
     size_t createdCount = 0;
@@ -84,11 +86,16 @@ size_t NPCSimulation::spawnNPCs(const std::vector<NPCSpawnInfo>& spawnPoints) {
         // Add to data arrays
         size_t npcIndex = data_.addNPC(spawn.templateIndex, worldPos, spawn.yawDegrees);
 
+        // Set initial activity state for animation variety
+        data_.animStates[npcIndex].activity = spawn.activity;
+
         // Store character
         characters_.push_back(std::move(character));
 
-        SDL_Log("NPCSimulation: Created NPC %zu at (%.1f, %.1f, %.1f) facing %.0f degrees",
-                npcIndex, worldPos.x, worldPos.y, worldPos.z, spawn.yawDegrees);
+        const char* activityName = spawn.activity == NPCActivity::Idle ? "idle" :
+                                   spawn.activity == NPCActivity::Walking ? "walking" : "running";
+        SDL_Log("NPCSimulation: Created NPC %zu at (%.1f, %.1f, %.1f) facing %.0f degrees (%s)",
+                npcIndex, worldPos.x, worldPos.y, worldPos.z, spawn.yawDegrees, activityName);
 
         createdCount++;
     }
@@ -197,9 +204,24 @@ void NPCSimulation::updateNPCAnimation(size_t npcIndex, float deltaTime) {
     // Build world transform for this NPC
     glm::mat4 worldTransform = buildNPCTransform(npcIndex);
 
-    // Update animation (idle state - movementSpeed = 0, grounded, not jumping)
+    // Determine movement speed based on NPC's activity state
+    // These values drive the animation state machine blend (idle/walk/run)
+    float movementSpeed = 0.0f;
+    switch (data_.animStates[npcIndex].activity) {
+        case NPCActivity::Idle:
+            movementSpeed = 0.0f;
+            break;
+        case NPCActivity::Walking:
+            movementSpeed = 1.5f;  // Walk speed (m/s)
+            break;
+        case NPCActivity::Running:
+            movementSpeed = 5.0f;  // Run speed (m/s)
+            break;
+    }
+
+    // Update animation with activity-appropriate movement speed
     character->update(deltaTime, allocator_, device_, commandPool_, graphicsQueue_,
-                      0.0f,  // movementSpeed (idle)
+                      movementSpeed,
                       true,  // isGrounded
                       false, // isJumping
                       worldTransform);
@@ -209,8 +231,13 @@ void NPCSimulation::updateNPCAnimation(size_t npcIndex, float deltaTime) {
 }
 
 glm::mat4 NPCSimulation::buildCharacterTransform(const glm::vec3& position, float yawRadians) const {
+    // Character model origin is at the center, but position is at ground level.
+    // Add vertical offset to raise the character so feet are on the ground.
+    // This matches the player character offset (CAPSULE_HEIGHT * 0.5f = 0.9m).
+    constexpr float CHARACTER_HEIGHT_OFFSET = 0.9f;
+
     glm::mat4 transform = glm::mat4(1.0f);
-    transform = glm::translate(transform, position);
+    transform = glm::translate(transform, position + glm::vec3(0.0f, CHARACTER_HEIGHT_OFFSET, 0.0f));
     transform = glm::rotate(transform, yawRadians, glm::vec3(0.0f, 1.0f, 0.0f));
     return transform;
 }

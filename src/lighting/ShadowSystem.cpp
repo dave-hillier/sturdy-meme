@@ -730,12 +730,15 @@ void ShadowSystem::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex,
     }
 }
 
-void ShadowSystem::bindSkinnedShadowPipeline(VkCommandBuffer cmd, VkDescriptorSet descriptorSet) {
+void ShadowSystem::bindSkinnedShadowPipeline(VkCommandBuffer cmd, VkDescriptorSet descriptorSet,
+                                              uint32_t boneMatrixOffset) {
     if (skinnedShadowPipeline == VK_NULL_HANDLE) return;
     vk::CommandBuffer vkCmd(cmd);
     vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, skinnedShadowPipeline);
+    // Pass dynamic offset for the bone matrices dynamic UBO (binding 12)
+    // This allows selecting different character's bone matrices for each draw
     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, skinnedShadowPipelineLayout,
-                             0, vk::DescriptorSet(descriptorSet), {});
+                             0, vk::DescriptorSet(descriptorSet), boneMatrixOffset);
 }
 
 void ShadowSystem::recordSkinnedMeshShadow(VkCommandBuffer cmd, uint32_t cascade,

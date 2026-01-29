@@ -96,16 +96,17 @@ void HDRPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float tim
         SceneBuilder& sceneBuilder = resources_.scene->getSceneBuilder();
         const auto& sceneObjects = sceneBuilder.getRenderables();
 
-        // Draw player character
+        // Draw player character (slot 0 is reserved for player)
+        constexpr uint32_t PLAYER_BONE_SLOT = 0;
         if (sceneBuilder.hasCharacter()) {
             size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
             if (playerIndex < sceneObjects.size()) {
                 const Renderable& playerObj = sceneObjects[playerIndex];
-                resources_.skinnedMesh->record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
+                resources_.skinnedMesh->record(cmd, frameIndex, PLAYER_BONE_SLOT, playerObj, sceneBuilder.getAnimatedCharacter());
             }
         }
 
-        // Draw NPC characters via NPCRenderer
+        // Draw NPC characters via NPCRenderer (NPCs use slots 1+)
         if (resources_.npcRenderer) {
             if (auto* npcSim = sceneBuilder.getNPCSimulation()) {
                 resources_.npcRenderer->prepare(frameIndex, *npcSim, sceneObjects);
@@ -222,16 +223,17 @@ void HDRPassRecorder::recordSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
             SceneBuilder& sceneBuilder = resources_.scene->getSceneBuilder();
             const auto& sceneObjects = sceneBuilder.getRenderables();
 
-            // Draw player character
+            // Draw player character (slot 0 is reserved for player)
+            constexpr uint32_t PLAYER_BONE_SLOT = 0;
             if (sceneBuilder.hasCharacter()) {
                 size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
                 if (playerIndex < sceneObjects.size()) {
                     const Renderable& playerObj = sceneObjects[playerIndex];
-                    resources_.skinnedMesh->record(cmd, frameIndex, playerObj, sceneBuilder.getAnimatedCharacter());
+                    resources_.skinnedMesh->record(cmd, frameIndex, PLAYER_BONE_SLOT, playerObj, sceneBuilder.getAnimatedCharacter());
                 }
             }
 
-            // Draw NPC characters via NPCRenderer
+            // Draw NPC characters via NPCRenderer (NPCs use slots 1+)
             if (resources_.npcRenderer) {
                 if (auto* npcSim = sceneBuilder.getNPCSimulation()) {
                     resources_.npcRenderer->prepare(frameIndex, *npcSim, sceneObjects);

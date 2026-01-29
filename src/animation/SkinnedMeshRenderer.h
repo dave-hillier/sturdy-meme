@@ -16,9 +16,13 @@
 #include "MaterialDescriptorFactory.h"
 #include "RenderableBuilder.h"
 #include "GlobalBufferManager.h"
-#include "PerFrameBuffer.h"
+#include "DynamicUniformBuffer.h"
 
 class AnimatedCharacter;
+
+// Maximum number of skinned characters that can be rendered per frame
+// Each character needs a separate bone matrix slot in the dynamic uniform buffer
+constexpr uint32_t MAX_SKINNED_CHARACTERS = 64;
 
 // Skinned mesh renderer - handles GPU skinning pipeline and bone matrices
 class SkinnedMeshRenderer {
@@ -32,6 +36,7 @@ public:
 
     struct InitInfo {
         VkDevice device;
+        VkPhysicalDevice physicalDevice;  // For minUniformBufferOffsetAlignment
         VmaAllocator allocator;
         DescriptorManager::Pool* descriptorPool;
         VkRenderPass renderPass;  // HDR render pass
@@ -90,18 +95,37 @@ public:
     // Update cloud shadow binding after cloud shadow system is initialized
     void updateCloudShadowBinding(VkImageView cloudShadowView, VkSampler cloudShadowSampler);
 
-    // Update bone matrices from animated character
-    void updateBoneMatrices(uint32_t frameIndex, AnimatedCharacter* character);
+    /**
+     * Update bone matrices for a character at a specific slot.
+     * @param frameIndex Current frame index for triple-buffered resources
+     * @param slotIndex Character slot (0 to MAX_SKINNED_CHARACTERS-1)
+     * @param character Character to get bone matrices from (can be null for identity)
+     */
+    void updateBoneMatrices(uint32_t frameIndex, uint32_t slotIndex, AnimatedCharacter* character);
 
-    // Record draw commands for skinned character
-    void record(VkCommandBuffer cmd, uint32_t frameIndex,
+    /**
+     * Record draw commands for skinned character using dynamic offset.
+     * Uses VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC to select the correct
+     * bone matrix slot for this character at draw time.
+     *
+     * @param cmd Command buffer to record to
+     * @param frameIndex Current frame index
+     * @param slotIndex Character slot containing this character's bone matrices
+     * @param playerObj Renderable with transform and material properties
+     * @param character Character for mesh data
+     */
+    void record(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slotIndex,
                 const Renderable& playerObj, AnimatedCharacter& character);
 
-    // Record draw commands for skinned character with explicit LOD mesh
-    // Use this when CharacterLODSystem provides the mesh to render
-    void recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex,
+    /**
+     * Record draw commands with explicit LOD mesh using dynamic offset.
+     */
+    void recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slotIndex,
                        const Renderable& playerObj, AnimatedCharacter& character,
                        const CharacterLODMesh& lodMesh);
+
+    // Get the maximum number of character slots
+    static constexpr uint32_t getMaxSlots() { return MAX_SKINNED_CHARACTERS; }
 
     // Update extent for viewport (on window resize)
     void setExtent(VkExtent2D newExtent) { extent = newExtent; }
@@ -121,6 +145,7 @@ private:
 
     // Vulkan handles (stored, not owned)
     VkDevice device = VK_NULL_HANDLE;
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
     DescriptorManager::Pool* descriptorPool = nullptr;
     VkRenderPass renderPass = VK_NULL_HANDLE;
@@ -136,5 +161,8 @@ private:
     std::optional<vk::raii::Pipeline> pipeline_;
 
     std::vector<VkDescriptorSet> descriptorSets;
-    BufferUtils::PerFrameBufferSet boneMatricesBuffers;
+
+    // Multi-slot dynamic buffer for bone matrices
+    // Supports MAX_SKINNED_CHARACTERS slots per frame, selected via dynamic offset
+    BufferUtils::MultiSlotDynamicBuffer boneMatricesBuffer_;
 };

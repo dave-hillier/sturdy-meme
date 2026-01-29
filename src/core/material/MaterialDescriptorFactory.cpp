@@ -97,8 +97,10 @@ void MaterialDescriptorFactory::writeSkinnedDescriptorSet(
         .writeImage(3, material.normalView, material.normalSampler);
 
     // Binding 12: Bone matrices (required for skinned meshes)
+    // Use UNIFORM_BUFFER_DYNAMIC to enable per-draw offset selection for character-specific bone data
     if (common.boneMatricesBuffer != VK_NULL_HANDLE) {
-        writer.writeBuffer(12, common.boneMatricesBuffer, 0, common.boneMatricesBufferSize);
+        writer.writeBuffer(12, common.boneMatricesBuffer, 0, common.boneMatricesBufferSize,
+                          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC);
     }
 
     // PBR texture bindings (13-16) - always write, using placeholder if no texture provided

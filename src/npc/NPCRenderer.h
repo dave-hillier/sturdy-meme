@@ -74,6 +74,7 @@ private:
         size_t npcIndex;           // Index into NPCSimulation
         size_t renderableIndex;    // Index into sceneObjects
         NPCLODLevel lodLevel;      // Current LOD level
+        uint32_t boneSlot;         // Bone matrix slot in dynamic buffer (1-63, 0 reserved for player)
     };
 
     SkinnedMeshRenderer* skinnedMeshRenderer_ = nullptr;
