@@ -129,18 +129,21 @@ bool BloomSystem::createMipChain() {
 
     // Create framebuffers for each mip level using vulkan-hpp builder
     // Use downsampleRenderPass - both render passes have compatible attachments
+    vk::Device vkDevice(device);
     for (auto& mip : mipChain) {
+        vk::ImageView attachment(mip.imageView);
         auto fbInfo = vk::FramebufferCreateInfo{}
             .setRenderPass(**downsampleRenderPass_)
-            .setAttachmentCount(1)
-            .setPAttachments(reinterpret_cast<const vk::ImageView*>(&mip.imageView))
+            .setAttachments(attachment)
             .setWidth(mip.extent.width)
             .setHeight(mip.extent.height)
             .setLayers(1);
 
-        if (vkCreateFramebuffer(device, reinterpret_cast<const VkFramebufferCreateInfo*>(&fbInfo), nullptr, &mip.framebuffer) != VK_SUCCESS) {
+        auto result = vkDevice.createFramebuffer(fbInfo);
+        if (result.result != vk::Result::eSuccess) {
             return false;
         }
+        mip.framebuffer = result.value;
     }
 
     return true;

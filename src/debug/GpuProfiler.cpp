@@ -102,18 +102,19 @@ bool GpuProfiler::initInternal(VkDevice dev, VkPhysicalDevice physicalDevice,
     uint32_t queriesPerFrame = (maxZones * QUERIES_PER_ZONE) + 2;
 
     queryPools.resize(framesInFlight);
+    vk::Device vkDevice(device);
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        VkQueryPoolCreateInfo poolInfo{};
-        poolInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-        poolInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-        poolInfo.queryCount = queriesPerFrame;
+        auto poolInfo = vk::QueryPoolCreateInfo{}
+            .setQueryType(vk::QueryType::eTimestamp)
+            .setQueryCount(queriesPerFrame);
 
-        VkResult result = vkCreateQueryPool(device, &poolInfo, nullptr, &queryPools[i]);
-        if (result != VK_SUCCESS) {
+        auto result = vkDevice.createQueryPool(poolInfo);
+        if (result.result != vk::Result::eSuccess) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create GPU profiler query pool %d", i);
             cleanup();
             return false;
         }
+        queryPools[i] = result.value;
     }
 
     // Pre-allocate zone slots for lock-free recording (one array per frame in flight)

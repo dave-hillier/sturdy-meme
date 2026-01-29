@@ -243,24 +243,20 @@ public:
             .setStage(stageInfo)
             .setLayout(pipelineLayout_);
 
-        VkResult vkResult = vkCreateComputePipelines(
-            rawDevice_,
-            static_cast<VkPipelineCache>(pipelineCache_),
-            1,
-            reinterpret_cast<const VkComputePipelineCreateInfo*>(&pipelineInfo),
-            nullptr,
-            &outPipeline);
+        vk::Device vkDevice(rawDevice_);
+        auto result = vkDevice.createComputePipeline(pipelineCache_, pipelineInfo);
 
         // Cleanup loaded shader module
         if (loadedModule) {
-            vk::Device(rawDevice_).destroyShaderModule(*loadedModule);
+            vkDevice.destroyShaderModule(*loadedModule);
         }
 
-        if (vkResult != VK_SUCCESS) {
+        if (result.result != vk::Result::eSuccess) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                "ComputePipelineBuilder: Failed to create pipeline (VkResult: %d)", vkResult);
+                "ComputePipelineBuilder: Failed to create pipeline (VkResult: %d)", static_cast<int>(result.result));
             return false;
         }
+        outPipeline = result.value;
 
         return true;
     }

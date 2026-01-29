@@ -107,27 +107,26 @@ bool TreeBranchCulling::createCullPipeline() {
 }
 
 bool TreeBranchCulling::createBuffers() {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
 
     // Input buffer: all tree transforms (CPU-writable)
     inputBufferSize_ = maxTrees_ * sizeof(BranchShadowInputGPU);
-    bufferInfo.size = inputBufferSize_;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufferInfo.setSize(inputBufferSize_)
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst);
     allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
     allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo, &inputBuffer_, &inputAllocation_, nullptr) != VK_SUCCESS) {
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo, &inputBuffer_, &inputAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeBranchCulling: Failed to create input buffer");
         return false;
     }
 
     // Mesh group metadata buffer
-    bufferInfo.size = maxMeshGroups_ * sizeof(BranchMeshGroupGPU);
-    if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo, &meshGroupBuffer_, &meshGroupAllocation_, nullptr) != VK_SUCCESS) {
+    bufferInfo.setSize(maxMeshGroups_ * sizeof(BranchMeshGroupGPU));
+    if (vmaCreateBuffer(allocator_, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo, &meshGroupBuffer_, &meshGroupAllocation_, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeBranchCulling: Failed to create mesh group buffer");
         return false;
     }
@@ -174,76 +173,77 @@ void TreeBranchCulling::updateDescriptorSets() {
         return;
     }
 
+    vk::Device vkDevice(device_);
     for (uint32_t i = 0; i < maxFramesInFlight_; ++i) {
 
         // Input buffer (binding 0)
-        VkDescriptorBufferInfo inputBufferInfo{};
-        inputBufferInfo.buffer = inputBuffer_;
-        inputBufferInfo.offset = 0;
-        inputBufferInfo.range = inputBufferSize_;
+        auto inputBufferInfo = vk::DescriptorBufferInfo{}
+            .setBuffer(inputBuffer_)
+            .setOffset(0)
+            .setRange(inputBufferSize_);
 
         // Output buffer (binding 1) - using FrameIndexedBuffers for type-safe access
-        VkDescriptorBufferInfo outputBufferInfo{};
-        outputBufferInfo.buffer = outputBuffers_.getVk(i);
-        outputBufferInfo.offset = 0;
-        outputBufferInfo.range = static_cast<VkDeviceSize>(outputBufferSize_);
+        auto outputBufferInfo = vk::DescriptorBufferInfo{}
+            .setBuffer(outputBuffers_.getVk(i))
+            .setOffset(0)
+            .setRange(static_cast<vk::DeviceSize>(outputBufferSize_));
 
         // Indirect buffer (binding 2) - using FrameIndexedBuffers for type-safe access
-        VkDescriptorBufferInfo indirectBufferInfo{};
-        indirectBufferInfo.buffer = indirectBuffers_.getVk(i);
-        indirectBufferInfo.offset = 0;
-        indirectBufferInfo.range = maxMeshGroups_ * sizeof(VkDrawIndexedIndirectCommand);
+        auto indirectBufferInfo = vk::DescriptorBufferInfo{}
+            .setBuffer(indirectBuffers_.getVk(i))
+            .setOffset(0)
+            .setRange(maxMeshGroups_ * sizeof(VkDrawIndexedIndirectCommand));
 
         // Uniform buffer (binding 3)
-        VkDescriptorBufferInfo uniformBufferInfo{};
-        uniformBufferInfo.buffer = uniformBuffers_.buffers[i];
-        uniformBufferInfo.offset = 0;
-        uniformBufferInfo.range = sizeof(BranchShadowCullUniforms);
+        auto uniformBufferInfo = vk::DescriptorBufferInfo{}
+            .setBuffer(uniformBuffers_.buffers[i])
+            .setOffset(0)
+            .setRange(sizeof(BranchShadowCullUniforms));
 
         // Mesh group buffer (binding 4)
-        VkDescriptorBufferInfo meshGroupBufferInfo{};
-        meshGroupBufferInfo.buffer = meshGroupBuffer_;
-        meshGroupBufferInfo.offset = 0;
-        meshGroupBufferInfo.range = maxMeshGroups_ * sizeof(BranchMeshGroupGPU);
+        auto meshGroupBufferInfo = vk::DescriptorBufferInfo{}
+            .setBuffer(meshGroupBuffer_)
+            .setOffset(0)
+            .setRange(maxMeshGroups_ * sizeof(BranchMeshGroupGPU));
 
-        std::array<VkWriteDescriptorSet, 5> writes{};
+        std::array<vk::WriteDescriptorSet, 5> writes{};
 
-        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[0].dstSet = cullDescriptorSets_[i];
-        writes[0].dstBinding = Bindings::TREE_BRANCH_SHADOW_INPUT;
-        writes[0].descriptorCount = 1;
-        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[0].pBufferInfo = &inputBufferInfo;
+        writes[0] = vk::WriteDescriptorSet{}
+            .setDstSet(cullDescriptorSets_[i])
+            .setDstBinding(Bindings::TREE_BRANCH_SHADOW_INPUT)
+            .setDescriptorCount(1)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setPBufferInfo(&inputBufferInfo);
 
-        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[1].dstSet = cullDescriptorSets_[i];
-        writes[1].dstBinding = Bindings::TREE_BRANCH_SHADOW_OUTPUT;
-        writes[1].descriptorCount = 1;
-        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[1].pBufferInfo = &outputBufferInfo;
+        writes[1] = vk::WriteDescriptorSet{}
+            .setDstSet(cullDescriptorSets_[i])
+            .setDstBinding(Bindings::TREE_BRANCH_SHADOW_OUTPUT)
+            .setDescriptorCount(1)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setPBufferInfo(&outputBufferInfo);
 
-        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[2].dstSet = cullDescriptorSets_[i];
-        writes[2].dstBinding = Bindings::TREE_BRANCH_SHADOW_INDIRECT;
-        writes[2].descriptorCount = 1;
-        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[2].pBufferInfo = &indirectBufferInfo;
+        writes[2] = vk::WriteDescriptorSet{}
+            .setDstSet(cullDescriptorSets_[i])
+            .setDstBinding(Bindings::TREE_BRANCH_SHADOW_INDIRECT)
+            .setDescriptorCount(1)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setPBufferInfo(&indirectBufferInfo);
 
-        writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[3].dstSet = cullDescriptorSets_[i];
-        writes[3].dstBinding = Bindings::TREE_BRANCH_SHADOW_UNIFORMS;
-        writes[3].descriptorCount = 1;
-        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[3].pBufferInfo = &uniformBufferInfo;
+        writes[3] = vk::WriteDescriptorSet{}
+            .setDstSet(cullDescriptorSets_[i])
+            .setDstBinding(Bindings::TREE_BRANCH_SHADOW_UNIFORMS)
+            .setDescriptorCount(1)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setPBufferInfo(&uniformBufferInfo);
 
-        writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[4].dstSet = cullDescriptorSets_[i];
-        writes[4].dstBinding = Bindings::TREE_BRANCH_SHADOW_GROUPS;
-        writes[4].descriptorCount = 1;
-        writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[4].pBufferInfo = &meshGroupBufferInfo;
+        writes[4] = vk::WriteDescriptorSet{}
+            .setDstSet(cullDescriptorSets_[i])
+            .setDstBinding(Bindings::TREE_BRANCH_SHADOW_GROUPS)
+            .setDescriptorCount(1)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setPBufferInfo(&meshGroupBufferInfo);
 
-        vkUpdateDescriptorSets(device_, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        vkDevice.updateDescriptorSets(writes, {});
     }
 
     descriptorSetsInitialized_ = true;

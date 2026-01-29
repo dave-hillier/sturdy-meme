@@ -587,9 +587,9 @@ void LeafSystem::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex, float time
     // Use dynamic offset for binding 0 (renderer UBO) if dynamic buffer is available
     if (dynamicRendererUBO_ && dynamicRendererUBO_->isValid()) {
         uint32_t dynamicOffset = dynamicRendererUBO_->getDynamicOffset(frameIndex);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                getGraphicsPipelineHandles().pipelineLayout, 0, 1,
-                                &graphicsSet, 1, &dynamicOffset);
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                 getGraphicsPipelineHandles().pipelineLayout, 0,
+                                 vk::DescriptorSet(graphicsSet), dynamicOffset);
     } else {
         vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                  getGraphicsPipelineHandles().pipelineLayout, 0, vk::DescriptorSet(graphicsSet), {});

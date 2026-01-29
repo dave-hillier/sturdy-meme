@@ -42,6 +42,7 @@
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
+#include <vulkan/vulkan.hpp>
 
 #include <cmath>
 #include <algorithm>
@@ -80,31 +81,32 @@ bool GuiSystem::initInternal(SDL_Window* window, VkInstance instance, VkPhysical
     device_ = device;  // Store for cleanup
 
     // Create descriptor pool for ImGui
-    VkDescriptorPoolSize poolSizes[] = {
-        { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
-        { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
-    };
+    std::array<vk::DescriptorPoolSize, 11> poolSizes = {{
+        {vk::DescriptorType::eSampler, 1000},
+        {vk::DescriptorType::eCombinedImageSampler, 1000},
+        {vk::DescriptorType::eSampledImage, 1000},
+        {vk::DescriptorType::eStorageImage, 1000},
+        {vk::DescriptorType::eUniformTexelBuffer, 1000},
+        {vk::DescriptorType::eStorageTexelBuffer, 1000},
+        {vk::DescriptorType::eUniformBuffer, 1000},
+        {vk::DescriptorType::eStorageBuffer, 1000},
+        {vk::DescriptorType::eUniformBufferDynamic, 1000},
+        {vk::DescriptorType::eStorageBufferDynamic, 1000},
+        {vk::DescriptorType::eInputAttachment, 1000}
+    }};
 
-    VkDescriptorPoolCreateInfo poolInfo = {};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    poolInfo.maxSets = 1000;
-    poolInfo.poolSizeCount = std::size(poolSizes);
-    poolInfo.pPoolSizes = poolSizes;
+    auto poolInfo = vk::DescriptorPoolCreateInfo{}
+        .setFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet)
+        .setMaxSets(1000)
+        .setPoolSizes(poolSizes);
 
-    if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &imguiPool) != VK_SUCCESS) {
+    vk::Device vkDevice(device);
+    auto result = vkDevice.createDescriptorPool(poolInfo);
+    if (result.result != vk::Result::eSuccess) {
         SDL_Log("Failed to create ImGui descriptor pool");
         return false;
     }
+    imguiPool = result.value;
 
     // Initialize ImGui context
     IMGUI_CHECKVERSION();

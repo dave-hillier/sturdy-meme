@@ -43,27 +43,35 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
     }
 
     // Create command buffer for the copy
-    VkCommandPool commandPool;
+    vk::Device vkDevice(device);
     auto poolInfo = vk::CommandPoolCreateInfo{}
         .setQueueFamilyIndex(0) // Assuming graphics queue family 0
         .setFlags(vk::CommandPoolCreateFlagBits::eTransient);
 
-    vkCreateCommandPool(device, reinterpret_cast<const VkCommandPoolCreateInfo*>(&poolInfo), nullptr, &commandPool);
+    auto poolResult = vkDevice.createCommandPool(poolInfo);
+    if (poolResult.result != vk::Result::eSuccess) {
+        SDL_Log("Failed to create command pool for PNG export");
+        return false;
+    }
+    vk::CommandPool commandPool = poolResult.value;
 
-    VkCommandBuffer commandBuffer;
     auto allocInfo2 = vk::CommandBufferAllocateInfo{}
         .setLevel(vk::CommandBufferLevel::ePrimary)
         .setCommandPool(commandPool)
         .setCommandBufferCount(1);
 
-    vkAllocateCommandBuffers(device, reinterpret_cast<const VkCommandBufferAllocateInfo*>(&allocInfo2), &commandBuffer);
+    auto cmdResult = vkDevice.allocateCommandBuffers(allocInfo2);
+    if (cmdResult.result != vk::Result::eSuccess) {
+        vkDevice.destroyCommandPool(commandPool);
+        SDL_Log("Failed to allocate command buffer for PNG export");
+        return false;
+    }
+    vk::CommandBuffer commandBuffer = cmdResult.value[0];
 
     auto beginInfo = vk::CommandBufferBeginInfo{}
         .setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
 
-    vkBeginCommandBuffer(commandBuffer, reinterpret_cast<const VkCommandBufferBeginInfo*>(&beginInfo));
-
-    vk::CommandBuffer vkCmd(commandBuffer);
+    commandBuffer.begin(beginInfo);
 
     // Transition image to TRANSFER_SRC_OPTIMAL
     auto toTransferBarrier = vk::ImageMemoryBarrier{}
@@ -75,7 +83,7 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
         .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
         .setImage(image)
         .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
-    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eTransfer,
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader, vk::PipelineStageFlagBits::eTransfer,
                           {}, {}, {}, toTransferBarrier);
 
     // Copy image to buffer
@@ -91,7 +99,7 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
         .setImageOffset({0, 0, 0})
         .setImageExtent({width, height, 1});
 
-    vkCmd.copyImageToBuffer(image, vk::ImageLayout::eTransferSrcOptimal, stagingBuffer.get(), region);
+    commandBuffer.copyImageToBuffer(image, vk::ImageLayout::eTransferSrcOptimal, stagingBuffer.get(), region);
 
     // Transition back
     auto toShaderBarrier = vk::ImageMemoryBarrier{}
@@ -103,22 +111,19 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
         .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
         .setImage(image)
         .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1});
-    vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader,
+    commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader,
                           {}, {}, {}, toShaderBarrier);
 
-    vkEndCommandBuffer(commandBuffer);
+    commandBuffer.end();
 
     // Submit and wait
-    VkQueue graphicsQueue;
-    vkGetDeviceQueue(device, 0, 0, &graphicsQueue);
+    vk::Queue graphicsQueue = vkDevice.getQueue(0, 0);
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
+    auto submitInfo = vk::SubmitInfo{}
+        .setCommandBuffers(commandBuffer);
 
-    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(graphicsQueue);
+    graphicsQueue.submit(submitInfo);
+    graphicsQueue.waitIdle();
 
     // Helper lambda to convert FP16 to float32
     auto fp16ToFloat = [](uint16_t h) -> float {
@@ -157,7 +162,7 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
     void* data = stagingBuffer.map();
     if (!data) {
         SDL_Log("Failed to map staging buffer for PNG export");
-        vkDestroyCommandPool(device, commandPool, nullptr);
+        vkDevice.destroyCommandPool(commandPool);
         return false;
     }
 
@@ -203,7 +208,7 @@ bool AtmosphereLUTSystem::exportImageToPNG(VkImage image, VkFormat format, uint3
     int result = stbi_write_png(filename.c_str(), width, height, 4, rgba8.data(), width * 4);
 
     // Cleanup - ManagedBuffer auto-destroys, just need to clean up command pool
-    vkDestroyCommandPool(device, commandPool, nullptr);
+    vkDevice.destroyCommandPool(commandPool);
 
     if (result == 0) {
         SDL_Log("Failed to write PNG: %s", filename.c_str());
