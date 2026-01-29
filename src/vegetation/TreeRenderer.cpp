@@ -6,6 +6,7 @@
 #include "Bindings.h"
 #include "QueueSubmitDiagnostics.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/DescriptorWriter.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <algorithm>
@@ -605,19 +606,10 @@ void TreeRenderer::updateBranchCullingData(const TreeSystem& treeSystem, const T
             continue;
         }
 
-        auto instanceBufferInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(instanceBuffer)
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
-
-        auto instanceWrite = vk::WriteDescriptorSet{}
-            .setDstSet(branchShadowInstancedDescriptorSets_[i])
-            .setDstBinding(Bindings::TREE_GFX_BRANCH_SHADOW_INSTANCES)
-            .setDstArrayElement(0)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setBufferInfo(instanceBufferInfo);
-
-        vkDevice.updateDescriptorSets(instanceWrite, nullptr);
+        DescriptorWriter()
+            .add(WriteBuilder::storageBuffer(Bindings::TREE_GFX_BRANCH_SHADOW_INSTANCES,
+                makeBufferInfo(instanceBuffer)))
+            .update(device_, branchShadowInstancedDescriptorSets_[i]);
     }
 }
 
@@ -627,22 +619,10 @@ void TreeRenderer::updateInstancedShadowDescriptorSets(uint32_t frameIndex, vk::
         return;
     }
 
-    vk::Device vkDevice(device_);
-    vk::DescriptorSet dstSet = branchShadowInstancedDescriptorSets_[frameIndex];
-
-    auto uboBufferInfo = vk::DescriptorBufferInfo{}
-        .setBuffer(uniformBuffer)
-        .setOffset(0)
-        .setRange(VK_WHOLE_SIZE);
-
-    auto uboWrite = vk::WriteDescriptorSet{}
-        .setDstSet(dstSet)
-        .setDstBinding(Bindings::TREE_GFX_UBO)
-        .setDstArrayElement(0)
-        .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-        .setBufferInfo(uboBufferInfo);
-
-    vkDevice.updateDescriptorSets(uboWrite, nullptr);
+    DescriptorWriter()
+        .add(WriteBuilder::uniformBuffer(Bindings::TREE_GFX_UBO,
+            makeBufferInfo(uniformBuffer)))
+        .update(device_, branchShadowInstancedDescriptorSets_[frameIndex]);
 }
 
 bool TreeRenderer::isBranchShadowCullingAvailable() const {

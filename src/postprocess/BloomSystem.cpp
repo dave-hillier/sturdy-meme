@@ -6,6 +6,8 @@
 #include "core/InitInfoBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/DescriptorSetLayoutBuilder.h"
+#include "core/vulkan/RenderPassBuilder.h"
 #include <vulkan/vulkan.hpp>
 #include <array>
 #include <algorithm>
@@ -145,78 +147,25 @@ bool BloomSystem::createMipChain() {
 }
 
 bool BloomSystem::createRenderPass() {
-    // Using vulkan-hpp builders for render pass creation
-    auto colorRef = vk::AttachmentReference{}
-        .setAttachment(0)
-        .setLayout(vk::ImageLayout::eColorAttachmentOptimal);
-
-    auto subpass = vk::SubpassDescription{}
-        .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
-        .setColorAttachmentCount(1)
-        .setPColorAttachments(&colorRef);
-
-    auto dependency = vk::SubpassDependency{}
-        .setSrcSubpass(VK_SUBPASS_EXTERNAL)
-        .setDstSubpass(0)
-        .setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput)
-        .setDstStageMask(vk::PipelineStageFlagBits::eFragmentShader)
-        .setSrcAccessMask(vk::AccessFlagBits::eColorAttachmentWrite)
-        .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
-
     // Downsample render pass - DONT_CARE since we're writing fresh data
-    {
-        auto colorAttachment = vk::AttachmentDescription{}
-            .setFormat(static_cast<vk::Format>(BLOOM_FORMAT))
-            .setSamples(vk::SampleCountFlagBits::e1)
-            .setLoadOp(vk::AttachmentLoadOp::eDontCare)
-            .setStoreOp(vk::AttachmentStoreOp::eStore)
-            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
-            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
-            .setInitialLayout(vk::ImageLayout::eUndefined)
-            .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-
-        auto renderPassInfo = vk::RenderPassCreateInfo{}
-            .setAttachmentCount(1)
-            .setPAttachments(&colorAttachment)
-            .setSubpassCount(1)
-            .setPSubpasses(&subpass)
-            .setDependencyCount(1)
-            .setPDependencies(&dependency);
-
-        try {
-            downsampleRenderPass_.emplace(*raiiDevice_, renderPassInfo);
-        } catch (const vk::SystemError& e) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create downsample render pass: %s", e.what());
-            return false;
-        }
+    if (!RenderPassBuilder()
+            .addColorAttachment(AttachmentBuilder::color(static_cast<vk::Format>(BLOOM_FORMAT))
+                .loadOp(vk::AttachmentLoadOp::eDontCare)
+                .finalLayout(vk::ImageLayout::eShaderReadOnlyOptimal))
+            .buildInto(*raiiDevice_, downsampleRenderPass_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create downsample render pass");
+        return false;
     }
 
     // Upsample render pass - LOAD to preserve downsampled content for additive blending
-    {
-        auto colorAttachment = vk::AttachmentDescription{}
-            .setFormat(static_cast<vk::Format>(BLOOM_FORMAT))
-            .setSamples(vk::SampleCountFlagBits::e1)
-            .setLoadOp(vk::AttachmentLoadOp::eLoad)
-            .setStoreOp(vk::AttachmentStoreOp::eStore)
-            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
-            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
-            .setInitialLayout(vk::ImageLayout::eColorAttachmentOptimal)
-            .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-
-        auto renderPassInfo = vk::RenderPassCreateInfo{}
-            .setAttachmentCount(1)
-            .setPAttachments(&colorAttachment)
-            .setSubpassCount(1)
-            .setPSubpasses(&subpass)
-            .setDependencyCount(1)
-            .setPDependencies(&dependency);
-
-        try {
-            upsampleRenderPass_.emplace(*raiiDevice_, renderPassInfo);
-        } catch (const vk::SystemError& e) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create upsample render pass: %s", e.what());
-            return false;
-        }
+    if (!RenderPassBuilder()
+            .addColorAttachment(AttachmentBuilder::color(static_cast<vk::Format>(BLOOM_FORMAT))
+                .loadOp(vk::AttachmentLoadOp::eLoad)
+                .initialLayout(vk::ImageLayout::eColorAttachmentOptimal)
+                .finalLayout(vk::ImageLayout::eShaderReadOnlyOptimal))
+            .buildInto(*raiiDevice_, upsampleRenderPass_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create upsample render pass");
+        return false;
     }
 
     return true;
@@ -230,22 +179,18 @@ bool BloomSystem::createSampler() {
 
 bool BloomSystem::createDescriptorSetLayouts() {
     // Both downsample and upsample use the same descriptor set layout
-    // Binding 0: input texture (sampler2D) - using vulkan-hpp builder
-    auto binding = vk::DescriptorSetLayoutBinding{}
-        .setBinding(0)
-        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eFragment);
+    // Binding 0: input texture (sampler2D)
+    if (!DescriptorSetLayoutBuilder()
+            .addBinding(BindingBuilder::combinedImageSampler(0, vk::ShaderStageFlagBits::eFragment))
+            .buildInto(*raiiDevice_, downsampleDescSetLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create downsample descriptor set layout");
+        return false;
+    }
 
-    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
-        .setBindingCount(1)
-        .setPBindings(&binding);
-
-    try {
-        downsampleDescSetLayout_.emplace(*raiiDevice_, layoutInfo);
-        upsampleDescSetLayout_.emplace(*raiiDevice_, layoutInfo);
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create descriptor set layouts: %s", e.what());
+    if (!DescriptorSetLayoutBuilder()
+            .addBinding(BindingBuilder::combinedImageSampler(0, vk::ShaderStageFlagBits::eFragment))
+            .buildInto(*raiiDevice_, upsampleDescSetLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create upsample descriptor set layout");
         return false;
     }
 

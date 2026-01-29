@@ -7,6 +7,9 @@
 #include "QueueSubmitDiagnostics.h"
 #include "shaders/bindings.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/DescriptorSetLayoutBuilder.h"
+#include "core/vulkan/DescriptorWriter.h"
+#include "core/vulkan/VertexInputBuilder.h"
 
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
@@ -220,48 +223,23 @@ bool TreeLODSystem::createBillboardMesh() {
 }
 
 bool TreeLODSystem::createDescriptorSetLayout() {
-    std::array<vk::DescriptorSetLayoutBinding, 5> bindings = {{
-        // UBO
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(BINDING_TREE_IMPOSTOR_UBO)
-            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment),
-        // Albedo atlas
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(BINDING_TREE_IMPOSTOR_ALBEDO)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eFragment),
-        // Normal atlas
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(BINDING_TREE_IMPOSTOR_NORMAL)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eFragment),
-        // Shadow map
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(BINDING_TREE_IMPOSTOR_SHADOW_MAP)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eFragment),
-        // Instance buffer (SSBO for GPU-culled rendering)
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(BINDING_TREE_IMPOSTOR_INSTANCES)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eVertex)
-    }};
-
-    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
-        .setBindings(bindings);
-
-    impostorDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
-
-    return true;
+    return DescriptorSetLayoutBuilder()
+        .addBinding(BindingBuilder::uniformBuffer(BINDING_TREE_IMPOSTOR_UBO, BindingBuilder::VertexFragment))
+        .addBinding(BindingBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_ALBEDO, vk::ShaderStageFlagBits::eFragment))
+        .addBinding(BindingBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_NORMAL, vk::ShaderStageFlagBits::eFragment))
+        .addBinding(BindingBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_SHADOW_MAP, vk::ShaderStageFlagBits::eFragment))
+        .addBinding(BindingBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_INSTANCES, vk::ShaderStageFlagBits::eVertex))
+        .buildInto(*raiiDevice_, impostorDescriptorSetLayout_);
 }
 
 bool TreeLODSystem::createPipeline() {
+    // Validate render pass before attempting pipeline creation
+    if (hdrRenderPass_ == VK_NULL_HANDLE) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLODSystem: hdrRenderPass_ is null - cannot create pipeline");
+        return false;
+    }
+    SDL_Log("TreeLODSystem: Creating pipeline with hdrRenderPass=%p", (void*)hdrRenderPass_);
+
     // Pipeline layout with push constants: cameraPos, lodParams, atlasParams
     auto layoutOpt = PipelineLayoutBuilder(*raiiDevice_)
         .addDescriptorSetLayout(**impostorDescriptorSetLayout_)
@@ -296,36 +274,13 @@ bool TreeLODSystem::createPipeline() {
             .setPName("main")
     }};
 
-    // Vertex input: billboard vertex + instance data
-    std::array<vk::VertexInputBindingDescription, 2> bindingDescriptions = {{
-        vk::VertexInputBindingDescription{}
-            .setBinding(0)
-            .setStride(sizeof(glm::vec3) + sizeof(glm::vec2))  // position + texcoord
-            .setInputRate(vk::VertexInputRate::eVertex),
-        vk::VertexInputBindingDescription{}
-            .setBinding(1)
-            .setStride(sizeof(ImpostorInstanceGPU))
-            .setInputRate(vk::VertexInputRate::eInstance)
-    }};
-
-    std::array<vk::VertexInputAttributeDescription, 10> attributeDescriptions = {{
-        // Per-vertex attributes
-        vk::VertexInputAttributeDescription{}.setLocation(0).setBinding(0).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(0),  // position
-        vk::VertexInputAttributeDescription{}.setLocation(1).setBinding(0).setFormat(vk::Format::eR32G32Sfloat).setOffset(sizeof(glm::vec3)),  // texcoord
-        // Per-instance attributes
-        vk::VertexInputAttributeDescription{}.setLocation(2).setBinding(1).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, position)),
-        vk::VertexInputAttributeDescription{}.setLocation(3).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, scale)),
-        vk::VertexInputAttributeDescription{}.setLocation(4).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, rotation)),
-        vk::VertexInputAttributeDescription{}.setLocation(5).setBinding(1).setFormat(vk::Format::eR32Uint).setOffset(offsetof(ImpostorInstanceGPU, archetypeIndex)),
-        vk::VertexInputAttributeDescription{}.setLocation(6).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, blendFactor)),
-        vk::VertexInputAttributeDescription{}.setLocation(7).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, hSize)),
-        vk::VertexInputAttributeDescription{}.setLocation(8).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, vSize)),
-        vk::VertexInputAttributeDescription{}.setLocation(9).setBinding(1).setFormat(vk::Format::eR32Sfloat).setOffset(offsetof(ImpostorInstanceGPU, baseOffset))
-    }};
-
-    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
-        .setVertexBindingDescriptions(bindingDescriptions)
-        .setVertexAttributeDescriptions(attributeDescriptions);
+    // Vertex input: billboard vertex only (position + texcoord)
+    // Instance data comes from SSBO (InstanceBuffer), not vertex attributes
+    auto vertexInput = VertexInputBuilder()
+        .addBinding(VertexBindingBuilder::vertex(0, sizeof(glm::vec3) + sizeof(glm::vec2)))
+        .addAttribute(AttributeBuilder::vec3(0, 0))                   // inPosition at offset 0
+        .addAttribute(AttributeBuilder::vec2(1, sizeof(glm::vec3)));  // inTexCoord at offset 12
+    auto vertexInputInfo = vertexInput.build();
 
     auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
         .setTopology(vk::PrimitiveTopology::eTriangleList);
@@ -394,35 +349,11 @@ bool TreeLODSystem::allocateDescriptorSets() {
 }
 
 bool TreeLODSystem::createShadowDescriptorSetLayout() {
-    // Shadow pass needs UBO (for cascade matrices), albedo atlas (for alpha testing),
-    // and instance buffer (for GPU-culled rendering)
-    std::array<vk::DescriptorSetLayoutBinding, 3> bindings = {{
-        // UBO
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(BINDING_TREE_IMPOSTOR_UBO)
-            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eVertex),
-        // Albedo atlas (for alpha testing in fragment shader)
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(BINDING_TREE_IMPOSTOR_ALBEDO)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eFragment),
-        // Instance buffer (SSBO for GPU-culled rendering)
-        vk::DescriptorSetLayoutBinding{}
-            .setBinding(BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eVertex)
-    }};
-
-    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
-        .setBindings(bindings);
-
-    shadowDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
-
-    return true;
+    return DescriptorSetLayoutBuilder()
+        .addBinding(BindingBuilder::uniformBuffer(BINDING_TREE_IMPOSTOR_UBO, vk::ShaderStageFlagBits::eVertex))
+        .addBinding(BindingBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_ALBEDO, vk::ShaderStageFlagBits::eFragment))
+        .addBinding(BindingBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES, vk::ShaderStageFlagBits::eVertex))
+        .buildInto(*raiiDevice_, shadowDescriptorSetLayout_);
 }
 
 bool TreeLODSystem::createShadowPipeline() {
@@ -461,20 +392,12 @@ bool TreeLODSystem::createShadowPipeline() {
     }};
 
     // Vertex input: only billboard quad vertices (instances come from SSBO)
-    auto bindingDescription = vk::VertexInputBindingDescription{}
-        .setBinding(0)
-        .setStride(sizeof(glm::vec3) + sizeof(glm::vec2))
-        .setInputRate(vk::VertexInputRate::eVertex);
-
-    std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions = {{
-        vk::VertexInputAttributeDescription{}.setLocation(0).setBinding(0).setFormat(vk::Format::eR32G32B32Sfloat).setOffset(0),  // inPosition
-        vk::VertexInputAttributeDescription{}.setLocation(1).setBinding(0).setFormat(vk::Format::eR32G32Sfloat).setOffset(sizeof(glm::vec3))  // inTexCoord
-    }};
-
-    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
-        .setVertexBindingDescriptionCount(1)
-        .setPVertexBindingDescriptions(&bindingDescription)
-        .setVertexAttributeDescriptions(attributeDescriptions);
+    // Position (vec3) + TexCoord (vec2)
+    auto vertexInput = VertexInputBuilder()
+        .addBinding(VertexBindingBuilder::vertex(0, sizeof(glm::vec3) + sizeof(glm::vec2)))
+        .addAttribute(AttributeBuilder::vec3(0, 0))                   // inPosition at offset 0
+        .addAttribute(AttributeBuilder::vec2(1, sizeof(glm::vec3)));  // inTexCoord at offset 12
+    auto vertexInputInfo = vertexInput.build();
 
     auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
         .setTopology(vk::PrimitiveTopology::eTriangleList);
@@ -557,7 +480,7 @@ bool TreeLODSystem::createInstanceBuffer(size_t maxInstances) {
 
     auto bufferInfo = vk::BufferCreateInfo{}
         .setSize(instanceBufferSize_)
-        .setUsage(vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst);
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
@@ -640,13 +563,20 @@ void TreeLODSystem::updateTreeLODState(TreeLODState& state, float distance, floa
 
 void TreeLODSystem::buildImpostorInstance(ImpostorInstanceGPU& instance, const TreeInstanceData& tree,
                                            const TreeLODState& state, const TreeSystem& treeSystem) {
-    instance.position = tree.position();
-    instance.scale = tree.scale();
-    instance.rotation = tree.getYRotation();
-    instance.archetypeIndex = state.archetypeIndex;
-    instance.blendFactor = state.blendFactor;
+    // Pack position and scale into vec4
+    instance.positionAndScale = glm::vec4(tree.position(), tree.scale());
+
+    // Pack rotation and archetype into vec4
+    // Note: archetype is stored as float for shader compatibility
+    instance.rotationAndArchetype = glm::vec4(
+        tree.getYRotation(),
+        static_cast<float>(state.archetypeIndex),
+        state.blendFactor,
+        0.0f  // reserved
+    );
 
     // Use full tree bounds (branches + leaves) for accurate imposter sizing
+    float hSize, vSize, baseOffset;
     if (tree.meshIndex < treeSystem.getMeshCount()) {
         const auto& fullBounds = treeSystem.getFullTreeBounds(tree.meshIndex);
         glm::vec3 extent = fullBounds.max - fullBounds.min;
@@ -654,16 +584,19 @@ void TreeLODSystem::buildImpostorInstance(ImpostorInstanceGPU& instance, const T
         float horizontalRadius = std::max(extent.x, extent.z) * 0.5f;
         float halfHeight = extent.y * 0.5f;
 
-        instance.hSize = horizontalRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN * tree.scale();
-        instance.vSize = halfHeight * TreeLODConstants::IMPOSTOR_SIZE_MARGIN * tree.scale();
-        instance.baseOffset = (fullBounds.min.y + fullBounds.max.y) * 0.5f * tree.scale();
+        hSize = horizontalRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN * tree.scale();
+        vSize = halfHeight * TreeLODConstants::IMPOSTOR_SIZE_MARGIN * tree.scale();
+        baseOffset = (fullBounds.min.y + fullBounds.max.y) * 0.5f * tree.scale();
     } else {
         // Fallback to archetype bounds
         const auto* archetype = impostorAtlas_->getArchetype(state.archetypeIndex);
-        instance.hSize = (archetype ? archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale();
-        instance.vSize = (archetype ? archetype->treeHeight * 0.5f * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale();
-        instance.baseOffset = (archetype ? archetype->centerHeight : 0.0f) * tree.scale();
+        hSize = (archetype ? archetype->boundingSphereRadius * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale();
+        vSize = (archetype ? archetype->treeHeight * 0.5f * TreeLODConstants::IMPOSTOR_SIZE_MARGIN : 10.0f) * tree.scale();
+        baseOffset = (archetype ? archetype->centerHeight : 0.0f) * tree.scale();
     }
+
+    // Pack size and offset into vec4
+    instance.sizeAndOffset = glm::vec4(hSize, vSize, baseOffset, 0.0f);
 }
 
 ImpostorPushConstants TreeLODSystem::buildImpostorPushConstants() const {
@@ -709,16 +642,9 @@ void TreeLODSystem::bindShadowPipeline(vk::CommandBuffer& cmd, uint32_t frameInd
 }
 
 void TreeLODSystem::bindBillboardBuffers(vk::CommandBuffer& cmd, VkBuffer instanceBuf) {
+    (void)instanceBuf;  // Instance data comes from SSBO via descriptor set, not vertex buffers
     vk::DeviceSize offset = 0;
-    if (instanceBuf != VK_NULL_HANDLE) {
-        // GPU-culled path: only bind vertex buffer (instances come from SSBO)
-        cmd.bindVertexBuffers(0, vk::Buffer(billboardVertexBuffer_), offset);
-    } else {
-        // CPU path: bind both vertex and instance buffers
-        vk::Buffer vertexBuffers[] = {billboardVertexBuffer_, instanceBuffer_};
-        vk::DeviceSize offsets[] = {0, 0};
-        cmd.bindVertexBuffers(0, vertexBuffers, offsets);
-    }
+    cmd.bindVertexBuffers(0, vk::Buffer(billboardVertexBuffer_), offset);
     cmd.bindIndexBuffer(billboardIndexBuffer_, 0, vk::IndexType::eUint32);
 }
 
@@ -815,103 +741,35 @@ void TreeLODSystem::initializeDescriptorSets(const std::vector<VkBuffer>& unifor
 
     vk::Device vkDevice(device_);
 
+    // Create reusable image/buffer info structs
+    auto albedoInfo = makeImageInfo(atlasSampler, albedoView);
+    auto normalInfo = makeImageInfo(atlasSampler, normalView);
+    auto shadowInfo = makeImageInfo(shadowSampler, shadowMap);
+    auto instanceInfo = makeBufferInfo(instanceBuffer_);
+
     // Initialize main impostor descriptor sets for all frames
     for (uint32_t frameIndex = 0; frameIndex < maxFramesInFlight_; ++frameIndex) {
-        auto uboInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(uniformBuffers[frameIndex])
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
+        auto uboInfo = makeBufferInfo(uniformBuffers[frameIndex]);
 
-        auto albedoInfo = vk::DescriptorImageInfo{}
-            .setSampler(atlasSampler)
-            .setImageView(albedoView)
-            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-
-        auto normalInfo = vk::DescriptorImageInfo{}
-            .setSampler(atlasSampler)
-            .setImageView(normalView)
-            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-
-        auto shadowInfo = vk::DescriptorImageInfo{}
-            .setSampler(shadowSampler)
-            .setImageView(shadowMap)
-            .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-
-        auto instanceInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(instanceBuffer_)
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
-
-        std::array<vk::WriteDescriptorSet, 5> writes = {{
-            vk::WriteDescriptorSet{}
-                .setDstSet(impostorDescriptorSets_[frameIndex])
-                .setDstBinding(BINDING_TREE_IMPOSTOR_UBO)
-                .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-                .setBufferInfo(uboInfo),
-            vk::WriteDescriptorSet{}
-                .setDstSet(impostorDescriptorSets_[frameIndex])
-                .setDstBinding(BINDING_TREE_IMPOSTOR_ALBEDO)
-                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                .setImageInfo(albedoInfo),
-            vk::WriteDescriptorSet{}
-                .setDstSet(impostorDescriptorSets_[frameIndex])
-                .setDstBinding(BINDING_TREE_IMPOSTOR_NORMAL)
-                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                .setImageInfo(normalInfo),
-            vk::WriteDescriptorSet{}
-                .setDstSet(impostorDescriptorSets_[frameIndex])
-                .setDstBinding(BINDING_TREE_IMPOSTOR_SHADOW_MAP)
-                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                .setImageInfo(shadowInfo),
-            // Instance buffer (CPU instance buffer - will be overwritten by initializeGPUCulledDescriptors for GPU path)
-            vk::WriteDescriptorSet{}
-                .setDstSet(impostorDescriptorSets_[frameIndex])
-                .setDstBinding(BINDING_TREE_IMPOSTOR_INSTANCES)
-                .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-                .setBufferInfo(instanceInfo)
-        }};
-
-        vkDevice.updateDescriptorSets(writes, nullptr);
+        DescriptorWriter()
+            .add(WriteBuilder::uniformBuffer(BINDING_TREE_IMPOSTOR_UBO, uboInfo))
+            .add(WriteBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_ALBEDO, albedoInfo))
+            .add(WriteBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_NORMAL, normalInfo))
+            .add(WriteBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_SHADOW_MAP, shadowInfo))
+            .add(WriteBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_INSTANCES, instanceInfo))
+            .update(vkDevice, impostorDescriptorSets_[frameIndex]);
     }
 
     // Initialize shadow descriptor sets for all frames
     if (!shadowDescriptorSets_.empty()) {
         for (uint32_t frameIndex = 0; frameIndex < maxFramesInFlight_; ++frameIndex) {
-            auto uboInfo = vk::DescriptorBufferInfo{}
-                .setBuffer(uniformBuffers[frameIndex])
-                .setOffset(0)
-                .setRange(VK_WHOLE_SIZE);
+            auto uboInfo = makeBufferInfo(uniformBuffers[frameIndex]);
 
-            auto albedoInfo = vk::DescriptorImageInfo{}
-                .setSampler(atlasSampler)
-                .setImageView(albedoView)
-                .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-
-            auto instanceInfo = vk::DescriptorBufferInfo{}
-                .setBuffer(instanceBuffer_)
-                .setOffset(0)
-                .setRange(VK_WHOLE_SIZE);
-
-            std::array<vk::WriteDescriptorSet, 3> writes = {{
-                vk::WriteDescriptorSet{}
-                    .setDstSet(shadowDescriptorSets_[frameIndex])
-                    .setDstBinding(BINDING_TREE_IMPOSTOR_UBO)
-                    .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-                    .setBufferInfo(uboInfo),
-                vk::WriteDescriptorSet{}
-                    .setDstSet(shadowDescriptorSets_[frameIndex])
-                    .setDstBinding(BINDING_TREE_IMPOSTOR_ALBEDO)
-                    .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-                    .setImageInfo(albedoInfo),
-                // Instance buffer (CPU instance buffer - will be overwritten by initializeGPUCulledDescriptors for GPU path)
-                vk::WriteDescriptorSet{}
-                    .setDstSet(shadowDescriptorSets_[frameIndex])
-                    .setDstBinding(BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES)
-                    .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-                    .setBufferInfo(instanceInfo)
-            }};
-
-            vkDevice.updateDescriptorSets(writes, nullptr);
+            DescriptorWriter()
+                .add(WriteBuilder::uniformBuffer(BINDING_TREE_IMPOSTOR_UBO, uboInfo))
+                .add(WriteBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_ALBEDO, albedoInfo))
+                .add(WriteBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES, instanceInfo))
+                .update(vkDevice, shadowDescriptorSets_[frameIndex]);
         }
     }
 
@@ -919,33 +777,20 @@ void TreeLODSystem::initializeDescriptorSets(const std::vector<VkBuffer>& unifor
 }
 
 void TreeLODSystem::initializeGPUCulledDescriptors(VkBuffer gpuInstanceBuffer) {
-    vk::Device vkDevice(device_);
+    auto instanceInfo = makeBufferInfo(gpuInstanceBuffer);
 
     // Update the instance buffer binding to use GPU-culled buffer instead of CPU buffer
     for (uint32_t frameIndex = 0; frameIndex < maxFramesInFlight_; ++frameIndex) {
-        auto instanceInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(gpuInstanceBuffer)
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
-
         // Update main descriptor set
-        auto mainWrite = vk::WriteDescriptorSet{}
-            .setDstSet(impostorDescriptorSets_[frameIndex])
-            .setDstBinding(BINDING_TREE_IMPOSTOR_INSTANCES)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setBufferInfo(instanceInfo);
-
-        vkDevice.updateDescriptorSets(mainWrite, nullptr);
+        DescriptorWriter()
+            .add(WriteBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_INSTANCES, instanceInfo))
+            .update(device_, impostorDescriptorSets_[frameIndex]);
 
         // Update shadow descriptor set
         if (!shadowDescriptorSets_.empty()) {
-            auto shadowWrite = vk::WriteDescriptorSet{}
-                .setDstSet(shadowDescriptorSets_[frameIndex])
-                .setDstBinding(BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES)
-                .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-                .setBufferInfo(instanceInfo);
-
-            vkDevice.updateDescriptorSets(shadowWrite, nullptr);
+            DescriptorWriter()
+                .add(WriteBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_SHADOW_INSTANCES, instanceInfo))
+                .update(device_, shadowDescriptorSets_[frameIndex]);
         }
     }
 

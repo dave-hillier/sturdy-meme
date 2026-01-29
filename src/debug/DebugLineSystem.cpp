@@ -1,5 +1,6 @@
 #include "DebugLineSystem.h"
 #include "ShaderLoader.h"
+#include "core/vulkan/VertexInputBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <cstring>
@@ -151,30 +152,13 @@ bool DebugLineSystem::createPipeline(VkRenderPass renderPass, const std::string&
             .setPName("main")
     }};
 
-    // Vertex input
-    auto bindingDesc = vk::VertexInputBindingDescription{}
-        .setBinding(0)
-        .setStride(sizeof(DebugLineVertex))
-        .setInputRate(vk::VertexInputRate::eVertex);
+    // Vertex input: position (vec3) + color (vec4)
+    auto vertexInput = VertexInputBuilder()
+        .addBinding(VertexBindingBuilder::perVertex<DebugLineVertex>(0))
+        .addAttribute(AttributeBuilder::vec3(0, offsetof(DebugLineVertex, position)))
+        .addAttribute(AttributeBuilder::vec4(1, offsetof(DebugLineVertex, color)));
 
-    std::array<vk::VertexInputAttributeDescription, 2> attrDescs = {{
-        vk::VertexInputAttributeDescription{}
-            .setLocation(0)
-            .setBinding(0)
-            .setFormat(vk::Format::eR32G32B32Sfloat)
-            .setOffset(offsetof(DebugLineVertex, position)),
-        vk::VertexInputAttributeDescription{}
-            .setLocation(1)
-            .setBinding(0)
-            .setFormat(vk::Format::eR32G32B32A32Sfloat)
-            .setOffset(offsetof(DebugLineVertex, color))
-    }};
-
-    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
-        .setVertexBindingDescriptionCount(1)
-        .setPVertexBindingDescriptions(&bindingDesc)
-        .setVertexAttributeDescriptionCount(static_cast<uint32_t>(attrDescs.size()))
-        .setPVertexAttributeDescriptions(attrDescs.data());
+    auto vertexInputInfo = vertexInput.build();
 
     // Input assembly for lines
     auto inputAssemblyLine = vk::PipelineInputAssemblyStateCreateInfo{}

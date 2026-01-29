@@ -5,6 +5,7 @@
 #include "DescriptorManager.h"
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/DescriptorSetLayoutBuilder.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -152,23 +153,14 @@ bool WaterTileCull::createBuffers() {
 }
 
 bool WaterTileCull::createComputePipeline() {
-    // Descriptor set layout:
-    // 0: Depth buffer (sampler2D)
-    // 1: Tile output buffer (storage)
-    // 2: Counter buffer (storage)
-    // 3: Indirect draw buffer (storage)
-
-    VkDescriptorSetLayout rawLayout = VK_NULL_HANDLE;
-    try {
-        rawLayout = DescriptorManager::DescriptorLayoutBuilder(device)
-            .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT, 1, 0)
-            .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT, 1, 1)
-            .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT, 1, 2)
-            .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT, 1, 3)
-            .build();
-        descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull descriptor set layout: %s", e.what());
+    // Descriptor set layout
+    if (!DescriptorSetLayoutBuilder()
+            .addBinding(BindingBuilder::combinedImageSampler(0, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::storageBuffer(1, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::storageBuffer(2, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::storageBuffer(3, vk::ShaderStageFlagBits::eCompute))
+            .buildInto(*raiiDevice_, descriptorSetLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create tile cull descriptor set layout");
         return false;
     }
 

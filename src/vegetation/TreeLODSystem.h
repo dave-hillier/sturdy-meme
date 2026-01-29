@@ -31,16 +31,11 @@ struct TreeLODState {
 };
 
 // GPU instance data for impostor rendering
+// Layout must match ImpostorInstance in shaders/tree_impostor_instance.glsl
 struct ImpostorInstanceGPU {
-    glm::vec3 position;
-    float scale;
-    float rotation;
-    uint32_t archetypeIndex;
-    float blendFactor;
-    float hSize;        // Horizontal half-size (from archetype, pre-scaled)
-    float vSize;        // Vertical half-size (from archetype, pre-scaled)
-    float baseOffset;   // Base offset (from archetype, pre-scaled)
-    float _padding;
+    glm::vec4 positionAndScale;     // xyz = world position, w = scale
+    glm::vec4 rotationAndArchetype; // x = rotation, y = archetype (as float), z = blend factor, w = reserved
+    glm::vec4 sizeAndOffset;        // x = hSize, y = vSize, z = baseOffset, w = reserved
 };
 
 // Push constants for impostor rendering

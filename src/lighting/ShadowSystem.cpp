@@ -6,6 +6,9 @@
 #include "GraphicsPipelineFactory.h"
 #include "debug/QueueSubmitDiagnostics.h"
 #include "shaders/bindings.h"
+#include "core/vulkan/DescriptorSetLayoutBuilder.h"
+#include "core/vulkan/RenderPassBuilder.h"
+#include "core/vulkan/DescriptorWriter.h"
 #include "core/InitInfoBuilder.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
@@ -83,52 +86,22 @@ ShadowSystem::~ShadowSystem() {
     // Instanced shadow cleanup
     destroyInstancedShadowResources();
 
-    // Render pass
-    if (shadowRenderPass != VK_NULL_HANDLE) vkDevice.destroyRenderPass(shadowRenderPass);
+    // Render pass - handled by RAII shadowRenderPass_ member
+    shadowRenderPass_.reset();
+    shadowRenderPass = VK_NULL_HANDLE;
 }
 
 bool ShadowSystem::createShadowRenderPass() {
-    auto depthAttachment = vk::AttachmentDescription{}
-        .setFormat(vk::Format::eD32Sfloat)
-        .setSamples(vk::SampleCountFlagBits::e1)
-        .setLoadOp(vk::AttachmentLoadOp::eClear)
-        .setStoreOp(vk::AttachmentStoreOp::eStore)
-        .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
-        .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
-        .setInitialLayout(vk::ImageLayout::eUndefined)
-        .setFinalLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
+    // Depth-only render pass for shadow mapping, outputs to shader read for sampling
+    auto renderPassOpt = RenderPassBuilder::depthOnly(vk::Format::eD32Sfloat)
+        .build(*initInfo_.raiiDevice);
 
-    auto depthAttachmentRef = vk::AttachmentReference{}
-        .setAttachment(0)
-        .setLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
-
-    auto subpass = vk::SubpassDescription{}
-        .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
-        .setColorAttachmentCount(0)
-        .setPDepthStencilAttachment(&depthAttachmentRef);
-
-    auto dependency = vk::SubpassDependency{}
-        .setSrcSubpass(VK_SUBPASS_EXTERNAL)
-        .setDstSubpass(0)
-        .setSrcStageMask(vk::PipelineStageFlagBits::eFragmentShader)
-        .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
-        .setDstStageMask(vk::PipelineStageFlagBits::eEarlyFragmentTests)
-        .setDstAccessMask(vk::AccessFlagBits::eDepthStencilAttachmentWrite);
-
-    auto renderPassInfo = vk::RenderPassCreateInfo{}
-        .setAttachmentCount(1)
-        .setPAttachments(&depthAttachment)
-        .setSubpassCount(1)
-        .setPSubpasses(&subpass)
-        .setDependencyCount(1)
-        .setPDependencies(&dependency);
-
-    try {
-        shadowRenderPass = vk::Device(initInfo_.device).createRenderPass(renderPassInfo);
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow render pass: %s", e.what());
+    if (!renderPassOpt) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create shadow render pass");
         return false;
     }
+    shadowRenderPass_ = std::move(*renderPassOpt);
+    shadowRenderPass = **shadowRenderPass_;
     return true;
 }
 
@@ -302,49 +275,32 @@ bool ShadowSystem::createDynamicShadowResources() {
 
 void ShadowSystem::destroyDynamicShadowResources() {
     vk::Device vkDevice(initInfo_.device);
-    const size_t frameCount = std::max(pointShadowFramebuffers.size(), spotShadowFramebuffers.size());
-    for (size_t frame = 0; frame < frameCount; frame++) {
-        if (frame < pointShadowFramebuffers.size()) {
-            for (auto fb : pointShadowFramebuffers[frame]) {
-                if (fb != VK_NULL_HANDLE) vkDevice.destroyFramebuffer(fb);
-            }
-            pointShadowFramebuffers[frame].clear();
+    for (uint32_t frame = 0; frame < initInfo_.framesInFlight; frame++) {
+        for (auto fb : pointShadowFramebuffers[frame]) {
+            if (fb != VK_NULL_HANDLE) vkDevice.destroyFramebuffer(fb);
         }
-        if (frame < spotShadowFramebuffers.size()) {
-            for (auto fb : spotShadowFramebuffers[frame]) {
-                if (fb != VK_NULL_HANDLE) vkDevice.destroyFramebuffer(fb);
-            }
-            spotShadowFramebuffers[frame].clear();
+        pointShadowFramebuffers[frame].clear();
+        for (auto fb : spotShadowFramebuffers[frame]) {
+            if (fb != VK_NULL_HANDLE) vkDevice.destroyFramebuffer(fb);
         }
+        spotShadowFramebuffers[frame].clear();
         if (frame < pointShadowResources.size()) pointShadowResources[frame].reset();
         if (frame < spotShadowResources.size()) spotShadowResources[frame].reset();
     }
-
-    pointShadowFramebuffers.clear();
-    spotShadowFramebuffers.clear();
-    pointShadowResources.clear();
-    spotShadowResources.clear();
 }
 
 bool ShadowSystem::createInstancedShadowResources() {
     vk::Device vkDevice(initInfo_.device);
 
     // Create descriptor set layout for instanced shadow rendering
-    auto instanceBufferBinding = vk::DescriptorSetLayoutBinding{}
-        .setBinding(Bindings::SHADOW_INSTANCES)
-        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eVertex);
-
-    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
-        .setBindings(instanceBufferBinding);
-
-    try {
-        instancedShadowDescriptorSetLayout = vkDevice.createDescriptorSetLayout(layoutInfo);
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create instanced shadow descriptor set layout: %s", e.what());
+    auto layoutOpt = DescriptorSetLayoutBuilder()
+        .addBinding(BindingBuilder::storageBuffer(Bindings::SHADOW_INSTANCES, vk::ShaderStageFlagBits::eVertex))
+        .build(*initInfo_.raiiDevice);
+    if (!layoutOpt) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create instanced shadow descriptor set layout");
         return false;
     }
+    instancedShadowDescriptorSetLayout = **layoutOpt;
 
     // Create per-frame instance buffers (persistently mapped for fast CPU writes)
     instanceBuffers.resize(initInfo_.framesInFlight);
@@ -401,18 +357,10 @@ bool ShadowSystem::createInstancedShadowResources() {
 
     // Update descriptor sets with buffer bindings
     for (uint32_t i = 0; i < initInfo_.framesInFlight; i++) {
-        auto bufferInfoDS = vk::DescriptorBufferInfo{}
-            .setBuffer(instanceBuffers[i])
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
-
-        auto writeDS = vk::WriteDescriptorSet{}
-            .setDstSet(instancedShadowDescriptorSets[i])
-            .setDstBinding(Bindings::SHADOW_INSTANCES)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setBufferInfo(bufferInfoDS);
-
-        vkDevice.updateDescriptorSets(writeDS, nullptr);
+        DescriptorWriter()
+            .add(WriteBuilder::storageBuffer(Bindings::SHADOW_INSTANCES,
+                makeBufferInfo(instanceBuffers[i])))
+            .update(initInfo_.device, instancedShadowDescriptorSets[i]);
     }
 
     SDL_Log("Created instanced shadow resources: %u frames, %u max instances", initInfo_.framesInFlight, MAX_SHADOW_INSTANCES);

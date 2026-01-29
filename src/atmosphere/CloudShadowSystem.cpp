@@ -6,11 +6,11 @@
 #include "core/InitInfoBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/DescriptorSetLayoutBuilder.h"
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <array>
 #include <cstring>
 
 std::unique_ptr<CloudShadowSystem> CloudShadowSystem::create(const InitInfo& info) {
@@ -145,27 +145,11 @@ bool CloudShadowSystem::createUniformBuffers() {
 }
 
 bool CloudShadowSystem::createDescriptorSetLayout() {
-    // Layout:
-    // 0: Cloud shadow map (storage image for compute output)
-    // 1: Cloud map LUT (sampled image from atmosphere system)
-    // 2: Uniform buffer
-
-    std::array<vk::DescriptorSetLayoutBinding, 3> bindings = {{
-        vk::DescriptorSetLayoutBinding{}.setBinding(0).setDescriptorType(vk::DescriptorType::eStorageImage).setDescriptorCount(1).setStageFlags(vk::ShaderStageFlagBits::eCompute),
-        vk::DescriptorSetLayoutBinding{}.setBinding(1).setDescriptorType(vk::DescriptorType::eCombinedImageSampler).setDescriptorCount(1).setStageFlags(vk::ShaderStageFlagBits::eCompute),
-        vk::DescriptorSetLayoutBinding{}.setBinding(2).setDescriptorType(vk::DescriptorType::eUniformBuffer).setDescriptorCount(1).setStageFlags(vk::ShaderStageFlagBits::eCompute)
-    }};
-
-    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}.setBindings(bindings);
-
-    try {
-        descriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create cloud shadow descriptor set layout: %s", e.what());
-        return false;
-    }
-
-    return true;
+    return DescriptorSetLayoutBuilder()
+        .addBinding(BindingBuilder::storageImage(0, vk::ShaderStageFlagBits::eCompute))
+        .addBinding(BindingBuilder::combinedImageSampler(1, vk::ShaderStageFlagBits::eCompute))
+        .addBinding(BindingBuilder::uniformBuffer(2, vk::ShaderStageFlagBits::eCompute))
+        .buildInto(*raiiDevice_, descriptorSetLayout_);
 }
 
 bool CloudShadowSystem::createDescriptorSets() {

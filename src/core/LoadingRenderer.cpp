@@ -1,6 +1,7 @@
 #include "LoadingRenderer.h"
 #include "vulkan/VulkanContext.h"
 #include "ShaderLoader.h"
+#include "core/vulkan/RenderPassBuilder.h"
 #include <SDL3/SDL.h>
 #include <chrono>
 
@@ -44,45 +45,14 @@ bool LoadingRenderer::createRenderPass() {
     const auto& device = ctx_->get().getRaiiDevice();
     vk::Format swapchainFormat = static_cast<vk::Format>(ctx_->get().getVkSwapchainImageFormat());
 
-    // Single color attachment, no depth
-    auto colorAttachment = vk::AttachmentDescription{}
-        .setFormat(swapchainFormat)
-        .setSamples(vk::SampleCountFlagBits::e1)
-        .setLoadOp(vk::AttachmentLoadOp::eClear)
-        .setStoreOp(vk::AttachmentStoreOp::eStore)
-        .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
-        .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
-        .setInitialLayout(vk::ImageLayout::eUndefined)
-        .setFinalLayout(vk::ImageLayout::ePresentSrcKHR);
-
-    auto colorAttachmentRef = vk::AttachmentReference{}
-        .setAttachment(0)
-        .setLayout(vk::ImageLayout::eColorAttachmentOptimal);
-
-    auto subpass = vk::SubpassDescription{}
-        .setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
-        .setColorAttachments(colorAttachmentRef);
-
-    auto dependency = vk::SubpassDependency{}
-        .setSrcSubpass(VK_SUBPASS_EXTERNAL)
-        .setDstSubpass(0)
-        .setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput)
-        .setSrcAccessMask({})
-        .setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput)
-        .setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite);
-
-    auto renderPassInfo = vk::RenderPassCreateInfo{}
-        .setAttachments(colorAttachment)
-        .setSubpasses(subpass)
-        .setDependencies(dependency);
-
-    try {
-        renderPass_.emplace(device, renderPassInfo);
-        return true;
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "LoadingRenderer: Failed to create render pass: %s", e.what());
+    // Single color attachment, no depth - for presentation
+    if (!RenderPassBuilder()
+            .addColorAttachment(AttachmentBuilder::colorPresent(swapchainFormat))
+            .buildInto(device, renderPass_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "LoadingRenderer: Failed to create render pass");
         return false;
     }
+    return true;
 }
 
 bool LoadingRenderer::createFramebuffers() {

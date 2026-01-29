@@ -5,6 +5,7 @@
 #include "core/InitInfoBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/DescriptorSetLayoutBuilder.h"
 #include "ShaderLoader.h"
 #include <vulkan/vulkan.hpp>
 #include <array>
@@ -167,59 +168,21 @@ bool ComputeBloomSystem::createSampler() {
 
 bool ComputeBloomSystem::createDescriptorSetLayouts() {
     // Downsample layout: sampler2D input (binding 0), image2D output (binding 1)
-    {
-        std::array<vk::DescriptorSetLayoutBinding, 2> bindings;
-
-        bindings[0] = vk::DescriptorSetLayoutBinding{}
-            .setBinding(0)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-        bindings[1] = vk::DescriptorSetLayoutBinding{}
-            .setBinding(1)
-            .setDescriptorType(vk::DescriptorType::eStorageImage)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-        auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
-            .setBindingCount(static_cast<uint32_t>(bindings.size()))
-            .setPBindings(bindings.data());
-
-        try {
-            downsampleDescSetLayout_.emplace(*raiiDevice_, layoutInfo);
-        } catch (const vk::SystemError& e) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create downsample descriptor set layout: %s", e.what());
-            return false;
-        }
+    if (!DescriptorSetLayoutBuilder()
+            .addBinding(BindingBuilder::combinedImageSampler(0, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::storageImage(1, vk::ShaderStageFlagBits::eCompute))
+            .buildInto(*raiiDevice_, downsampleDescSetLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create downsample descriptor set layout");
+        return false;
     }
 
     // Upsample layout: sampler2D input (binding 0), image2D output (binding 1) for read-modify-write
-    {
-        std::array<vk::DescriptorSetLayoutBinding, 2> bindings;
-
-        bindings[0] = vk::DescriptorSetLayoutBinding{}
-            .setBinding(0)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-        bindings[1] = vk::DescriptorSetLayoutBinding{}
-            .setBinding(1)
-            .setDescriptorType(vk::DescriptorType::eStorageImage)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-        auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
-            .setBindingCount(static_cast<uint32_t>(bindings.size()))
-            .setPBindings(bindings.data());
-
-        try {
-            upsampleDescSetLayout_.emplace(*raiiDevice_, layoutInfo);
-        } catch (const vk::SystemError& e) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create upsample descriptor set layout: %s", e.what());
-            return false;
-        }
+    if (!DescriptorSetLayoutBuilder()
+            .addBinding(BindingBuilder::combinedImageSampler(0, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::storageImage(1, vk::ShaderStageFlagBits::eCompute))
+            .buildInto(*raiiDevice_, upsampleDescSetLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create upsample descriptor set layout");
+        return false;
     }
 
     return true;

@@ -7,6 +7,8 @@
 #include "Mesh.h"
 #include "OctahedralMapping.h"
 #include "core/vulkan/SamplerFactory.h"
+#include "core/vulkan/FramebufferBuilder.h"
+#include "core/vulkan/DescriptorWriter.h"
 
 #include <SDL3/SDL.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -269,20 +271,16 @@ bool TreeImpostorAtlas::createAtlasResources(uint32_t archetypeIndex) {
     atlas.depthView.emplace(*raiiDevice_, viewInfo);
 
     // Create framebuffer
-    std::array<vk::ImageView, 3> attachments = {
-        **atlas.albedoView,
-        **atlas.normalView,
-        **atlas.depthView
-    };
-
-    auto fbInfo = vk::FramebufferCreateInfo{}
-        .setRenderPass(**captureRenderPass_)
-        .setAttachments(attachments)
-        .setWidth(OctahedralAtlasConfig::ATLAS_WIDTH)
-        .setHeight(OctahedralAtlasConfig::ATLAS_HEIGHT)
-        .setLayers(1);
-
-    atlas.framebuffer.emplace(*raiiDevice_, fbInfo);
+    if (!FramebufferBuilder()
+            .renderPass(**captureRenderPass_)
+            .extent(OctahedralAtlasConfig::ATLAS_WIDTH, OctahedralAtlasConfig::ATLAS_HEIGHT)
+            .addAttachment(**atlas.albedoView)
+            .addAttachment(**atlas.normalView)
+            .addAttachment(**atlas.depthView)
+            .buildInto(*raiiDevice_, atlas.framebuffer)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeImpostorAtlas: Failed to create atlas framebuffer");
+        return false;
+    }
 
     return true;
 }
@@ -379,21 +377,13 @@ int32_t TreeImpostorAtlas::generateArchetype(
                 .setImageView(barkNormal)
                 .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
 
-            auto ssboInfo = vk::DescriptorBufferInfo{}
-                .setBuffer(leafCaptureBuffer_)
-                .setOffset(0)
-                .setRange(VK_WHOLE_SIZE);
+            auto ssboInfo = makeBufferInfo(leafCaptureBuffer_);
 
-            std::array<vk::WriteDescriptorSet, 3> writes = {
-                vk::WriteDescriptorSet{}.setDstSet(leafCaptureDescSet).setDstBinding(0)
-                    .setDescriptorType(vk::DescriptorType::eCombinedImageSampler).setImageInfo(leafImageInfo),
-                vk::WriteDescriptorSet{}.setDstSet(leafCaptureDescSet).setDstBinding(1)
-                    .setDescriptorType(vk::DescriptorType::eCombinedImageSampler).setImageInfo(normalInfo),
-                vk::WriteDescriptorSet{}.setDstSet(leafCaptureDescSet).setDstBinding(2)
-                    .setDescriptorType(vk::DescriptorType::eStorageBuffer).setBufferInfo(ssboInfo)
-            };
-
-            vk::Device(device_).updateDescriptorSets(writes, nullptr);
+            DescriptorWriter()
+                .add(WriteBuilder::combinedImageSampler(0, leafImageInfo))
+                .add(WriteBuilder::combinedImageSampler(1, normalInfo))
+                .add(WriteBuilder::storageBuffer(2, ssboInfo))
+                .update(device_, leafCaptureDescSet);
         }
     }
 
@@ -413,14 +403,10 @@ int32_t TreeImpostorAtlas::generateArchetype(
         .setImageView(barkNormal)
         .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
 
-    std::array<vk::WriteDescriptorSet, 2> writes = {
-        vk::WriteDescriptorSet{}.setDstSet(captureDescSet).setDstBinding(0)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler).setImageInfo(albedoInfo),
-        vk::WriteDescriptorSet{}.setDstSet(captureDescSet).setDstBinding(1)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler).setImageInfo(normalInfo)
-    };
-
-    vk::Device(device_).updateDescriptorSets(writes, nullptr);
+    DescriptorWriter()
+        .add(WriteBuilder::combinedImageSampler(0, albedoInfo))
+        .add(WriteBuilder::combinedImageSampler(1, normalInfo))
+        .update(device_, captureDescSet);
 
     vk::CommandBuffer cmd = (*raiiDevice_).allocateCommandBuffers(
         vk::CommandBufferAllocateInfo{}

@@ -3,6 +3,7 @@
 #include "DescriptorManager.h"
 #include "core/InitInfoBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/DescriptorSetLayoutBuilder.h"
 #include "ShaderLoader.h"
 #include <vulkan/vulkan.hpp>
 #include <SDL3/SDL.h>
@@ -121,34 +122,12 @@ bool GodRaysSystem::createResources() {
 
 bool GodRaysSystem::createPipeline() {
     // Descriptor set layout: hdrInput (0), depthInput (1), output (2)
-    std::array<vk::DescriptorSetLayoutBinding, 3> bindings;
-
-    bindings[0] = vk::DescriptorSetLayoutBinding{}
-        .setBinding(0)
-        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-    bindings[1] = vk::DescriptorSetLayoutBinding{}
-        .setBinding(1)
-        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-    bindings[2] = vk::DescriptorSetLayoutBinding{}
-        .setBinding(2)
-        .setDescriptorType(vk::DescriptorType::eStorageImage)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
-        .setBindingCount(static_cast<uint32_t>(bindings.size()))
-        .setPBindings(bindings.data());
-
-    try {
-        descSetLayout_.emplace(*raiiDevice_, layoutInfo);
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GodRaysSystem: Failed to create descriptor set layout: %s", e.what());
+    if (!DescriptorSetLayoutBuilder()
+            .addBinding(BindingBuilder::combinedImageSampler(0, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::combinedImageSampler(1, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::storageImage(2, vk::ShaderStageFlagBits::eCompute))
+            .buildInto(*raiiDevice_, descSetLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GodRaysSystem: Failed to create descriptor set layout");
         return false;
     }
 

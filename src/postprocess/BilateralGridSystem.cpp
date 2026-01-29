@@ -2,6 +2,8 @@
 #include "ShaderLoader.h"
 #include "core/InitInfoBuilder.h"
 #include "core/vulkan/SamplerFactory.h"
+#include "core/vulkan/DescriptorSetLayoutBuilder.h"
+#include "core/vulkan/DescriptorWriter.h"
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
@@ -174,77 +176,25 @@ bool BilateralGridSystem::createSampler() {
 
 bool BilateralGridSystem::createDescriptorSetLayout() {
     // Build layout: HDR input (sampler) + grid output (storage image) + uniforms
-    {
-        std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
-
-        // HDR input texture
-        bindings[0] = vk::DescriptorSetLayoutBinding{}
-            .setBinding(0)
-            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-        // Grid output (storage image)
-        bindings[1] = vk::DescriptorSetLayoutBinding{}
-            .setBinding(1)
-            .setDescriptorType(vk::DescriptorType::eStorageImage)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-        // Uniforms
-        bindings[2] = vk::DescriptorSetLayoutBinding{}
-            .setBinding(2)
-            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-        auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
-            .setBindings(bindings);
-
-        try {
-            buildDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
-        } catch (const vk::SystemError& e) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                        "BilateralGridSystem: Failed to create build descriptor set layout: %s", e.what());
-            return false;
-        }
+    if (!DescriptorSetLayoutBuilder()
+            .addBinding(BindingBuilder::combinedImageSampler(0, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::storageImage(1, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::uniformBuffer(2, vk::ShaderStageFlagBits::eCompute))
+            .buildInto(*raiiDevice_, buildDescriptorSetLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                    "BilateralGridSystem: Failed to create build descriptor set layout");
+        return false;
     }
 
     // Blur layout: grid src (storage image) + grid dst (storage image) + uniforms
-    {
-        std::array<vk::DescriptorSetLayoutBinding, 3> bindings{};
-
-        // Grid source
-        bindings[0] = vk::DescriptorSetLayoutBinding{}
-            .setBinding(0)
-            .setDescriptorType(vk::DescriptorType::eStorageImage)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-        // Grid destination
-        bindings[1] = vk::DescriptorSetLayoutBinding{}
-            .setBinding(1)
-            .setDescriptorType(vk::DescriptorType::eStorageImage)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-        // Uniforms
-        bindings[2] = vk::DescriptorSetLayoutBinding{}
-            .setBinding(2)
-            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-            .setDescriptorCount(1)
-            .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-        auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
-            .setBindings(bindings);
-
-        try {
-            blurDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
-        } catch (const vk::SystemError& e) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                        "BilateralGridSystem: Failed to create blur descriptor set layout: %s", e.what());
-            return false;
-        }
+    if (!DescriptorSetLayoutBuilder()
+            .addBinding(BindingBuilder::storageImage(0, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::storageImage(1, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::uniformBuffer(2, vk::ShaderStageFlagBits::eCompute))
+            .buildInto(*raiiDevice_, blurDescriptorSetLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                    "BilateralGridSystem: Failed to create blur descriptor set layout");
+        return false;
     }
 
     return true;
@@ -347,59 +297,28 @@ bool BilateralGridSystem::createDescriptorSets() {
         // X blur: grid[0] -> grid[1]
         // Y blur: grid[1] -> grid[0]
         // Z blur: grid[0] -> grid[1] (final output in grid[1], but we'll copy back)
-        auto srcInfo = vk::DescriptorImageInfo{}
-            .setImageLayout(vk::ImageLayout::eGeneral);
-        auto dstInfo = vk::DescriptorImageInfo{}
-            .setImageLayout(vk::ImageLayout::eGeneral);
+        auto bufferInfo = makeBufferInfo(blurUniformBuffers.buffers[i], 0, sizeof(BilateralBlurUniforms));
 
         // X: 0 -> 1
-        srcInfo.setImageView(gridViews[0]);
-        dstInfo.setImageView(gridViews[1]);
-
-        auto bufferInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(blurUniformBuffers.buffers[i])
-            .setOffset(0)
-            .setRange(sizeof(BilateralBlurUniforms));
-
-        std::array<vk::WriteDescriptorSet, 3> writes{};
-        writes[0] = vk::WriteDescriptorSet{}
-            .setDstSet(blurDescriptorSetsX[i])
-            .setDstBinding(0)
-            .setDescriptorCount(1)
-            .setDescriptorType(vk::DescriptorType::eStorageImage)
-            .setPImageInfo(&srcInfo);
-
-        writes[1] = vk::WriteDescriptorSet{}
-            .setDstSet(blurDescriptorSetsX[i])
-            .setDstBinding(1)
-            .setDescriptorCount(1)
-            .setDescriptorType(vk::DescriptorType::eStorageImage)
-            .setPImageInfo(&dstInfo);
-
-        writes[2] = vk::WriteDescriptorSet{}
-            .setDstSet(blurDescriptorSetsX[i])
-            .setDstBinding(2)
-            .setDescriptorCount(1)
-            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-            .setPBufferInfo(&bufferInfo);
-
-        vk::Device(device).updateDescriptorSets(writes, {});
+        DescriptorWriter()
+            .add(WriteBuilder::storageImage(0, makeStorageImageInfo(gridViews[0])))
+            .add(WriteBuilder::storageImage(1, makeStorageImageInfo(gridViews[1])))
+            .add(WriteBuilder::uniformBuffer(2, bufferInfo))
+            .update(device, blurDescriptorSetsX[i]);
 
         // Y: 1 -> 0
-        srcInfo.setImageView(gridViews[1]);
-        dstInfo.setImageView(gridViews[0]);
-        writes[0].setDstSet(blurDescriptorSetsY[i]);
-        writes[1].setDstSet(blurDescriptorSetsY[i]);
-        writes[2].setDstSet(blurDescriptorSetsY[i]);
-        vk::Device(device).updateDescriptorSets(writes, {});
+        DescriptorWriter()
+            .add(WriteBuilder::storageImage(0, makeStorageImageInfo(gridViews[1])))
+            .add(WriteBuilder::storageImage(1, makeStorageImageInfo(gridViews[0])))
+            .add(WriteBuilder::uniformBuffer(2, bufferInfo))
+            .update(device, blurDescriptorSetsY[i]);
 
-        // Z: 0 -> 1 (or skip Z blur for simplicity like GOT sometimes did)
-        srcInfo.setImageView(gridViews[0]);
-        dstInfo.setImageView(gridViews[1]);
-        writes[0].setDstSet(blurDescriptorSetsZ[i]);
-        writes[1].setDstSet(blurDescriptorSetsZ[i]);
-        writes[2].setDstSet(blurDescriptorSetsZ[i]);
-        vk::Device(device).updateDescriptorSets(writes, {});
+        // Z: 0 -> 1
+        DescriptorWriter()
+            .add(WriteBuilder::storageImage(0, makeStorageImageInfo(gridViews[0])))
+            .add(WriteBuilder::storageImage(1, makeStorageImageInfo(gridViews[1])))
+            .add(WriteBuilder::uniformBuffer(2, bufferInfo))
+            .update(device, blurDescriptorSetsZ[i]);
     }
 
     return true;
@@ -502,38 +421,14 @@ void BilateralGridSystem::recordBilateralGrid(VkCommandBuffer cmd, uint32_t fram
         .setImageView(hdrInputView)
         .setSampler(**gridSampler_);
 
-    auto gridInfo = vk::DescriptorImageInfo{}
-        .setImageLayout(vk::ImageLayout::eGeneral)
-        .setImageView(gridViews[0]);
+    auto gridInfo = makeStorageImageInfo(gridViews[0]);
+    auto bufferInfo = makeBufferInfo(buildUniformBuffers.buffers[frameIndex], 0, sizeof(BilateralBuildUniforms));
 
-    auto bufferInfo = vk::DescriptorBufferInfo{}
-        .setBuffer(buildUniformBuffers.buffers[frameIndex])
-        .setOffset(0)
-        .setRange(sizeof(BilateralBuildUniforms));
-
-    std::array<vk::WriteDescriptorSet, 3> writes{};
-    writes[0] = vk::WriteDescriptorSet{}
-        .setDstSet(buildDescriptorSets[frameIndex])
-        .setDstBinding(0)
-        .setDescriptorCount(1)
-        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-        .setPImageInfo(&hdrInfo);
-
-    writes[1] = vk::WriteDescriptorSet{}
-        .setDstSet(buildDescriptorSets[frameIndex])
-        .setDstBinding(1)
-        .setDescriptorCount(1)
-        .setDescriptorType(vk::DescriptorType::eStorageImage)
-        .setPImageInfo(&gridInfo);
-
-    writes[2] = vk::WriteDescriptorSet{}
-        .setDstSet(buildDescriptorSets[frameIndex])
-        .setDstBinding(2)
-        .setDescriptorCount(1)
-        .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-        .setPBufferInfo(&bufferInfo);
-
-    vk::Device(device).updateDescriptorSets(writes, {});
+    DescriptorWriter()
+        .add(WriteBuilder::combinedImageSampler(0, hdrInfo))
+        .add(WriteBuilder::storageImage(1, gridInfo))
+        .add(WriteBuilder::uniformBuffer(2, bufferInfo))
+        .update(device, buildDescriptorSets[frameIndex]);
 
     // Build pass
     vk::CommandBuffer vkCmd(cmd);

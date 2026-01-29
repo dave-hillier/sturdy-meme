@@ -5,6 +5,7 @@
 #include "DescriptorManager.h"
 #include "core/pipeline/ComputePipelineBuilder.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
+#include "core/vulkan/DescriptorSetLayoutBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
 #include "core/ImageBuilder.h"
 #include <SDL3/SDL_log.h>
@@ -165,16 +166,12 @@ bool WaterDisplacement::createParticleBuffer() {
 
 bool WaterDisplacement::createComputePipeline() {
     // Descriptor set layout
-    VkDescriptorSetLayout rawLayout = VK_NULL_HANDLE;
-    try {
-        rawLayout = DescriptorManager::DescriptorLayoutBuilder(device)
-            .addStorageImage(VK_SHADER_STAGE_COMPUTE_BIT, 1, 0)
-            .addCombinedImageSampler(VK_SHADER_STAGE_COMPUTE_BIT, 1, 1)
-            .addStorageBuffer(VK_SHADER_STAGE_COMPUTE_BIT, 1, 2)
-            .build();
-        descriptorSetLayout_.emplace(*raiiDevice_, rawLayout);
-    } catch (const vk::SystemError& e) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create displacement descriptor set layout: %s", e.what());
+    if (!DescriptorSetLayoutBuilder()
+            .addBinding(BindingBuilder::storageImage(0, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::combinedImageSampler(1, vk::ShaderStageFlagBits::eCompute))
+            .addBinding(BindingBuilder::storageBuffer(2, vk::ShaderStageFlagBits::eCompute))
+            .buildInto(*raiiDevice_, descriptorSetLayout_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create displacement descriptor set layout");
         return false;
     }
 

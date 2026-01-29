@@ -5,6 +5,8 @@
 #include "shaders/bindings.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/BarrierHelpers.h"
+#include "core/vulkan/DescriptorSetLayoutBuilder.h"
+#include "core/vulkan/DescriptorWriter.h"
 #include "core/ComputeShaderCommon.h"
 
 #include <SDL3/SDL.h>
@@ -94,63 +96,15 @@ void ImpostorCullSystem::cleanup() {
 }
 
 bool ImpostorCullSystem::createDescriptorSetLayout() {
-    std::array<vk::DescriptorSetLayoutBinding, 7> bindings{};
-
-    // Binding 0: Tree input data (SSBO)
-    bindings[0] = vk::DescriptorSetLayoutBinding{}
-        .setBinding(BINDING_TREE_IMPOSTOR_CULL_INPUT)
-        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-    // Binding 1: Visible impostor output (SSBO)
-    bindings[1] = vk::DescriptorSetLayoutBinding{}
-        .setBinding(BINDING_TREE_IMPOSTOR_CULL_OUTPUT)
-        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-    // Binding 2: Indirect draw command (SSBO)
-    bindings[2] = vk::DescriptorSetLayoutBinding{}
-        .setBinding(BINDING_TREE_IMPOSTOR_CULL_INDIRECT)
-        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-    // Binding 3: Culling uniforms (UBO)
-    bindings[3] = vk::DescriptorSetLayoutBinding{}
-        .setBinding(BINDING_TREE_IMPOSTOR_CULL_UNIFORMS)
-        .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-    // Binding 4: Archetype data (SSBO)
-    bindings[4] = vk::DescriptorSetLayoutBinding{}
-        .setBinding(BINDING_TREE_IMPOSTOR_CULL_ARCHETYPE)
-        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-    // Binding 5: Hi-Z pyramid (sampler2D)
-    bindings[5] = vk::DescriptorSetLayoutBinding{}
-        .setBinding(BINDING_TREE_IMPOSTOR_CULL_HIZ)
-        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-    // Binding 6: Visibility cache (SSBO) for temporal coherence
-    bindings[6] = vk::DescriptorSetLayoutBinding{}
-        .setBinding(BINDING_TREE_IMPOSTOR_CULL_VISIBILITY)
-        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-        .setDescriptorCount(1)
-        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
-
-    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}
-        .setBindings(bindings);
-
-    cullDescriptorSetLayout_.emplace(*raiiDevice_, layoutInfo);
-
-    return true;
+    return DescriptorSetLayoutBuilder()
+        .addBinding(BindingBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_CULL_INPUT, vk::ShaderStageFlagBits::eCompute))
+        .addBinding(BindingBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_CULL_OUTPUT, vk::ShaderStageFlagBits::eCompute))
+        .addBinding(BindingBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_CULL_INDIRECT, vk::ShaderStageFlagBits::eCompute))
+        .addBinding(BindingBuilder::uniformBuffer(BINDING_TREE_IMPOSTOR_CULL_UNIFORMS, vk::ShaderStageFlagBits::eCompute))
+        .addBinding(BindingBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_CULL_ARCHETYPE, vk::ShaderStageFlagBits::eCompute))
+        .addBinding(BindingBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_CULL_HIZ, vk::ShaderStageFlagBits::eCompute))
+        .addBinding(BindingBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_CULL_VISIBILITY, vk::ShaderStageFlagBits::eCompute))
+        .buildInto(*raiiDevice_, cullDescriptorSetLayout_);
 }
 
 bool ImpostorCullSystem::createComputePipeline() {
@@ -377,103 +331,34 @@ void ImpostorCullSystem::updateArchetypeData(const TreeImpostorAtlas* atlas) {
 void ImpostorCullSystem::initializeDescriptorSets() {
     vk::Device vkDevice(device_);
 
-    // Initialize static descriptor bindings for all frames
+    // Static buffer info (shared across frames)
+    auto inputInfo = makeBufferInfo(treeInputBuffer_);
+    auto outputInfo = makeBufferInfo(visibleImpostorBuffer_);
+    auto indirectInfo = makeBufferInfo(indirectDrawBuffer_);
+    auto archetypeInfo = makeBufferInfo(archetypeBuffer_);
+
     for (uint32_t frameIndex = 0; frameIndex < maxFramesInFlight_; ++frameIndex) {
-        // Tree input buffer (static)
-        auto inputInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(treeInputBuffer_)
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
+        auto uniformInfo = makeBufferInfo(uniformBuffers_.buffers[frameIndex], 0, sizeof(ImpostorCullUniforms));
+        auto visibilityInfo = makeBufferInfo(visibilityCacheBuffers_.getVk(frameIndex));
 
-        // Visible output buffer (static)
-        auto outputInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(visibleImpostorBuffer_)
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
-
-        // Indirect draw buffer (static)
-        auto indirectInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(indirectDrawBuffer_)
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
-
-        // Uniform buffer (per-frame indexed, but static binding)
-        auto uniformInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(uniformBuffers_.buffers[frameIndex])
-            .setOffset(0)
-            .setRange(sizeof(ImpostorCullUniforms));
-
-        // Archetype buffer (static)
-        auto archetypeInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(archetypeBuffer_)
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
-
-        // Visibility cache buffer (per-frame indexed, but static binding)
-        auto visibilityInfo = vk::DescriptorBufferInfo{}
-            .setBuffer(visibilityCacheBuffers_.getVk(frameIndex))
-            .setOffset(0)
-            .setRange(VK_WHOLE_SIZE);
-
-        std::array<vk::WriteDescriptorSet, 6> writes{};
-
-        writes[0] = vk::WriteDescriptorSet{}
-            .setDstSet(cullDescriptorSets_[frameIndex])
-            .setDstBinding(BINDING_TREE_IMPOSTOR_CULL_INPUT)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setBufferInfo(inputInfo);
-
-        writes[1] = vk::WriteDescriptorSet{}
-            .setDstSet(cullDescriptorSets_[frameIndex])
-            .setDstBinding(BINDING_TREE_IMPOSTOR_CULL_OUTPUT)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setBufferInfo(outputInfo);
-
-        writes[2] = vk::WriteDescriptorSet{}
-            .setDstSet(cullDescriptorSets_[frameIndex])
-            .setDstBinding(BINDING_TREE_IMPOSTOR_CULL_INDIRECT)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setBufferInfo(indirectInfo);
-
-        writes[3] = vk::WriteDescriptorSet{}
-            .setDstSet(cullDescriptorSets_[frameIndex])
-            .setDstBinding(BINDING_TREE_IMPOSTOR_CULL_UNIFORMS)
-            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
-            .setBufferInfo(uniformInfo);
-
-        writes[4] = vk::WriteDescriptorSet{}
-            .setDstSet(cullDescriptorSets_[frameIndex])
-            .setDstBinding(BINDING_TREE_IMPOSTOR_CULL_ARCHETYPE)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setBufferInfo(archetypeInfo);
-
-        writes[5] = vk::WriteDescriptorSet{}
-            .setDstSet(cullDescriptorSets_[frameIndex])
-            .setDstBinding(BINDING_TREE_IMPOSTOR_CULL_VISIBILITY)
-            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
-            .setBufferInfo(visibilityInfo);
-
-        vkDevice.updateDescriptorSets(writes, nullptr);
+        DescriptorWriter()
+            .add(WriteBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_CULL_INPUT, inputInfo))
+            .add(WriteBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_CULL_OUTPUT, outputInfo))
+            .add(WriteBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_CULL_INDIRECT, indirectInfo))
+            .add(WriteBuilder::uniformBuffer(BINDING_TREE_IMPOSTOR_CULL_UNIFORMS, uniformInfo))
+            .add(WriteBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_CULL_ARCHETYPE, archetypeInfo))
+            .add(WriteBuilder::storageBuffer(BINDING_TREE_IMPOSTOR_CULL_VISIBILITY, visibilityInfo))
+            .update(vkDevice, cullDescriptorSets_[frameIndex]);
     }
 
-    // Reset lastHiZView_ to force Hi-Z binding update on first use
     lastHiZView_ = VK_NULL_HANDLE;
 }
 
 void ImpostorCullSystem::updateHiZDescriptor(uint32_t frameIndex, VkImageView hiZPyramidView, VkSampler hiZSampler) {
-    // Only update the Hi-Z pyramid descriptor (binding 5)
-    auto hiZInfo = vk::DescriptorImageInfo{}
-        .setSampler(hiZSampler)
-        .setImageView(hiZPyramidView)
-        .setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal);
-
-    auto write = vk::WriteDescriptorSet{}
-        .setDstSet(cullDescriptorSets_[frameIndex])
-        .setDstBinding(BINDING_TREE_IMPOSTOR_CULL_HIZ)
-        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
-        .setImageInfo(hiZInfo);
-
-    vk::Device(device_).updateDescriptorSets(write, nullptr);
+    auto hiZInfo = makeImageInfo(hiZSampler, hiZPyramidView);
+    DescriptorWriter()
+        .add(WriteBuilder::combinedImageSampler(BINDING_TREE_IMPOSTOR_CULL_HIZ, hiZInfo))
+        .update(vk::Device(device_), cullDescriptorSets_[frameIndex]);
 }
 
 void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
