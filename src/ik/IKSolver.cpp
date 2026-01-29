@@ -226,6 +226,11 @@ bool IKSystem::addFootPlacement(
         return false;
     }
 
+    // Compute bind pose global transforms for skeleton-derived parameters
+    std::vector<glm::mat4> bindPoseGlobalTransforms;
+    Skeleton& mutableSkeleton = const_cast<Skeleton&>(skeleton);
+    mutableSkeleton.computeGlobalTransforms(bindPoseGlobalTransforms);
+
     NamedFootPlacement nfp;
     nfp.name = name;
     nfp.foot.hipBoneIndex = hipIdx;
@@ -234,10 +239,24 @@ bool IKSystem::addFootPlacement(
     nfp.foot.toeBoneIndex = toeIdx;
     nfp.foot.enabled = true;  // Enabled by default
 
+    // Compute ankle height from skeleton bind pose
+    nfp.foot.ankleHeightAboveGround = FootPlacementIKSolver::computeAnkleHeight(
+        skeleton, footIdx, toeIdx, bindPoseGlobalTransforms);
+
+    // Detect foot orientation from skeleton bind pose
+    FootPlacementIKSolver::detectFootOrientation(
+        skeleton, footIdx, toeIdx, bindPoseGlobalTransforms,
+        nfp.foot.footUpVector, nfp.foot.footForwardVector);
+
+    // Compute leg length for reach checking
+    nfp.foot.legLength = FootPlacementIKSolver::computeLegLength(
+        bindPoseGlobalTransforms, hipIdx, kneeIdx, footIdx);
+
     footPlacements.push_back(nfp);
 
-    SDL_Log("IKSystem: Added foot placement '%s' (hip=%d, knee=%d, foot=%d, toe=%d)",
-            name.c_str(), hipIdx, kneeIdx, footIdx, toeIdx);
+    SDL_Log("IKSystem: Added foot placement '%s' (hip=%d, knee=%d, foot=%d, toe=%d, ankleHeight=%.3f, legLength=%.3f)",
+            name.c_str(), hipIdx, kneeIdx, footIdx, toeIdx,
+            nfp.foot.ankleHeightAboveGround, nfp.foot.legLength);
 
     return true;
 }

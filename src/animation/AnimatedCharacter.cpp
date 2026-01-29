@@ -366,14 +366,25 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
             // Idle: full lock, full IK
             targetLockBlend = 1.0f;
             targetWeight = 1.0f;
+            foot->currentPhase = FootPhase::Stance;
+            foot->phaseProgress = 0.0f;
         } else if (useFootPhaseTracking && footPhaseTracker.hasTimingData()) {
             // Use phase-aware values during locomotion
             targetLockBlend = footPhaseTracker.getLockBlend(isLeftFoot);
             targetWeight = footPhaseTracker.getIKWeight(isLeftFoot);
+
+            // Pass phase data to foot for solver to use
+            const FootPhaseData& phaseData = isLeftFoot
+                ? footPhaseTracker.getLeftFoot()
+                : footPhaseTracker.getRightFoot();
+            foot->currentPhase = phaseData.phase;
+            foot->phaseProgress = phaseData.phaseProgress;
         } else {
             // Fallback: no lock during movement, moderate IK
             targetLockBlend = 0.0f;
             targetWeight = 0.5f;  // Partial IK for ground adaptation
+            foot->currentPhase = FootPhase::Swing;
+            foot->phaseProgress = 0.5f;
         }
 
         // Smoothly blend toward target lock state
@@ -385,9 +396,12 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
                 foot->lockBlend = std::min(foot->lockBlend + blendDelta, targetLockBlend);
             } else if (foot->lockBlend > targetLockBlend) {
                 foot->lockBlend = std::max(foot->lockBlend - blendDelta, targetLockBlend);
-                if (foot->lockBlend < 0.1f) {
-                    foot->isLocked = false;
-                }
+            }
+
+            // Explicitly clear lock state when blend reaches zero
+            if (foot->lockBlend <= 0.0f) {
+                foot->isLocked = false;
+                foot->lockedWorldPosition = glm::vec3(0.0f);
             }
 
             // IK weight - faster blending for responsiveness

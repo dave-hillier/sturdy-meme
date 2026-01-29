@@ -8,6 +8,7 @@
 #include <functional>
 
 #include "GLTFLoader.h"
+#include "../animation/FootPhaseTracker.h"
 
 // Joint rotation limits (in radians)
 struct JointLimits {
@@ -114,6 +115,12 @@ struct FootPlacementIK {
     float raycastHeight = 0.5f;       // How high above foot to start raycast
     float raycastDistance = 1.0f;     // How far down to check for ground
 
+    // Skeleton-derived parameters (computed during setup)
+    float ankleHeightAboveGround = 0.08f;  // Distance from ankle bone to ground in bind pose
+    glm::vec3 footUpVector = glm::vec3(0.0f, 1.0f, 0.0f);     // Foot's local up (perpendicular to sole)
+    glm::vec3 footForwardVector = glm::vec3(0.0f, 0.0f, 1.0f); // Foot's local forward (toe direction)
+    float legLength = 0.0f;           // Total leg length (hip-knee + knee-foot) for reach checking
+
     // IK settings
     glm::vec3 poleVector = glm::vec3(0.0f, 0.0f, 1.0f);  // Knee direction
     float weight = 1.0f;
@@ -128,11 +135,21 @@ struct FootPlacementIK {
     glm::quat currentFootRotation = glm::quat(1, 0, 0, 0);
     float currentGroundHeight = 0.0f;
     bool isGrounded = false;
+    float currentExtensionRatio = 0.0f;  // 0-1 how extended the leg is (1 = fully extended)
+    bool targetUnreachable = false;       // True if target would hyper-extend leg
 
-    // Foot locking state (prevents sliding during idle)
+    // Animation foot position (for pelvis offset calculation)
+    glm::vec3 animationFootPosition = glm::vec3(0.0f);
+
+    // Foot locking state (prevents sliding during stance)
     glm::vec3 lockedWorldPosition = glm::vec3(0.0f);  // World position where foot is locked
+    glm::vec3 lockedGroundNormal = glm::vec3(0.0f, 1.0f, 0.0f);  // Ground normal when locked
     bool isLocked = false;                             // Whether foot is currently locked in place
     float lockBlend = 0.0f;                            // Blend factor toward locked position (0-1)
+
+    // Phase tracking integration
+    FootPhase currentPhase = FootPhase::Stance;
+    float phaseProgress = 0.0f;
 };
 
 // Pelvis adjustment for foot placement
@@ -357,6 +374,32 @@ public:
         PelvisAdjustment& pelvis,
         float targetOffset,
         float deltaTime
+    );
+
+    // Compute ankle height from skeleton bind pose
+    static float computeAnkleHeight(
+        const Skeleton& skeleton,
+        int32_t footBoneIndex,
+        int32_t toeBoneIndex,
+        const std::vector<glm::mat4>& bindPoseGlobalTransforms
+    );
+
+    // Detect foot orientation from skeleton bind pose
+    static void detectFootOrientation(
+        const Skeleton& skeleton,
+        int32_t footBoneIndex,
+        int32_t toeBoneIndex,
+        const std::vector<glm::mat4>& bindPoseGlobalTransforms,
+        glm::vec3& outUpVector,
+        glm::vec3& outForwardVector
+    );
+
+    // Compute total leg length for reach checking
+    static float computeLegLength(
+        const std::vector<glm::mat4>& bindPoseGlobalTransforms,
+        int32_t hipBoneIndex,
+        int32_t kneeBoneIndex,
+        int32_t footBoneIndex
     );
 
 private:
