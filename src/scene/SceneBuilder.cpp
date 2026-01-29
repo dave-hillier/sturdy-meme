@@ -3,6 +3,7 @@
 #include "PhysicsSystem.h"
 #include "asset/AssetRegistry.h"
 #include "npc/NPCSimulation.h"
+#include "npc/NPCData.h"
 #include <SDL3/SDL_log.h>
 
 // Constructor must be defined in .cpp to allow unique_ptr<NPCSimulation> with incomplete type in header
@@ -311,11 +312,11 @@ void SceneBuilder::createNPCs(const InitInfo& info) {
         return;
     }
 
-    // NPC spawn positions relative to scene origin
+    // NPC spawn positions relative to scene origin with varied activities
     std::vector<NPCSimulation::NPCSpawnInfo> spawnPoints = {
-        {  5.0f,  5.0f,  45.0f, 0 },   // NPC 1: Near northeast
-        { -4.0f,  3.0f, 180.0f, 0 },   // NPC 2: West side, facing south
-        {  3.0f, -4.0f, -90.0f, 0 },   // NPC 3: South side, facing west
+        {  5.0f,  5.0f,  45.0f, 0, NPCActivity::Idle },     // NPC 1: Standing idle
+        { -4.0f,  3.0f, 180.0f, 0, NPCActivity::Walking },  // NPC 2: Walking animation
+        {  3.0f, -4.0f, -90.0f, 0, NPCActivity::Running },  // NPC 3: Running animation
     };
 
     size_t created = npcSimulation_->spawnNPCs(spawnPoints);
