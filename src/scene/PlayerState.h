@@ -30,9 +30,13 @@ struct PlayerTransform : Transform {
     }
 
     // Get yaw in degrees (extracted from quaternion)
+    // Note: glm::eulerAngles has gimbal lock issues, so we compute yaw directly
     float getYaw() const {
-        glm::vec3 euler = glm::eulerAngles(rotation);
-        return glm::degrees(euler.y);
+        // For a Y-axis rotation quaternion q = (cos(θ/2), 0, sin(θ/2), 0)
+        // yaw = 2 * atan2(q.y, q.w)
+        // This gives full -180 to 180 range without gimbal lock
+        float yaw = 2.0f * atan2(rotation.y, rotation.w);
+        return glm::degrees(yaw);
     }
 
     // Set yaw in degrees
