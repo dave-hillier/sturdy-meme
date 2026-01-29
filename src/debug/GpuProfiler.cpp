@@ -102,15 +102,16 @@ bool GpuProfiler::initInternal(VkDevice dev, VkPhysicalDevice physicalDevice,
     uint32_t queriesPerFrame = (maxZones * QUERIES_PER_ZONE) + 2;
 
     queryPools.resize(framesInFlight);
+    vk::Device vkDevice(device);
     for (uint32_t i = 0; i < framesInFlight; i++) {
-        VkQueryPoolCreateInfo poolInfo{};
-        poolInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-        poolInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
-        poolInfo.queryCount = queriesPerFrame;
+        auto poolInfo = vk::QueryPoolCreateInfo{}
+            .setQueryType(vk::QueryType::eTimestamp)
+            .setQueryCount(queriesPerFrame);
 
-        VkResult result = vkCreateQueryPool(device, &poolInfo, nullptr, &queryPools[i]);
-        if (result != VK_SUCCESS) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create GPU profiler query pool %d", i);
+        try {
+            queryPools[i] = vkDevice.createQueryPool(poolInfo);
+        } catch (const vk::SystemError& e) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create GPU profiler query pool %d: %s", i, e.what());
             cleanup();
             return false;
         }

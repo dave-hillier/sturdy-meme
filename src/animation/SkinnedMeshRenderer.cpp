@@ -308,9 +308,9 @@ void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, uint3
     // Bind skinned mesh vertex and index buffers
     SkinnedMesh& skinnedMesh = character.getSkinnedMesh();
 
-    VkBuffer vertexBuffers[] = {skinnedMesh.getVertexBuffer()};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+    vk::Buffer vertexBuffers[] = {skinnedMesh.getVertexBuffer()};
+    vk::DeviceSize offsets[] = {0};
+    vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
     vkCmd.bindIndexBuffer(skinnedMesh.getIndexBuffer(), 0, vk::IndexType::eUint32);
 
     vkCmd.drawIndexed(skinnedMesh.getIndexCount(), 1, 0, 0, 0);
@@ -372,9 +372,9 @@ void SkinnedMeshRenderer::recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex
         0, push);
 
     // Bind LOD mesh vertex and index buffers
-    VkBuffer vertexBuffers[] = {lodMesh.vertexBuffer};
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+    vk::Buffer vertexBuffers[] = {lodMesh.vertexBuffer};
+    vk::DeviceSize offsets[] = {0};
+    vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
     vkCmd.bindIndexBuffer(lodMesh.indexBuffer, 0, vk::IndexType::eUint32);
 
     vkCmd.drawIndexed(lodMesh.indexCount, 1, 0, 0, 0);

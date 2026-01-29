@@ -1,5 +1,6 @@
 #include "TreeSystem.h"
 #include <SDL3/SDL.h>
+#include <vulkan/vulkan.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/constants.hpp>
 #include <filesystem>
@@ -434,18 +435,17 @@ bool TreeSystem::uploadLeafInstanceBuffer() {
     // Create storage buffer for leaf instances
     leafInstanceBufferSize_ = sizeof(LeafInstanceGPU) * allLeafInstances_.size();
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = leafInstanceBufferSize_;
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(leafInstanceBufferSize_)
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst)
+        .setSharingMode(vk::SharingMode::eExclusive);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
 
     VmaAllocationInfo allocationInfo{};
-    if (vmaCreateBuffer(storedAllocator_, &bufferInfo, &allocInfo,
+    if (vmaCreateBuffer(storedAllocator_, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo,
                         &leafInstanceBuffer_, &leafInstanceAllocation_, &allocationInfo) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create leaf instance SSBO");
         return false;

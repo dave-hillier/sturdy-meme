@@ -159,16 +159,15 @@ DescriptorManager::SetWriter& DescriptorManager::SetWriter::writeBufferArray(
 
     bufferInfos.push_back({buffer, offset, range});
 
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set;
-    write.dstBinding = binding;
-    write.dstArrayElement = arrayElement;
-    write.descriptorType = type;
-    write.descriptorCount = 1;
-    write.pBufferInfo = &bufferInfos.back();
+    auto write = vk::WriteDescriptorSet{}
+        .setDstSet(set)
+        .setDstBinding(binding)
+        .setDstArrayElement(arrayElement)
+        .setDescriptorType(static_cast<vk::DescriptorType>(type))
+        .setDescriptorCount(1)
+        .setPBufferInfo(reinterpret_cast<const vk::DescriptorBufferInfo*>(&bufferInfos.back()));
 
-    writes.push_back(write);
+    writes.push_back(*reinterpret_cast<const VkWriteDescriptorSet*>(&write));
     return *this;
 }
 
@@ -184,16 +183,15 @@ DescriptorManager::SetWriter& DescriptorManager::SetWriter::writeImageArray(
 
     imageInfos.push_back({sampler, view, layout});
 
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set;
-    write.dstBinding = binding;
-    write.dstArrayElement = arrayElement;
-    write.descriptorType = type;
-    write.descriptorCount = 1;
-    write.pImageInfo = &imageInfos.back();
+    auto write = vk::WriteDescriptorSet{}
+        .setDstSet(set)
+        .setDstBinding(binding)
+        .setDstArrayElement(arrayElement)
+        .setDescriptorType(static_cast<vk::DescriptorType>(type))
+        .setDescriptorCount(1)
+        .setPImageInfo(reinterpret_cast<const vk::DescriptorImageInfo*>(&imageInfos.back()));
 
-    writes.push_back(write);
+    writes.push_back(*reinterpret_cast<const VkWriteDescriptorSet*>(&write));
     return *this;
 }
 
@@ -202,16 +200,15 @@ DescriptorManager::SetWriter& DescriptorManager::SetWriter::writeStorageImage(
 
     imageInfos.push_back({VK_NULL_HANDLE, view, layout});
 
-    VkWriteDescriptorSet write{};
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = set;
-    write.dstBinding = binding;
-    write.dstArrayElement = 0;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    write.descriptorCount = 1;
-    write.pImageInfo = &imageInfos.back();
+    auto write = vk::WriteDescriptorSet{}
+        .setDstSet(set)
+        .setDstBinding(binding)
+        .setDstArrayElement(0)
+        .setDescriptorType(vk::DescriptorType::eStorageImage)
+        .setDescriptorCount(1)
+        .setPImageInfo(reinterpret_cast<const vk::DescriptorImageInfo*>(&imageInfos.back()));
 
-    writes.push_back(write);
+    writes.push_back(*reinterpret_cast<const VkWriteDescriptorSet*>(&write));
     return *this;
 }
 

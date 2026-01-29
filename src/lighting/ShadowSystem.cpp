@@ -307,9 +307,9 @@ bool ShadowSystem::createInstancedShadowResources() {
     instanceAllocations.resize(initInfo_.framesInFlight);
     instanceMappedPtrs.resize(initInfo_.framesInFlight);
 
-    VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    bufferInfo.size = MAX_SHADOW_INSTANCES * sizeof(glm::mat4);
-    bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    auto bufferInfo = vk::BufferCreateInfo{}
+        .setSize(MAX_SHADOW_INSTANCES * sizeof(glm::mat4))
+        .setUsage(vk::BufferUsageFlagBits::eStorageBuffer);
 
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
@@ -317,7 +317,7 @@ bool ShadowSystem::createInstancedShadowResources() {
 
     for (uint32_t i = 0; i < initInfo_.framesInFlight; i++) {
         VmaAllocationInfo allocResult;
-        if (vmaCreateBuffer(initInfo_.allocator, &bufferInfo, &allocInfo,
+        if (vmaCreateBuffer(initInfo_.allocator, reinterpret_cast<const VkBufferCreateInfo*>(&bufferInfo), &allocInfo,
                             &instanceBuffers[i], &instanceAllocations[i], &allocResult) != VK_SUCCESS) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create instance buffer %u", i);
             return false;
