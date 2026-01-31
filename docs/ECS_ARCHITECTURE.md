@@ -227,6 +227,171 @@ Migrate hueShift, emissive, outline to sparse components. Only entities needing 
 ### Step 5: Full Component-Based Rendering
 Remove Renderable struct entirely. All render data lives in components.
 
+## Beyond Rendering: Other High-Value Areas
+
+### 7. NPC Scaling with Shared Animation Templates
+
+**Current:** Each NPC holds a full `AnimatedCharacter` instance (`NPCSimulation.h:122`). With 54 NPCs:
+- 54 × sizeof(AnimatedCharacter) with bone matrices
+- Each NPC owns animation state machine, layers, blend trees
+- Memory scales linearly with NPC count
+
+**With ECS:**
+```cpp
+// Shared archetypes - maybe 10 character types
+struct AnimationArchetype {
+    Skeleton* skeleton;
+    std::vector<AnimationClip*> clips;
+    AnimationStateMachine stateMachine;
+};
+
+// Per-entity: just playback state (tiny)
+struct AnimationPlayback {
+    ArchetypeId archetype;
+    uint32_t currentClip;
+    float currentTime;
+    float blendWeight;
+};
+
+// Batch process all NPCs using same skeleton together
+for (auto [e, playback] : world.query<AnimationPlayback>()) {
+    auto& archetype = archetypes[playback.archetype];
+    // Compute bone matrices using shared skeleton
+}
+```
+
+**Capability:** Scale to 1000+ animated NPCs. Memory cost is per-archetype (10) not per-instance (1000).
+
+### 8. Eliminating Parallel Index Arrays
+
+**Current:** Fragile manual index mappings throughout the codebase:
+```cpp
+// SceneManager.cpp:203-241 - parallel arrays require manual sync
+std::vector<PhysicsBodyID> scenePhysicsBodies;  // Same size as sceneObjects
+for (size_t i = 0; i < scenePhysicsBodies.size(); i++) {
+    if (scenePhysicsBodies[i] != INVALID_BODY_ID) {
+        sceneObjects[i].transform = physics.getBodyTransform(scenePhysicsBodies[i]);
+    }
+}
+
+// NPCData.h:54 - NPCs store indices into scene objects
+std::vector<size_t> renderableIndices;
+
+// SceneBuilder - hardcoded indices for special objects
+size_t playerIndex, emissiveOrbIndex, capeIndex, flagIndex, poleIndex...
+```
+
+**With ECS:**
+```cpp
+// Physics is a component, not a parallel array
+struct PhysicsBody {
+    PhysicsBodyID bodyId;
+};
+
+// Sync system - no index bookkeeping
+void syncPhysicsToTransform(World& world, PhysicsSystem& physics) {
+    for (auto [e, body, transform] : world.query<PhysicsBody, Transform>()) {
+        transform.matrix = physics.getBodyTransform(body.bodyId);
+    }
+}
+
+// Add/remove physics at runtime - just add/remove component
+world.add<PhysicsBody>(entity, physics.createBox(size));
+world.remove<PhysicsBody>(entity);  // Cleanup automatic
+```
+
+**Capability:** No index synchronization bugs. Add/remove physics at runtime without bookkeeping.
+
+### 9. Dynamic Entity Composition
+
+**Current:** Adding a new entity type (vehicle, destructible, interactable) requires:
+- Extending Renderable struct with type-specific fields
+- New fields in hot path even for objects that don't use them
+- Modifying multiple systems to handle new type
+
+**With ECS:**
+```cpp
+// Compose entities from components - no struct changes
+auto vehicle = world.create();
+world.add<Transform>(vehicle, position);
+world.add<Mesh>(vehicle, vehicleMesh);
+world.add<PhysicsBody>(vehicle, vehicleCollider);
+world.add<Driveable>(vehicle, {maxSpeed, acceleration});
+world.add<Damageable>(vehicle, {health: 100});
+
+auto prop = world.create();
+world.add<Transform>(prop, position);
+world.add<Mesh>(prop, propMesh);
+// No physics, not driveable, not damageable - no cost for unused features
+
+auto destructible = world.create();
+world.add<Transform>(destructible, position);
+world.add<Mesh>(destructible, crateMesh);
+world.add<Damageable>(destructible, {health: 25});
+world.add<SpawnsDebris>(destructible, {debrisMesh, count: 5});
+```
+
+**Capability:** Prototype new entity types without touching core code. Each entity pays only for components it has.
+
+### 10. Unified LOD Scheduling
+
+**Current:** LOD duplicated across systems with different implementations:
+- `NPCSimulation` has Real/Bulk/Virtual tiers with frame counters
+- `TreeSystem` has separate LOD logic
+- Each system polls camera position independently
+- LOD transitions can be inconsistent across systems
+
+**With ECS:**
+```cpp
+struct LODController {
+    std::array<float, 3> thresholds;  // Distance thresholds
+    uint8_t currentLevel;              // 0=high, 1=medium, 2=low
+    uint16_t updateInterval;           // Frames between updates at this LOD
+    uint16_t frameCounter;
+};
+
+// Single system manages all LOD
+void updateLOD(World& world, glm::vec3 cameraPos) {
+    for (auto [e, transform, lod] : world.query<Transform, LODController>()) {
+        float dist = distance(cameraPos, transform.position);
+        lod.currentLevel = dist < lod.thresholds[0] ? 0
+                         : dist < lod.thresholds[1] ? 1 : 2;
+        lod.updateInterval = (lod.currentLevel == 0) ? 1
+                           : (lod.currentLevel == 1) ? 60 : 600;
+    }
+}
+
+// Animation system respects LOD
+void updateAnimations(World& world, float dt) {
+    for (auto [e, anim, lod] : world.query<AnimationPlayback, LODController>()) {
+        if (++lod.frameCounter >= lod.updateInterval) {
+            lod.frameCounter = 0;
+            updateAnimation(anim, dt * lod.updateInterval);
+        }
+    }
+}
+
+// Render system uses LOD for mesh selection
+for (auto [e, mesh, lod] : world.query<LODMesh, LODController>()) {
+    Mesh* toRender = mesh.levels[lod.currentLevel];
+    // ...
+}
+```
+
+**Capability:** Consistent LOD behavior across all entity types. Single place to tune LOD thresholds. Systems automatically respect LOD without custom logic.
+
+## Current Pain Points Summary
+
+| Issue | Location | ECS Solution |
+|-------|----------|--------------|
+| Parallel physics arrays | `SceneManager.cpp:88` | Physics as component |
+| NPC renderable indices | `NPCData.h:54` | Entity owns all its data |
+| Hardcoded special objects | `SceneBuilder` (10+ indices) | Query by component |
+| Per-NPC AnimatedCharacter | `NPCSimulation.h:122` | Shared archetypes |
+| Scattered LOD logic | Multiple systems | Unified LODController |
+| Transform duplication | NPCData + Renderable | Single Transform component |
+| Type-specific Renderable fields | `RenderableBuilder.h` | Sparse components |
+
 ## What NOT to Migrate
 
 These systems are already well-architected and wouldn't benefit:
