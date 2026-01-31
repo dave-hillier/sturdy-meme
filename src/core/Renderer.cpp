@@ -725,8 +725,13 @@ bool Renderer::render(const Camera& camera) {
 
     vk::SwapchainKHR swapChains[] = {swapchain};
 
+    // Present only waits on the binary renderFinished semaphore, NOT the timeline semaphore.
+    // vkQueuePresentKHR doesn't support timeline semaphores - passing one causes undefined behavior
+    // and can result in ghost frames (presenting before rendering is complete).
+    vk::Semaphore presentWaitSemaphores[] = {frameSync_.currentRenderFinishedSemaphore()};
+
     auto presentInfo = vk::PresentInfoKHR{}
-        .setWaitSemaphores(signalSemaphores)
+        .setWaitSemaphores(presentWaitSemaphores)
         .setSwapchains(swapChains)
         .setImageIndices(imageIndex);
 
