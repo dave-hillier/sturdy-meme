@@ -6,6 +6,7 @@
 #include "animation/MotionMatchingController.h"
 #include "npc/NPCSimulation.h"
 #include "npc/NPCData.h"
+#include "PlayerState.h"  // For PlayerMovement::CAPSULE_HEIGHT
 
 #include <imgui.h>
 
@@ -390,6 +391,10 @@ void GuiPlayerTab::renderMotionMatchingOverlay(IPlayerControl& playerControl, co
 
     glm::mat4 worldTransform = sceneObjects[playerIndex].transform;
     glm::vec3 characterPos = glm::vec3(worldTransform[3]);
+
+    // The render transform includes a vertical offset (CAPSULE_HEIGHT * 0.5) for the character model.
+    // Motion matching trajectory/features are at ground level, so subtract this offset.
+    characterPos.y -= PlayerMovement::CAPSULE_HEIGHT * 0.5f;
 
     // Get ImGui background draw list for overlay rendering
     ImDrawList* drawList = ImGui::GetBackgroundDrawList();

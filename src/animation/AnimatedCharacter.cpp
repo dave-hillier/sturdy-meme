@@ -302,8 +302,9 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
     }
 
     if (useMotionMatching) {
-        // Motion matching mode - skeleton is updated via updateMotionMatching()
-        // Nothing to do here - skeleton already updated
+        // Motion matching mode - apply the pose from the controller
+        // (updateMotionMatching was called before update, but skeleton was reset to bind pose above)
+        motionMatchingController.applyToSkeleton(skeleton);
     } else if (useLayerController) {
         // Use layer controller for advanced layer-based blending
         layerController.update(deltaTime);
