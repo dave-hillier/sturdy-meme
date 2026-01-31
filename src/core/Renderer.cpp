@@ -223,22 +223,12 @@ bool Renderer::initInternal(const InitInfo& info) {
     }
 
     // Initialize pass recorders (must be after systems_ is set up)
+    // Note: These use stateless recording - config is passed to record() each frame
     reportProgress(0.97f, "Creating pass recorders");
     {
         INIT_PROFILE_PHASE("PassRecorders");
         shadowPassRecorder_ = std::make_unique<ShadowPassRecorder>(*systems_);
-        ShadowPassRecorder::Config shadowConfig;
-        shadowConfig.terrainEnabled = terrainEnabled;
-        shadowConfig.perfToggles = &perfToggles;
-        shadowPassRecorder_->setConfig(shadowConfig);
-
         hdrPassRecorder_ = std::make_unique<HDRPassRecorder>(*systems_);
-        HDRPassRecorder::Config hdrConfig;
-        hdrConfig.terrainEnabled = terrainEnabled;
-        hdrConfig.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
-        hdrConfig.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
-        hdrConfig.lastViewProj = &lastViewProj;
-        hdrPassRecorder_->setConfig(hdrConfig);
     }
     SDL_Log("Pass recorders initialized");
 
@@ -776,54 +766,51 @@ bool Renderer::handleResize() {
 // Render pass recording helpers - pure command recording, no state mutation
 
 void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, const glm::vec3& cameraPosition) {
-    // Update config in case terrainEnabled changed at runtime
-    ShadowPassRecorder::Config config;
-    config.terrainEnabled = terrainEnabled;
-    config.perfToggles = &perfToggles;
-    shadowPassRecorder_->setConfig(config);
+    // Build params for stateless recording
+    ShadowPassRecorder::Params params;
+    params.terrainEnabled = terrainEnabled;
+    params.terrainShadows = perfToggles.terrainShadows;
+    params.grassShadows = perfToggles.grassShadows;
 
     // Delegate to the recorder
-    shadowPassRecorder_->record(cmd, frameIndex, grassTime, cameraPosition);
+    shadowPassRecorder_->record(cmd, frameIndex, grassTime, cameraPosition, params);
 }
 
 void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime) {
-    // Update config in case state changed at runtime
-    HDRPassRecorder::Config config;
-    config.terrainEnabled = terrainEnabled;
-    config.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
-    config.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
-    config.lastViewProj = &lastViewProj;
-    hdrPassRecorder_->setConfig(config);
+    // Build params for stateless recording
+    HDRPassRecorder::Params params;
+    params.terrainEnabled = terrainEnabled;
+    params.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
+    params.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
+    params.viewProj = lastViewProj;
 
     // Delegate to the recorder
-    hdrPassRecorder_->record(cmd, frameIndex, grassTime);
+    hdrPassRecorder_->record(cmd, frameIndex, grassTime, params);
 }
 
 void Renderer::recordHDRPassWithSecondaries(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime,
                                             const std::vector<vk::CommandBuffer>& secondaries) {
-    // Update config in case state changed at runtime
-    HDRPassRecorder::Config config;
-    config.terrainEnabled = terrainEnabled;
-    config.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
-    config.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
-    config.lastViewProj = &lastViewProj;
-    hdrPassRecorder_->setConfig(config);
+    // Build params for stateless recording
+    HDRPassRecorder::Params params;
+    params.terrainEnabled = terrainEnabled;
+    params.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
+    params.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
+    params.viewProj = lastViewProj;
 
     // Delegate to the recorder
-    hdrPassRecorder_->recordWithSecondaries(cmd, frameIndex, grassTime, secondaries);
+    hdrPassRecorder_->recordWithSecondaries(cmd, frameIndex, grassTime, secondaries, params);
 }
 
 void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, uint32_t slot) {
-    // Update config in case state changed at runtime
-    HDRPassRecorder::Config config;
-    config.terrainEnabled = terrainEnabled;
-    config.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
-    config.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
-    config.lastViewProj = &lastViewProj;
-    hdrPassRecorder_->setConfig(config);
+    // Build params for stateless recording
+    HDRPassRecorder::Params params;
+    params.terrainEnabled = terrainEnabled;
+    params.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
+    params.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
+    params.viewProj = lastViewProj;
 
     // Delegate to the recorder
-    hdrPassRecorder_->recordSecondarySlot(cmd, frameIndex, grassTime, slot);
+    hdrPassRecorder_->recordSecondarySlot(cmd, frameIndex, grassTime, slot, params);
 }
 
 // ===== GPU Skinning Implementation =====
@@ -1078,18 +1065,7 @@ bool Renderer::pollAsyncInit() {
         {
             INIT_PROFILE_PHASE("PassRecorders");
             shadowPassRecorder_ = std::make_unique<ShadowPassRecorder>(*systems_);
-            ShadowPassRecorder::Config shadowConfig;
-            shadowConfig.terrainEnabled = terrainEnabled;
-            shadowConfig.perfToggles = &perfToggles;
-            shadowPassRecorder_->setConfig(shadowConfig);
-
             hdrPassRecorder_ = std::make_unique<HDRPassRecorder>(*systems_);
-            HDRPassRecorder::Config hdrConfig;
-            hdrConfig.terrainEnabled = terrainEnabled;
-            hdrConfig.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
-            hdrConfig.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
-            hdrConfig.lastViewProj = &lastViewProj;
-            hdrPassRecorder_->setConfig(hdrConfig);
         }
         SDL_Log("Pass recorders initialized");
 
