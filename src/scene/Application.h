@@ -15,6 +15,10 @@
 #include "GuiSystem.h"
 #include "InputSystem.h"
 #include "BreadcrumbTracker.h"
+#include "ecs/World.h"
+#include "ecs/Components.h"
+#include "ecs/Systems.h"
+#include "ecs/EntityFactory.h"
 
 class Application {
 public:
@@ -37,6 +41,8 @@ private:
     void initFlag();
     void updateFlag(float deltaTime);
     void updateCameraOcclusion(float deltaTime);
+    void initECS();
+    void updateECS(float deltaTime);
 
     SDL_Window* window = nullptr;
     std::unique_ptr<Renderer> renderer_;
@@ -72,6 +78,10 @@ private:
     std::unordered_set<PhysicsBodyID> occludingBodies;
     static constexpr float occlusionFadeSpeed = 8.0f;
     static constexpr float occludedOpacity = 0.3f;
+
+    // ECS world and entity tracking
+    ecs::World ecsWorld_;
+    std::vector<ecs::Entity> sceneEntities_;  // Maps scene object indices to ECS entities
 
     bool running = false;
     // Walk speed matches animation root motion: 158.42 cm / 1.10s * 0.01 scale = 1.44 m/s
