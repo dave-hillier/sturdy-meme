@@ -79,20 +79,24 @@ void MotionDatabase::build(const DatabaseBuildOptions& options) {
 
         poses_ = std::move(prunedPoses);
 
-        // Update clip pose indices
-        size_t currentIndex = 0;
-        for (auto& clip : clips_) {
-            clip.startPoseIndex = currentIndex;
-            size_t clipPoses = 0;
-            for (size_t i = currentIndex; i < poses_.size(); ++i) {
-                if (poses_[i].clipIndex == &clip - clips_.data()) {
-                    ++clipPoses;
-                } else {
-                    break;
-                }
+        // Update clip pose indices - count poses per clip properly
+        for (size_t clipIdx = 0; clipIdx < clips_.size(); ++clipIdx) {
+            clips_[clipIdx].startPoseIndex = 0;
+            clips_[clipIdx].poseCount = 0;
+        }
+
+        // First pass: count poses per clip
+        for (const auto& pose : poses_) {
+            if (pose.clipIndex < clips_.size()) {
+                clips_[pose.clipIndex].poseCount++;
             }
-            clip.poseCount = clipPoses;
-            currentIndex += clipPoses;
+        }
+
+        // Second pass: compute start indices
+        size_t runningIndex = 0;
+        for (auto& clip : clips_) {
+            clip.startPoseIndex = runningIndex;
+            runningIndex += clip.poseCount;
         }
     }
 

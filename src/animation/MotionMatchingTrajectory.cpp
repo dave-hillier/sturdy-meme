@@ -273,11 +273,8 @@ void InertialBlender::update(float deltaTime) {
         velocityOffset_[i] = (B - omega * (A + B * t)) * decay;
     }
 
-    // Apply blend curve for final fade-out
-    float progress = getProgress();
-    float blendWeight = 1.0f - progress * progress * (3.0f - 2.0f * progress); // Smooth step
-    positionOffset_ *= blendWeight;
-    velocityOffset_ *= blendWeight;
+    // The critically damped spring naturally decays to zero
+    // No additional blend curve needed - it would cause double-attenuation
 }
 
 void InertialBlender::reset() {

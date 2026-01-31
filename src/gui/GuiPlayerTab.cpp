@@ -252,7 +252,7 @@ void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& setting
     ImGui::Text("MOTION MATCHING");
     ImGui::PopStyleColor();
 
-    auto& character = sceneBuilder.getAnimatedCharacter();
+    // character already declared above, reuse it
 
     // Enable/disable motion matching
     bool wasEnabled = character.isUsingMotionMatching();

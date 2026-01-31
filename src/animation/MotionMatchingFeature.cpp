@@ -43,8 +43,16 @@ float Trajectory::computeCost(const Trajectory& other,
             float velCost = glm::length(s1.velocity - s2.velocity) * velocityWeight;
 
             // Facing cost using dot product (1 - dot gives 0 for same direction, 2 for opposite)
-            float facingDot = glm::dot(glm::normalize(s1.facing), glm::normalize(s2.facing));
-            float facingCost = (1.0f - facingDot) * facingWeight;
+            // Guard against zero-length facing vectors to avoid NaN
+            float facingCost = 0.0f;
+            float s1FacingLen = glm::length(s1.facing);
+            float s2FacingLen = glm::length(s2.facing);
+            if (s1FacingLen > 0.001f && s2FacingLen > 0.001f) {
+                glm::vec3 s1Norm = s1.facing / s1FacingLen;
+                glm::vec3 s2Norm = s2.facing / s2FacingLen;
+                float facingDot = glm::dot(s1Norm, s2Norm);
+                facingCost = (1.0f - facingDot) * facingWeight;
+            }
 
             totalCost += posCost + velCost + facingCost;
             ++comparisons;
@@ -180,14 +188,32 @@ PoseFeatures FeatureExtractor::extractFromPose(const Skeleton& skeleton,
         }
     }
 
-    // Extract root velocity
+    // Extract root velocity and angular velocity
     if (rootBoneIndex_ >= 0 && static_cast<size_t>(rootBoneIndex_) < pose.size()) {
-        glm::vec3 rootPos = glm::vec3(computeRootTransform(skeleton, pose)[3]);
+        glm::mat4 rootTransform = computeRootTransform(skeleton, pose);
+        glm::vec3 rootPos = glm::vec3(rootTransform[3]);
+
         if (prevPose.size() > 0 && deltaTime > 0.0f) {
-            glm::vec3 prevRootPos = glm::vec3(computeRootTransform(skeleton, prevPose)[3]);
+            glm::mat4 prevRootTransform = computeRootTransform(skeleton, prevPose);
+            glm::vec3 prevRootPos = glm::vec3(prevRootTransform[3]);
             features.rootVelocity = (rootPos - prevRootPos) / deltaTime;
             // Keep only horizontal velocity
             features.rootVelocity.y = 0.0f;
+
+            // Compute angular velocity (Y-axis rotation rate)
+            // Extract facing direction from both transforms (Z axis, flattened)
+            glm::vec3 currentFacing = glm::normalize(glm::vec3(rootTransform[2].x, 0.0f, rootTransform[2].z));
+            glm::vec3 prevFacing = glm::normalize(glm::vec3(prevRootTransform[2].x, 0.0f, prevRootTransform[2].z));
+
+            // Compute signed angle between facing directions
+            float dot = glm::clamp(glm::dot(prevFacing, currentFacing), -1.0f, 1.0f);
+            float angle = std::acos(dot);
+            // Determine sign using cross product (Y component)
+            float cross = prevFacing.x * currentFacing.z - prevFacing.z * currentFacing.x;
+            if (cross < 0.0f) {
+                angle = -angle;
+            }
+            features.rootAngularVelocity = angle / deltaTime;
         }
     }
 
