@@ -104,6 +104,9 @@ public:
     // Clear all particles and reset displacement map
     void clear();
 
+    // Reset temporal state (call when window regains focus to prevent ghost frames)
+    void resetTemporalHistory() { clear(); }
+
     // Get current particle count
     size_t getParticleCount() const { return particles.size(); }
 

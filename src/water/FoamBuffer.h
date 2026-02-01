@@ -113,6 +113,9 @@ public:
     // Clear foam buffer
     void clear(VkCommandBuffer cmd);
 
+    // Reset temporal state (call when window regains focus to prevent ghost frames)
+    void resetTemporalHistory() { currentBuffer = 0; }
+
     // Phase 16: Wake System
     // Add a wake source for this frame (cleared after compute pass)
     void addWakeSource(const glm::vec2& position, const glm::vec2& velocity,

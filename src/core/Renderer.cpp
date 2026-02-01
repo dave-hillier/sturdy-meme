@@ -820,8 +820,8 @@ bool Renderer::handleResize() {
 
 void Renderer::notifyWindowFocusGained() {
     // When window regains focus (especially on macOS), the compositor may have
-    // cached stale content. Invalidate all temporal history to prevent ghost frames
-    // from temporal blending systems (SSR, Froxel fog).
+    // cached stale content. Invalidate ALL temporal history to prevent ghost frames
+    // from any temporal blending systems.
 
     if (!windowFocusLost_) {
         // Focus wasn't lost, nothing to do
@@ -830,16 +830,22 @@ void Renderer::notifyWindowFocusGained() {
 
     windowFocusLost_ = false;
 
-    SDL_Log("Window focus gained - invalidating temporal history to prevent ghost frames");
+    SDL_Log("Window focus gained - invalidating ALL temporal history to prevent ghost frames");
 
-    // Invalidate SSR temporal history
     if (systems_) {
+        // SSR (Screen-Space Reflections) - has temporal blending
         systems_->ssr().resetTemporalHistory();
 
-        // Invalidate Froxel volumetric fog temporal history
+        // Froxel volumetric fog - has temporal blending
         if (systems_->hasFroxel()) {
             systems_->froxel().resetTemporalHistory();
         }
+
+        // Water systems with temporal state
+        systems_->foam().resetTemporalHistory();
+        systems_->waterDisplacement().resetTemporalHistory();
+
+        SDL_Log("Reset temporal history for: SSR, Froxel, FoamBuffer, WaterDisplacement");
     }
 
     // Force swapchain clear on next frame to flush compositor cache
