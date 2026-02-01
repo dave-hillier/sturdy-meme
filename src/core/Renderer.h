@@ -288,7 +288,6 @@ private:
     bool framebufferResized = false;       // true = window resized, need to recreate swapchain
     bool windowSuspended = false;          // true = window minimized/hidden (macOS screen lock)
     bool windowFocusLost_ = false;         // true = window lost focus, need to invalidate temporal on regain
-    int skipFramesAfterRestore_ = 0;       // Skip N frames after restore to flush compositor (macOS ghost frame fix)
 
 
     // Dynamic lights
