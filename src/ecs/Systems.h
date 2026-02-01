@@ -109,6 +109,67 @@ struct Frustum {
 namespace systems {
 
 // =============================================================================
+// External Transform Source System
+// =============================================================================
+// Updates transforms for entities driven by external sources (physics, bones, etc.)
+// Must be called BEFORE updateWorldTransforms() so hierarchy can build on these.
+
+// Update transforms from external sources (pointers to matrices managed elsewhere)
+inline void updateExternalTransforms(World& world) {
+    for (auto [entity, source, transform] :
+         world.view<ExternalTransformSource, Transform>().each()) {
+        if (source.valid()) {
+            transform.matrix = *source.sourceMatrix;
+        }
+    }
+}
+
+// Update transforms for bone-attached entities
+// Requires the global bone transforms array computed from the skeleton
+// entityWorldTransform is the character's world transform
+// globalBoneTransforms is the array of bone transforms in model space
+inline void updateBoneAttachments(World& world,
+                                   const glm::mat4& entityWorldTransform,
+                                   const std::vector<glm::mat4>& globalBoneTransforms) {
+    for (auto [entity, attachment, transform] :
+         world.view<BoneAttachment, Transform>().each()) {
+        if (!attachment.valid()) continue;
+
+        size_t boneIdx = static_cast<size_t>(attachment.boneIndex);
+        if (boneIdx >= globalBoneTransforms.size()) continue;
+
+        // World transform = entity world * bone transform * local offset
+        glm::mat4 boneWorld = entityWorldTransform * globalBoneTransforms[boneIdx];
+        transform.matrix = boneWorld * attachment.localOffset;
+    }
+}
+
+// Variant that also applies LocalTransform offset if present
+inline void updateBoneAttachmentsWithLocalOffset(World& world,
+                                                   const glm::mat4& entityWorldTransform,
+                                                   const std::vector<glm::mat4>& globalBoneTransforms) {
+    for (auto [entity, attachment, transform] :
+         world.view<BoneAttachment, Transform>().each()) {
+        if (!attachment.valid()) continue;
+
+        size_t boneIdx = static_cast<size_t>(attachment.boneIndex);
+        if (boneIdx >= globalBoneTransforms.size()) continue;
+
+        // World transform = entity world * bone transform * attachment offset
+        glm::mat4 boneWorld = entityWorldTransform * globalBoneTransforms[boneIdx];
+        glm::mat4 baseTransform = boneWorld * attachment.localOffset;
+
+        // Apply additional LocalTransform if present
+        if (world.has<LocalTransform>(entity)) {
+            const auto& local = world.get<LocalTransform>(entity);
+            transform.matrix = baseTransform * local.toMatrix();
+        } else {
+            transform.matrix = baseTransform;
+        }
+    }
+}
+
+// =============================================================================
 // Hierarchical Transform System
 // =============================================================================
 // Updates world Transform components from LocalTransform and Parent hierarchy.

@@ -186,6 +186,125 @@ public:
     }
 
     // -------------------------------------------------------------------------
+    // Bone-attached entity creation
+    // -------------------------------------------------------------------------
+    // Creates an entity that follows a skeleton bone transform.
+
+    [[nodiscard]] Entity createBoneAttached(
+        Mesh* mesh,
+        MaterialId materialId,
+        int32_t boneIndex,
+        const glm::mat4& localOffset = glm::mat4(1.0f),
+        bool castsShadow = true) {
+
+        Entity entity = world_.create();
+        world_.add<Transform>(entity);  // Will be computed by bone attachment system
+        world_.add<MeshRef>(entity, mesh);
+        world_.add<MaterialRef>(entity, materialId);
+        world_.add<BoneAttachment>(entity, boneIndex, localOffset);
+
+        if (castsShadow) {
+            world_.add<CastsShadow>(entity);
+        }
+
+        return entity;
+    }
+
+    // -------------------------------------------------------------------------
+    // Child entity creation (hierarchical)
+    // -------------------------------------------------------------------------
+    // Creates an entity as a child of another entity.
+
+    [[nodiscard]] Entity createChild(
+        Entity parent,
+        Mesh* mesh,
+        MaterialId materialId,
+        const LocalTransform& localTransform,
+        bool castsShadow = true) {
+
+        Entity entity = world_.create();
+        world_.add<Transform>(entity);  // Will be computed by hierarchy system
+        world_.add<LocalTransform>(entity, localTransform);
+        world_.add<Parent>(entity, parent);
+        world_.add<MeshRef>(entity, mesh);
+        world_.add<MaterialRef>(entity, materialId);
+
+        if (castsShadow) {
+            world_.add<CastsShadow>(entity);
+        }
+
+        // Add to parent's Children list if it has one
+        if (world_.has<Children>(parent)) {
+            world_.get<Children>(parent).add(entity);
+        }
+
+        // Update hierarchy depths
+        if (world_.has<HierarchyDepth>(parent)) {
+            uint16_t parentDepth = world_.get<HierarchyDepth>(parent).depth;
+            world_.add<HierarchyDepth>(entity, static_cast<uint16_t>(parentDepth + 1));
+        } else {
+            world_.add<HierarchyDepth>(entity, uint16_t(1));
+        }
+
+        return entity;
+    }
+
+    // Create a transform-only child (no mesh, just for grouping/pivot)
+    [[nodiscard]] Entity createTransformChild(
+        Entity parent,
+        const LocalTransform& localTransform) {
+
+        Entity entity = world_.create();
+        world_.add<Transform>(entity);
+        world_.add<LocalTransform>(entity, localTransform);
+        world_.add<Parent>(entity, parent);
+        world_.add<Children>(entity);  // Can have children of its own
+
+        if (world_.has<Children>(parent)) {
+            world_.get<Children>(parent).add(entity);
+        }
+
+        if (world_.has<HierarchyDepth>(parent)) {
+            uint16_t parentDepth = world_.get<HierarchyDepth>(parent).depth;
+            world_.add<HierarchyDepth>(entity, static_cast<uint16_t>(parentDepth + 1));
+        } else {
+            world_.add<HierarchyDepth>(entity, uint16_t(1));
+        }
+
+        return entity;
+    }
+
+    // -------------------------------------------------------------------------
+    // Root entity with children support
+    // -------------------------------------------------------------------------
+    // Creates a root entity that can have children attached.
+
+    [[nodiscard]] Entity createRoot(const glm::mat4& transform) {
+        Entity entity = world_.create();
+        world_.add<Transform>(entity, transform);
+        world_.add<Children>(entity);
+        world_.add<HierarchyDepth>(entity, uint16_t(0));
+        return entity;
+    }
+
+    [[nodiscard]] Entity createRootWithMesh(
+        Mesh* mesh,
+        MaterialId materialId,
+        const glm::mat4& transform,
+        bool castsShadow = true) {
+
+        Entity entity = createRoot(transform);
+        world_.add<MeshRef>(entity, mesh);
+        world_.add<MaterialRef>(entity, materialId);
+
+        if (castsShadow) {
+            world_.add<CastsShadow>(entity);
+        }
+
+        return entity;
+    }
+
+    // -------------------------------------------------------------------------
     // Utility helpers
     // -------------------------------------------------------------------------
 

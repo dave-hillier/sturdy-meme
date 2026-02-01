@@ -280,6 +280,39 @@ struct LODController {
 };
 
 // =============================================================================
+// Bone/Skeleton Attachment Component
+// =============================================================================
+// Attaches an entity's transform to a bone in a skeletal hierarchy.
+// The bone transform is provided externally (from AnimatedCharacter) and
+// combined with the local offset to produce the entity's world transform.
+
+struct BoneAttachment {
+    int32_t boneIndex = -1;           // Index into skeleton's bone array
+    glm::mat4 localOffset;            // Offset from bone (rotation, translation)
+
+    BoneAttachment() : localOffset(glm::mat4(1.0f)) {}
+    BoneAttachment(int32_t bone, const glm::mat4& offset)
+        : boneIndex(bone), localOffset(offset) {}
+
+    [[nodiscard]] bool valid() const { return boneIndex >= 0; }
+};
+
+// External transform source - for entities driven by external systems
+// (physics bodies, bones, procedural animation, etc.)
+// The source provides a world-space transform that becomes this entity's base.
+// If the entity also has LocalTransform, it's applied as an additional offset.
+struct ExternalTransformSource {
+    // Pointer to external transform matrix (must remain valid!)
+    // This allows entities to follow transforms managed elsewhere.
+    const glm::mat4* sourceMatrix = nullptr;
+
+    ExternalTransformSource() = default;
+    explicit ExternalTransformSource(const glm::mat4* src) : sourceMatrix(src) {}
+
+    [[nodiscard]] bool valid() const { return sourceMatrix != nullptr; }
+};
+
+// =============================================================================
 // Physics Component
 // =============================================================================
 // Links an entity to a physics body.
