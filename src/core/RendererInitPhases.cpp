@@ -691,6 +691,11 @@ void Renderer::initTemporalSystems() {
     systems_->registerTemporalSystem(&systems_->foam());
     systems_->registerTemporalSystem(&systems_->waterDisplacement());
 
+    // Vegetation systems with temporal state
+    if (systems_->impostorCull()) {
+        systems_->registerTemporalSystem(systems_->impostorCull());
+    }
+
     SDL_Log("Registered %zu temporal systems for ghost frame prevention",
             systems_->getTemporalSystemCount());
 }

@@ -13,6 +13,7 @@
 #include "DescriptorManager.h"
 #include "PerFrameBuffer.h"
 #include "FrameIndexedBuffers.h"
+#include "interfaces/ITemporalSystem.h"
 
 class TreeSystem;
 class TreeImpostorAtlas;
@@ -67,7 +68,7 @@ struct ImpostorOutputData {
  * impostors using compute shaders, outputting visible instances for indirect
  * drawing.
  */
-class ImpostorCullSystem {
+class ImpostorCullSystem : public ITemporalSystem {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -172,6 +173,9 @@ public:
     const TemporalSettings& getTemporalSettings() const { return temporalSettings_; }
     void setTemporalEnabled(bool enabled) { temporalSettings_.enabled = enabled; }
     bool isTemporalEnabled() const { return temporalSettings_.enabled; }
+
+    // ITemporalSystem: Reset temporal state to prevent ghost frames
+    void resetTemporalHistory() override;
 
     // Get tree count
     uint32_t getTreeCount() const { return treeCount_; }

@@ -506,3 +506,15 @@ void ImpostorCullSystem::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
 void ImpostorCullSystem::setExtent(VkExtent2D newExtent) {
     extent_ = newExtent;
 }
+
+void ImpostorCullSystem::resetTemporalHistory() {
+    // Reset all temporal coherence state to force full visibility recalculation
+    // This prevents ghost frames when window regains focus after being backgrounded
+
+    temporalSettings_.framesSinceFullUpdate = 0;
+    lastCameraPos_ = glm::vec3(0.0f);
+    lastCameraDir_ = glm::vec3(0.0f, 0.0f, -1.0f);
+    partialUpdateOffset_ = 0;
+
+    SDL_Log("ImpostorCullSystem: Reset temporal history");
+}
