@@ -375,4 +375,110 @@ struct NPCTag {
 // Well entrance (terrain hole marker)
 struct WellEntranceTag {};
 
+// =============================================================================
+// NPC Animation Components
+// =============================================================================
+// Components for NPC skeletal animation, enabling ECS-driven animation updates.
+
+// NPC activity states for animation variety
+enum class NPCActivity : uint8_t {
+    Idle = 0,       // Standing still
+    Walking = 1,    // Slow movement (walk animation)
+    Running = 2     // Fast movement (run animation)
+};
+
+// Animation playback state - per-NPC animation control
+struct NPCAnimationState {
+    size_t clipIndex = 0;          // Index into template's animation clips
+    float currentTime = 0.0f;      // Current playback position in seconds
+    float playbackSpeed = 1.0f;    // Speed multiplier
+    float blendWeight = 1.0f;      // Blend weight for transitions
+    bool looping = true;           // Whether to loop at end
+    NPCActivity activity = NPCActivity::Idle;  // Current activity state
+
+    NPCAnimationState() = default;
+};
+
+// Cached bone matrices for LOD-based update skipping
+// When an NPC is far away, we skip animation updates and reuse cached matrices
+struct NPCBoneCache {
+    std::vector<glm::mat4> matrices;
+    uint32_t lastUpdateFrame = 0;
+
+    NPCBoneCache() = default;
+
+    void resize(size_t boneCount) {
+        if (matrices.size() != boneCount) {
+            matrices.resize(boneCount, glm::mat4(1.0f));
+        }
+    }
+};
+
+// NPC LOD level (mirrors NPCLODLevel from NPCData.h for ECS)
+enum class NPCLODLevel : uint8_t {
+    Virtual = 0,  // >50m: No rendering, minimal updates (every 10 seconds)
+    Bulk = 1,     // 25-50m: Simplified animation, reduced updates (every 1 second)
+    Real = 2      // <25m: Full animation every frame
+};
+
+// NPC-specific LOD controller with tiered update scheduling
+struct NPCLODController {
+    NPCLODLevel level = NPCLODLevel::Real;
+    uint32_t framesSinceUpdate = 0;
+
+    // LOD distance thresholds
+    static constexpr float DISTANCE_REAL = 25.0f;
+    static constexpr float DISTANCE_BULK = 50.0f;
+
+    // Update intervals (in frames) per LOD level
+    static constexpr uint32_t INTERVAL_REAL = 1;      // Every frame
+    static constexpr uint32_t INTERVAL_BULK = 60;     // ~1 second at 60fps
+    static constexpr uint32_t INTERVAL_VIRTUAL = 600; // ~10 seconds at 60fps
+
+    NPCLODController() = default;
+
+    // Check if this NPC should update this frame
+    [[nodiscard]] bool shouldUpdate() const {
+        uint32_t interval = INTERVAL_REAL;
+        switch (level) {
+            case NPCLODLevel::Bulk: interval = INTERVAL_BULK; break;
+            case NPCLODLevel::Virtual: interval = INTERVAL_VIRTUAL; break;
+            default: break;
+        }
+        return framesSinceUpdate >= interval;
+    }
+
+    // Get the movement speed for animation based on activity
+    [[nodiscard]] static float getMovementSpeed(NPCActivity activity) {
+        switch (activity) {
+            case NPCActivity::Walking: return 1.5f;  // Walk speed (m/s)
+            case NPCActivity::Running: return 5.0f;  // Run speed (m/s)
+            default: return 0.0f;  // Idle
+        }
+    }
+};
+
+// Skinned mesh reference - links NPC to its AnimatedCharacter instance
+// For Phase 2, each NPC still has its own AnimatedCharacter
+// Phase 2.2 will introduce shared archetypes
+struct SkinnedMeshRef {
+    void* character = nullptr;  // Pointer to AnimatedCharacter (type-erased to avoid header dependency)
+    size_t npcIndex = 0;        // Index into NPCSimulation's characters array
+
+    SkinnedMeshRef() = default;
+    SkinnedMeshRef(void* c, size_t idx) : character(c), npcIndex(idx) {}
+
+    [[nodiscard]] bool valid() const { return character != nullptr; }
+};
+
+// NPC facing direction (yaw in degrees)
+struct NPCFacing {
+    float yawDegrees = 0.0f;
+
+    NPCFacing() = default;
+    explicit NPCFacing(float yaw) : yawDegrees(yaw) {}
+
+    [[nodiscard]] float yawRadians() const { return glm::radians(yawDegrees); }
+};
+
 } // namespace ecs

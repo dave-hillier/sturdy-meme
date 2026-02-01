@@ -1,6 +1,8 @@
 #pragma once
 
 #include "NPCData.h"
+#include "ecs/World.h"
+#include "ecs/Components.h"
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
@@ -32,6 +34,7 @@ public:
         std::string resourcePath;
         HeightQueryFunc getTerrainHeight;  // Query terrain height for placement
         glm::vec2 sceneOrigin = glm::vec2(0.0f);  // World XZ offset for scene objects
+        ecs::World* ecsWorld = nullptr;  // Optional ECS world for entity creation
     };
 
     // Spawn info for creating NPCs
@@ -88,6 +91,20 @@ public:
     void setLODEnabled(bool enabled) { lodEnabled_ = enabled; }
     bool isLODEnabled() const { return lodEnabled_; }
 
+    // ECS integration - get entity for an NPC
+    ecs::Entity getNPCEntity(size_t npcIndex) const {
+        return npcIndex < npcEntities_.size() ? npcEntities_[npcIndex] : ecs::NullEntity;
+    }
+
+    // Get all NPC entities
+    const std::vector<ecs::Entity>& getNPCEntities() const { return npcEntities_; }
+
+    // Check if ECS mode is enabled
+    bool isECSEnabled() const { return ecsWorld_ != nullptr; }
+
+    // ECS-based update (alternative to legacy update)
+    void updateECS(float deltaTime, const glm::vec3& cameraPos);
+
 private:
     bool initInternal(const InitInfo& info);
     void cleanup();
@@ -115,11 +132,15 @@ private:
     HeightQueryFunc terrainHeightFunc_;
     glm::vec2 sceneOrigin_ = glm::vec2(0.0f);
 
-    // NPC data (Structure-of-Arrays)
+    // NPC data (Structure-of-Arrays) - legacy, kept for backward compatibility
     NPCData data_;
 
     // Character instances (one per NPC for now, will become template references in Stage 4)
     std::vector<std::unique_ptr<AnimatedCharacter>> characters_;
+
+    // ECS integration
+    ecs::World* ecsWorld_ = nullptr;
+    std::vector<ecs::Entity> npcEntities_;  // ECS entities for each NPC
 
     // LOD configuration
     bool lodEnabled_ = true;

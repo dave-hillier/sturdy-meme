@@ -460,6 +460,85 @@ void syncPhysicsTransforms(World& world, PhysicsSystem& physics) {
     }
 }
 
+// =============================================================================
+// NPC Animation Systems
+// =============================================================================
+// Systems for NPC animation state management and LOD-based updates.
+
+// Update NPC LOD levels based on camera distance
+inline void updateNPCLODLevels(World& world, const glm::vec3& cameraPos) {
+    for (auto [entity, transform, lodCtrl] :
+         world.view<Transform, NPCLODController>().each()) {
+        glm::vec3 npcPos = transform.position();
+        float distance = glm::distance(cameraPos, npcPos);
+
+        NPCLODLevel newLevel;
+        if (distance < NPCLODController::DISTANCE_REAL) {
+            newLevel = NPCLODLevel::Real;
+        } else if (distance < NPCLODController::DISTANCE_BULK) {
+            newLevel = NPCLODLevel::Bulk;
+        } else {
+            newLevel = NPCLODLevel::Virtual;
+        }
+
+        // Reset frame counter on LOD change
+        if (lodCtrl.level != newLevel) {
+            lodCtrl.framesSinceUpdate = 0;
+        }
+
+        lodCtrl.level = newLevel;
+    }
+}
+
+// Increment NPC frame counters (call once per frame)
+inline void tickNPCFrameCounters(World& world) {
+    for (auto [entity, lodCtrl] : world.view<NPCLODController>().each()) {
+        lodCtrl.framesSinceUpdate++;
+    }
+}
+
+// Get NPC entities that should update animation this frame
+// Returns entities where lodCtrl.shouldUpdate() is true
+inline std::vector<Entity> getNPCsToUpdate(World& world) {
+    std::vector<Entity> toUpdate;
+    for (auto [entity, lodCtrl] : world.view<NPCLODController>().each()) {
+        if (lodCtrl.shouldUpdate()) {
+            toUpdate.push_back(entity);
+        }
+    }
+    return toUpdate;
+}
+
+// Reset frame counter for NPCs that were updated
+inline void resetUpdatedNPCCounters(World& world, const std::vector<Entity>& updatedEntities) {
+    for (Entity entity : updatedEntities) {
+        if (world.valid(entity) && world.has<NPCLODController>(entity)) {
+            world.get<NPCLODController>(entity).framesSinceUpdate = 0;
+        }
+    }
+}
+
+// Get NPC statistics for debugging
+struct NPCLODStats {
+    size_t realCount = 0;    // NPCs at highest quality
+    size_t bulkCount = 0;    // NPCs at medium quality
+    size_t virtualCount = 0; // NPCs at lowest quality
+    size_t totalCount = 0;
+};
+
+inline NPCLODStats getNPCLODStats(const World& world) {
+    NPCLODStats stats;
+    for (auto [entity, lodCtrl] : world.view<NPCLODController>().each()) {
+        stats.totalCount++;
+        switch (lodCtrl.level) {
+            case NPCLODLevel::Real: stats.realCount++; break;
+            case NPCLODLevel::Bulk: stats.bulkCount++; break;
+            case NPCLODLevel::Virtual: stats.virtualCount++; break;
+        }
+    }
+    return stats;
+}
+
 } // namespace systems
 
 // =============================================================================

@@ -26,11 +26,22 @@ bool NPCSimulation::initInternal(const InitInfo& info) {
     resourcePath_ = info.resourcePath;
     terrainHeightFunc_ = info.getTerrainHeight;
     sceneOrigin_ = info.sceneOrigin;
+    ecsWorld_ = info.ecsWorld;
 
     return true;
 }
 
 void NPCSimulation::cleanup() {
+    // Destroy ECS entities if ECS is enabled
+    if (ecsWorld_) {
+        for (ecs::Entity entity : npcEntities_) {
+            if (ecsWorld_->valid(entity)) {
+                ecsWorld_->destroy(entity);
+            }
+        }
+        npcEntities_.clear();
+    }
+
     characters_.clear();
     data_.clear();
 }
@@ -43,6 +54,9 @@ size_t NPCSimulation::spawnNPCs(const std::vector<NPCSpawnInfo>& spawnPoints) {
     // Reserve space
     data_.reserve(spawnPoints.size());
     characters_.reserve(spawnPoints.size());
+    if (ecsWorld_) {
+        npcEntities_.reserve(spawnPoints.size());
+    }
 
     std::string characterPath = resourcePath_ + "/assets/characters/fbx/Y Bot.fbx";
 
@@ -83,24 +97,71 @@ size_t NPCSimulation::spawnNPCs(const std::vector<NPCSpawnInfo>& spawnPoints) {
             worldPos.y = terrainHeightFunc_(worldPos.x, worldPos.z);
         }
 
-        // Add to data arrays
+        // Add to data arrays (legacy path)
         size_t npcIndex = data_.addNPC(spawn.templateIndex, worldPos, spawn.yawDegrees);
 
         // Set initial activity state for animation variety
         data_.animStates[npcIndex].activity = spawn.activity;
+
+        // Convert activity enum for ECS
+        ecs::NPCActivity ecsActivity = ecs::NPCActivity::Idle;
+        switch (spawn.activity) {
+            case NPCActivity::Walking: ecsActivity = ecs::NPCActivity::Walking; break;
+            case NPCActivity::Running: ecsActivity = ecs::NPCActivity::Running; break;
+            default: break;
+        }
+
+        // Create ECS entity if ECS is enabled
+        if (ecsWorld_) {
+            ecs::Entity entity = ecsWorld_->create();
+
+            // Transform - position with height offset for character center
+            constexpr float CHARACTER_HEIGHT_OFFSET = 0.9f;
+            glm::mat4 transform = glm::mat4(1.0f);
+            transform = glm::translate(transform, worldPos + glm::vec3(0.0f, CHARACTER_HEIGHT_OFFSET, 0.0f));
+            transform = glm::rotate(transform, glm::radians(spawn.yawDegrees), glm::vec3(0.0f, 1.0f, 0.0f));
+            ecsWorld_->add<ecs::Transform>(entity, transform);
+
+            // NPC identification
+            ecsWorld_->add<ecs::NPCTag>(entity, spawn.templateIndex);
+            ecsWorld_->add<ecs::NPCFacing>(entity, spawn.yawDegrees);
+
+            // Animation state
+            ecs::NPCAnimationState animState;
+            animState.activity = ecsActivity;
+            ecsWorld_->add<ecs::NPCAnimationState>(entity, animState);
+
+            // LOD controller
+            ecsWorld_->add<ecs::NPCLODController>(entity);
+
+            // Bone cache for LOD skipping
+            ecsWorld_->add<ecs::NPCBoneCache>(entity);
+
+            // Skinned mesh reference (link to AnimatedCharacter)
+            ecsWorld_->add<ecs::SkinnedMeshRef>(entity, character.get(), npcIndex);
+
+            // Bounding sphere for culling (approximate character bounds)
+            ecsWorld_->add<ecs::BoundingSphere>(entity, glm::vec3(0.0f, 1.0f, 0.0f), 1.0f);
+
+            // Mark as visible initially
+            ecsWorld_->add<ecs::Visible>(entity);
+
+            npcEntities_.push_back(entity);
+        }
 
         // Store character
         characters_.push_back(std::move(character));
 
         const char* activityName = spawn.activity == NPCActivity::Idle ? "idle" :
                                    spawn.activity == NPCActivity::Walking ? "walking" : "running";
-        SDL_Log("NPCSimulation: Created NPC %zu at (%.1f, %.1f, %.1f) facing %.0f degrees (%s)",
-                npcIndex, worldPos.x, worldPos.y, worldPos.z, spawn.yawDegrees, activityName);
+        SDL_Log("NPCSimulation: Created NPC %zu at (%.1f, %.1f, %.1f) facing %.0f degrees (%s)%s",
+                npcIndex, worldPos.x, worldPos.y, worldPos.z, spawn.yawDegrees, activityName,
+                ecsWorld_ ? " [ECS]" : "");
 
         createdCount++;
     }
 
-    SDL_Log("NPCSimulation: Created %zu NPCs", createdCount);
+    SDL_Log("NPCSimulation: Created %zu NPCs%s", createdCount, ecsWorld_ ? " with ECS entities" : "");
     return createdCount;
 }
 
@@ -263,5 +324,89 @@ const AnimatedCharacter* NPCSimulation::getCharacter(size_t npcIndex) const {
 void NPCSimulation::setRenderableIndex(size_t npcIndex, size_t renderableIndex) {
     if (npcIndex < data_.renderableIndices.size()) {
         data_.renderableIndices[npcIndex] = renderableIndex;
+    }
+}
+
+void NPCSimulation::updateECS(float deltaTime, const glm::vec3& cameraPos) {
+    if (!ecsWorld_ || npcEntities_.empty()) {
+        // Fall back to legacy update if ECS not enabled
+        update(deltaTime, cameraPos);
+        return;
+    }
+
+    // Update LOD levels based on camera distance using ECS query
+    for (auto [entity, transform, lodCtrl] : ecsWorld_->view<ecs::Transform, ecs::NPCLODController>().each()) {
+        glm::vec3 npcPos = transform.position();
+        float distance = glm::distance(cameraPos, npcPos);
+
+        ecs::NPCLODLevel newLevel;
+        if (distance < ecs::NPCLODController::DISTANCE_REAL) {
+            newLevel = ecs::NPCLODLevel::Real;
+        } else if (distance < ecs::NPCLODController::DISTANCE_BULK) {
+            newLevel = ecs::NPCLODLevel::Bulk;
+        } else {
+            newLevel = ecs::NPCLODLevel::Virtual;
+        }
+
+        // Reset frame counter on LOD change
+        if (lodCtrl.level != newLevel) {
+            lodCtrl.framesSinceUpdate = 0;
+        }
+
+        lodCtrl.level = newLevel;
+        lodCtrl.framesSinceUpdate++;
+    }
+
+    // Update NPC animations using ECS query
+    for (auto [entity, transform, lodCtrl, animState, skinnedRef] :
+         ecsWorld_->view<ecs::Transform, ecs::NPCLODController, ecs::NPCAnimationState, ecs::SkinnedMeshRef>().each()) {
+
+        // Check if we should update this frame based on LOD
+        if (!lodCtrl.shouldUpdate()) {
+            // Skip update, use cached bones
+            if (skinnedRef.valid()) {
+                auto* character = static_cast<AnimatedCharacter*>(skinnedRef.character);
+                if (character) {
+                    character->setSkipAnimationUpdate(true);
+                }
+            }
+            continue;
+        }
+
+        // Reset frame counter after update
+        lodCtrl.framesSinceUpdate = 0;
+
+        if (!skinnedRef.valid()) continue;
+
+        auto* character = static_cast<AnimatedCharacter*>(skinnedRef.character);
+        if (!character) continue;
+
+        character->setSkipAnimationUpdate(false);
+
+        // Get movement speed from activity
+        float movementSpeed = ecs::NPCLODController::getMovementSpeed(animState.activity);
+
+        // Calculate effective delta time for LOD-adjusted updates
+        float effectiveDelta = deltaTime;
+        if (lodCtrl.level == ecs::NPCLODLevel::Bulk) {
+            effectiveDelta *= static_cast<float>(ecs::NPCLODController::INTERVAL_BULK);
+        } else if (lodCtrl.level == ecs::NPCLODLevel::Virtual) {
+            effectiveDelta *= static_cast<float>(ecs::NPCLODController::INTERVAL_VIRTUAL);
+        }
+
+        // Update animation
+        character->update(effectiveDelta, allocator_, device_, commandPool_, graphicsQueue_,
+                          movementSpeed, true, false, transform.matrix);
+
+        // Cache bone matrices (store in ECS component if available)
+        if (ecsWorld_->has<ecs::NPCBoneCache>(entity)) {
+            auto& boneCache = ecsWorld_->get<ecs::NPCBoneCache>(entity);
+            character->computeBoneMatrices(boneCache.matrices);
+        }
+
+        // Also update legacy cache for backward compatibility
+        if (skinnedRef.npcIndex < data_.cachedBoneMatrices.size()) {
+            character->computeBoneMatrices(data_.cachedBoneMatrices[skinnedRef.npcIndex]);
+        }
     }
 }

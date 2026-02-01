@@ -21,6 +21,8 @@
 class AssetRegistry;
 class NPCSimulation;
 
+namespace ecs { class World; }
+
 // Holds all scene resources (meshes, textures) and provides scene objects
 class SceneBuilder {
 public:
@@ -45,6 +47,7 @@ public:
         HeightQueryFunc getTerrainHeight;  // Optional: query terrain height for object placement
         glm::vec2 sceneOrigin = glm::vec2(0.0f);  // World XZ offset for scene objects
         bool deferRenderables = false;  // If true, don't create renderables during init
+        ecs::World* ecsWorld = nullptr;  // Optional: ECS world for NPC entity creation
     };
 
     /**
