@@ -13,7 +13,8 @@ static constexpr uint32_t MAX_LIGHTS = 16;
 // Light types
 enum class LightType : uint32_t {
     Point = 0,
-    Spot = 1
+    Spot = 1,
+    Directional = 2
 };
 
 // GPU-side light data structure (std430 layout compatible)
@@ -114,6 +115,37 @@ struct Light {
         light.radius = rad;
         light.innerConeAngle = innerAngle;
         light.outerConeAngle = outerAngle;
+        return light;
+    }
+
+    // Create a directional light (sun/moon)
+    // Direction comes from rotation quaternion (default = pointing down in -Y)
+    static Light createDirectionalLight(const glm::vec3& dir,
+                                        const glm::vec3& col = glm::vec3(1.0f),
+                                        float intens = 1.0f) {
+        Light light;
+        light.type = LightType::Directional;
+        light.position = glm::vec3(0.0f);  // Position doesn't matter for directional lights
+        light.rotation = rotationFromDirection(dir);
+        light.color = col;
+        light.intensity = intens;
+        light.radius = 0.0f;  // Infinite range
+        light.priority = 10.0f;  // High priority - directional lights are important
+        return light;
+    }
+
+    // Create a directional light with rotation quaternion
+    static Light createDirectionalLightWithRotation(const glm::quat& rot,
+                                                     const glm::vec3& col = glm::vec3(1.0f),
+                                                     float intens = 1.0f) {
+        Light light;
+        light.type = LightType::Directional;
+        light.position = glm::vec3(0.0f);
+        light.rotation = rot;
+        light.color = col;
+        light.intensity = intens;
+        light.radius = 0.0f;
+        light.priority = 10.0f;
         return light;
     }
 

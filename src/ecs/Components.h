@@ -606,4 +606,160 @@ struct NPCAnimationInstance {
     }
 };
 
+// =============================================================================
+// Light Components
+// =============================================================================
+// Light components for ECS-driven lighting. Position/direction comes from the
+// entity's Transform component. Multiple light types can be attached to entities
+// to create complex lighting setups.
+
+// Light type enum (matches shader LightType)
+enum class LightType : uint32_t {
+    Point = 0,
+    Spot = 1,
+    Directional = 2
+};
+
+// Base light properties shared across light types
+struct LightProperties {
+    glm::vec3 color = glm::vec3(1.0f);
+    float intensity = 1.0f;
+    float priority = 1.0f;        // Higher = more important for culling
+    int32_t shadowMapIndex = -1;  // -1 = no shadow, >= 0 = shadow map index
+    bool castsShadows = true;
+    bool enabled = true;
+
+    LightProperties() = default;
+    LightProperties(const glm::vec3& col, float intens)
+        : color(col), intensity(intens) {}
+};
+
+// Point light component - omnidirectional light
+// Position comes from entity's Transform
+struct PointLightComponent {
+    LightProperties properties;
+    float radius = 10.0f;         // Falloff radius
+
+    PointLightComponent() = default;
+    PointLightComponent(const glm::vec3& color, float intensity, float rad = 10.0f)
+        : properties(color, intensity), radius(rad) {}
+
+    // Factory for common light types
+    static PointLightComponent torch(float intensity = 2.0f) {
+        return PointLightComponent(glm::vec3(1.0f, 0.7f, 0.4f), intensity, 8.0f);
+    }
+
+    static PointLightComponent orb(const glm::vec3& color, float intensity = 1.5f) {
+        return PointLightComponent(color, intensity, 12.0f);
+    }
+};
+
+// Spot light component - directional cone light
+// Position comes from entity's Transform
+// Direction comes from entity's Transform rotation (default = -Y)
+struct SpotLightComponent {
+    LightProperties properties;
+    float radius = 15.0f;         // Falloff radius
+    float innerConeAngle = 30.0f; // Degrees - full intensity inside this cone
+    float outerConeAngle = 45.0f; // Degrees - light fades to zero at this angle
+
+    SpotLightComponent() = default;
+    SpotLightComponent(const glm::vec3& color, float intensity,
+                       float rad = 15.0f, float innerAngle = 30.0f, float outerAngle = 45.0f)
+        : properties(color, intensity), radius(rad),
+          innerConeAngle(innerAngle), outerConeAngle(outerAngle) {}
+
+    // Factory for common spot light types
+    static SpotLightComponent lantern(float intensity = 3.0f) {
+        return SpotLightComponent(glm::vec3(1.0f, 0.9f, 0.7f), intensity, 20.0f, 25.0f, 40.0f);
+    }
+
+    static SpotLightComponent streetLight(float intensity = 4.0f) {
+        return SpotLightComponent(glm::vec3(1.0f, 0.95f, 0.8f), intensity, 25.0f, 35.0f, 55.0f);
+    }
+};
+
+// Directional light component - parallel rays (sun/moon)
+// Direction comes from entity's Transform rotation (default = -Y pointing down)
+// No position falloff - affects entire scene
+struct DirectionalLightComponent {
+    LightProperties properties;
+    float angularDiameter = 0.53f;  // Degrees - sun is ~0.53 degrees
+
+    DirectionalLightComponent() = default;
+    DirectionalLightComponent(const glm::vec3& color, float intensity, float angularDiam = 0.53f)
+        : properties(color, intensity), angularDiameter(angularDiam) {
+        // Directional lights usually cast shadows
+        properties.castsShadows = true;
+        properties.priority = 10.0f;  // High priority - always rendered
+    }
+
+    // Factory for common directional lights
+    static DirectionalLightComponent sun(float intensity = 1.0f) {
+        return DirectionalLightComponent(glm::vec3(1.0f, 0.98f, 0.95f), intensity, 0.53f);
+    }
+
+    static DirectionalLightComponent moon(float intensity = 0.15f) {
+        return DirectionalLightComponent(glm::vec3(0.8f, 0.85f, 1.0f), intensity, 0.52f);
+    }
+};
+
+// =============================================================================
+// Light Flicker Component
+// =============================================================================
+// Adds flickering effect to lights (torches, candles, fires).
+// Modulates the light's intensity over time using noise-based animation.
+
+struct LightFlickerComponent {
+    // Flicker parameters
+    float baseIntensity = 1.0f;       // Original intensity (set from light component)
+    float flickerAmount = 0.3f;       // How much to vary (0.0 = no flicker, 1.0 = full off-on)
+    float flickerSpeed = 8.0f;        // Oscillations per second
+    float noiseScale = 2.0f;          // Noise frequency multiplier
+
+    // Animation state
+    float phase = 0.0f;               // Current phase offset (randomized per light)
+    float currentModifier = 1.0f;     // Current intensity multiplier (0.0 to 1.0)
+
+    LightFlickerComponent() = default;
+    LightFlickerComponent(float amount, float speed, float noise = 2.0f)
+        : flickerAmount(amount), flickerSpeed(speed), noiseScale(noise) {}
+
+    // Factory methods for common flicker patterns
+    static LightFlickerComponent torch() {
+        LightFlickerComponent flicker;
+        flicker.flickerAmount = 0.25f;
+        flicker.flickerSpeed = 10.0f;
+        flicker.noiseScale = 3.0f;
+        return flicker;
+    }
+
+    static LightFlickerComponent candle() {
+        LightFlickerComponent flicker;
+        flicker.flickerAmount = 0.4f;
+        flicker.flickerSpeed = 12.0f;
+        flicker.noiseScale = 4.0f;
+        return flicker;
+    }
+
+    static LightFlickerComponent fire() {
+        LightFlickerComponent flicker;
+        flicker.flickerAmount = 0.35f;
+        flicker.flickerSpeed = 6.0f;
+        flicker.noiseScale = 2.5f;
+        return flicker;
+    }
+
+    static LightFlickerComponent subtle() {
+        LightFlickerComponent flicker;
+        flicker.flickerAmount = 0.1f;
+        flicker.flickerSpeed = 4.0f;
+        flicker.noiseScale = 1.5f;
+        return flicker;
+    }
+};
+
+// Tag component for entities that are light sources
+// Used for quick identification without checking each light component type
+struct LightSourceTag {};
 } // namespace ecs
