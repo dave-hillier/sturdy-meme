@@ -118,10 +118,30 @@ public:
                 const Renderable& playerObj, AnimatedCharacter& character);
 
     /**
+     * Record draw commands with explicit transform (Phase 6: ECS-compatible).
+     * This version does not require a Renderable, only the transform matrix.
+     *
+     * @param cmd Command buffer to record to
+     * @param frameIndex Current frame index
+     * @param slotIndex Character slot containing this character's bone matrices
+     * @param transform World transform matrix for the character
+     * @param character Character for mesh data
+     */
+    void record(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slotIndex,
+                const glm::mat4& transform, AnimatedCharacter& character);
+
+    /**
      * Record draw commands with explicit LOD mesh using dynamic offset.
      */
     void recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slotIndex,
                        const Renderable& playerObj, AnimatedCharacter& character,
+                       const CharacterLODMesh& lodMesh);
+
+    /**
+     * Record draw commands with explicit LOD mesh (Phase 6: ECS-compatible).
+     */
+    void recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slotIndex,
+                       const glm::mat4& transform, AnimatedCharacter& character,
                        const CharacterLODMesh& lodMesh);
 
     // Get the maximum number of character slots

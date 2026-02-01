@@ -31,6 +31,10 @@
 #include "AnimatedCharacter.h"
 #include "Mesh.h"
 
+// ECS includes for Phase 6 rendering
+#include "ecs/World.h"
+#include "ecs/Components.h"
+
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <numeric>
@@ -288,7 +292,37 @@ void HDRPassRecorder::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameInde
     // Get MaterialRegistry for descriptor set lookup
     const auto& materialRegistry = resources_.scene->getSceneBuilder().getMaterialRegistry();
 
-    // Helper lambda to render a scene object with a descriptor set
+    // Helper lambda to render an entity with RenderData
+    auto renderWithRenderData = [&](const ecs::RenderData& data, VkDescriptorSet descSet) {
+        if (!data.mesh) return;
+
+        PushConstants push{};
+        push.model = data.transform;
+        push.roughness = data.roughness;
+        push.metallic = data.metallic;
+        push.emissiveIntensity = data.emissiveIntensity;
+        push.opacity = data.opacity;
+        push.emissiveColor = glm::vec4(data.emissiveColor, 1.0f);
+        push.pbrFlags = data.pbrFlags;
+        push.alphaTestThreshold = data.alphaTestThreshold;
+
+        vkCmd.pushConstants<PushConstants>(
+            *params.pipelineLayout,
+            vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+            0, push);
+
+        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                 *params.pipelineLayout, 0, vk::DescriptorSet(descSet), {});
+
+        vk::Buffer vertexBuffers[] = {data.mesh->getVertexBuffer()};
+        vk::DeviceSize offsets[] = {0};
+        vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
+        vkCmd.bindIndexBuffer(data.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+
+        vkCmd.drawIndexed(data.mesh->getIndexCount(), 1, 0, 0, 0);
+    };
+
+    // Helper lambda to render a legacy Renderable (for rocks/detritus)
     auto renderObject = [&](const Renderable& obj, VkDescriptorSet descSet) {
         PushConstants push{};
         push.model = obj.transform;
@@ -316,62 +350,108 @@ void HDRPassRecorder::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameInde
         vkCmd.drawIndexed(obj.mesh->getIndexCount(), 1, 0, 0, 0);
     };
 
-    // Render scene manager objects using MaterialRegistry for descriptor set lookup
-    const auto& sceneObjects = resources_.scene->getRenderables();
-    size_t playerIndex = resources_.scene->getSceneBuilder().getPlayerObjectIndex();
-    bool hasCharacter = resources_.scene->getSceneBuilder().hasCharacter();
+    // Phase 6: Use ECS if available, otherwise fall back to legacy renderables
+    if (resources_.ecsWorld) {
+        ecs::World& world = *resources_.ecsWorld;
 
-    // Build sorted indices by materialId to minimize descriptor set switches
-    std::vector<size_t> sortedIndices(sceneObjects.size());
-    std::iota(sortedIndices.begin(), sortedIndices.end(), 0);
-    std::sort(sortedIndices.begin(), sortedIndices.end(), [&](size_t a, size_t b) {
-        return sceneObjects[a].materialId < sceneObjects[b].materialId;
-    });
+        // Collect entities to render (those with MeshRef and MaterialRef, excluding special entities)
+        std::vector<ecs::RenderData> renderList;
+        renderList.reserve(256);  // Preallocate for typical scene size
 
-    MaterialId lastMaterialId = INVALID_MATERIAL_ID;
-    VkDescriptorSet currentDescSet = VK_NULL_HANDLE;
+        // Query all entities with MeshRef and MaterialRef (required for rendering)
+        for (auto [entity, meshRef, materialRef] : world.view<ecs::MeshRef, ecs::MaterialRef>().each()) {
+            // Skip entities rendered by specialized systems
+            if (world.has<ecs::PlayerTag>(entity)) continue;   // Skinned mesh renderer
+            if (world.has<ecs::NPCTag>(entity)) continue;      // NPC renderer
+            if (world.has<ecs::TreeData>(entity)) continue;    // Tree renderer
 
-    // Get NPC simulation for skipping NPC renderables (rendered with GPU skinning)
-    const NPCSimulation* npcSim = resources_.scene->getSceneBuilder().getNPCSimulation();
-
-    for (size_t i : sortedIndices) {
-        // Skip player character (rendered separately with GPU skinning)
-        if (hasCharacter && i == playerIndex) {
-            continue;
-        }
-
-        // Skip NPC characters (rendered separately with GPU skinning)
-        bool isNPC = false;
-        if (npcSim) {
-            const auto& npcData = npcSim->getData();
-            for (size_t npcIdx = 0; npcIdx < npcData.count(); ++npcIdx) {
-                if (i == npcData.renderableIndices[npcIdx]) {
-                    isNPC = true;
-                    break;
-                }
+            // Extract render data from entity's components
+            ecs::RenderData data = ecs::extractRenderData(world, entity);
+            if (data.mesh && data.materialId != ecs::InvalidMaterialId) {
+                renderList.push_back(data);
             }
         }
-        if (isNPC) {
-            continue;
+
+        // Sort by materialId to minimize descriptor set switches
+        std::sort(renderList.begin(), renderList.end(), [](const ecs::RenderData& a, const ecs::RenderData& b) {
+            return a.materialId < b.materialId;
+        });
+
+        // Render sorted entities
+        ecs::MaterialId lastMaterialId = ecs::InvalidMaterialId;
+        VkDescriptorSet currentDescSet = VK_NULL_HANDLE;
+
+        for (const auto& data : renderList) {
+            if (data.materialId != lastMaterialId) {
+                currentDescSet = materialRegistry.getDescriptorSet(data.materialId, frameIndex);
+                if (currentDescSet == VK_NULL_HANDLE) {
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Skipping entity with invalid materialId %u", data.materialId);
+                    continue;
+                }
+                lastMaterialId = data.materialId;
+            }
+            renderWithRenderData(data, currentDescSet);
         }
+    } else {
+        // Legacy path: Use Renderable vector
+        const auto& sceneObjects = resources_.scene->getRenderables();
+        size_t playerIndex = resources_.scene->getSceneBuilder().getPlayerObjectIndex();
+        bool hasCharacter = resources_.scene->getSceneBuilder().hasCharacter();
 
-        const auto& obj = sceneObjects[i];
+        // Build sorted indices by materialId to minimize descriptor set switches
+        std::vector<size_t> sortedIndices(sceneObjects.size());
+        std::iota(sortedIndices.begin(), sortedIndices.end(), 0);
+        std::sort(sortedIndices.begin(), sortedIndices.end(), [&](size_t a, size_t b) {
+            return sceneObjects[a].materialId < sceneObjects[b].materialId;
+        });
 
-        // Only update descriptor set when material changes
-        if (obj.materialId != lastMaterialId) {
-            currentDescSet = materialRegistry.getDescriptorSet(obj.materialId, frameIndex);
-            if (currentDescSet == VK_NULL_HANDLE) {
-                // Skip objects with invalid materialId
-                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "Skipping object with invalid materialId %u", obj.materialId);
+        MaterialId lastMaterialId = INVALID_MATERIAL_ID;
+        VkDescriptorSet currentDescSet = VK_NULL_HANDLE;
+
+        // Get NPC simulation for skipping NPC renderables (rendered with GPU skinning)
+        const NPCSimulation* npcSim = resources_.scene->getSceneBuilder().getNPCSimulation();
+
+        for (size_t i : sortedIndices) {
+            // Skip player character (rendered separately with GPU skinning)
+            if (hasCharacter && i == playerIndex) {
                 continue;
             }
-            lastMaterialId = obj.materialId;
+
+            // Skip NPC characters (rendered separately with GPU skinning)
+            bool isNPC = false;
+            if (npcSim) {
+                const auto& npcData = npcSim->getData();
+                for (size_t npcIdx = 0; npcIdx < npcData.count(); ++npcIdx) {
+                    if (i == npcData.renderableIndices[npcIdx]) {
+                        isNPC = true;
+                        break;
+                    }
+                }
+            }
+            if (isNPC) {
+                continue;
+            }
+
+            const auto& obj = sceneObjects[i];
+
+            // Only update descriptor set when material changes
+            if (obj.materialId != lastMaterialId) {
+                currentDescSet = materialRegistry.getDescriptorSet(obj.materialId, frameIndex);
+                if (currentDescSet == VK_NULL_HANDLE) {
+                    // Skip objects with invalid materialId
+                    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Skipping object with invalid materialId %u", obj.materialId);
+                    continue;
+                }
+                lastMaterialId = obj.materialId;
+            }
+            renderObject(obj, currentDescSet);
         }
-        renderObject(obj, currentDescSet);
     }
 
     // Render procedural rocks (ScatterSystem owns its own descriptor sets)
+    // These still use legacy Renderable as they're procedurally generated
     if (resources_.vegetation.rocks().hasDescriptorSets()) {
         VkDescriptorSet rockDescSet = resources_.vegetation.rocks().getDescriptorSet(frameIndex);
         for (const auto& rock : resources_.vegetation.rocks().getSceneObjects()) {

@@ -13,6 +13,7 @@ ShadowPassResources ShadowPassResources::collect(RendererSystems& systems) {
     resources.scene = &systems.scene();
     resources.globalBuffers = &systems.globalBuffers();
     resources.skinnedMesh = &systems.skinnedMesh();
+    resources.ecsWorld = systems.ecsWorld();  // Phase 6: ECS world for direct entity queries
 
     return resources;
 }

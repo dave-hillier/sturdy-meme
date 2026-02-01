@@ -18,6 +18,10 @@
 #include "SkinnedMesh.h"
 #include "CullCommon.h"  // For extractFrustumPlanes
 
+// ECS includes for Phase 6 rendering
+#include "ecs/World.h"
+#include "ecs/Components.h"
+
 ShadowPassRecorder::ShadowPassRecorder(const ShadowPassResources& resources)
     : resources_(resources)
 {
@@ -81,20 +85,62 @@ void ShadowPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float 
     // Combine scene objects and rock objects for shadow rendering
     // Skip player character - it's rendered separately with skinned shadow pipeline
     std::vector<Renderable> allObjects;
-    const auto& sceneObjects = resources_.scene->getRenderables();
-    size_t playerIndex = resources_.scene->getSceneBuilder().getPlayerObjectIndex();
     bool hasCharacter = resources_.scene->getSceneBuilder().hasCharacter();
 
     size_t detritusCount = resources_.vegetation.hasDetritus() ? resources_.vegetation.detritus()->getSceneObjects().size() : 0;
     size_t rockCount = resources_.vegetation.rocks().getSceneObjects().size();
-    allObjects.reserve(sceneObjects.size() + rockCount + detritusCount);
-    for (size_t i = 0; i < sceneObjects.size(); ++i) {
-        // Skip player character - rendered with skinned shadow pipeline
-        if (hasCharacter && i == playerIndex) {
-            continue;
+
+    // Phase 6: Use ECS if available, otherwise fall back to legacy renderables
+    if (resources_.ecsWorld) {
+        ecs::World& world = *resources_.ecsWorld;
+
+        // Collect shadow-casting entities from ECS
+        allObjects.reserve(256 + rockCount + detritusCount);
+
+        for (auto [entity, meshRef, materialRef] : world.view<ecs::MeshRef, ecs::MaterialRef>().each()) {
+            // Skip entities rendered by specialized systems
+            if (world.has<ecs::PlayerTag>(entity)) continue;   // Skinned mesh renderer
+            if (world.has<ecs::NPCTag>(entity)) continue;      // NPC renderer (handled separately)
+            if (world.has<ecs::TreeData>(entity)) continue;    // Tree renderer
+
+            // Only include shadow-casting entities
+            if (!world.has<ecs::CastsShadow>(entity)) continue;
+
+            // Extract render data and create a Renderable for shadow pass
+            ecs::RenderData data = ecs::extractRenderData(world, entity);
+            if (data.mesh && data.materialId != ecs::InvalidMaterialId) {
+                Renderable r = RenderableBuilder()
+                    .withTransform(data.transform)
+                    .withMesh(data.mesh)
+                    .withTexture(nullptr)
+                    .withMaterialId(data.materialId)
+                    .withRoughness(data.roughness)
+                    .withMetallic(data.metallic)
+                    .withEmissiveIntensity(data.emissiveIntensity)
+                    .withEmissiveColor(data.emissiveColor)
+                    .withAlphaTest(data.alphaTestThreshold)
+                    .withPBRFlags(data.pbrFlags)
+                    .withCastsShadow(true)
+                    .build();
+                allObjects.push_back(r);
+            }
         }
-        allObjects.push_back(sceneObjects[i]);
+    } else {
+        // Legacy path: Use Renderable vector
+        const auto& sceneObjects = resources_.scene->getRenderables();
+        size_t playerIndex = resources_.scene->getSceneBuilder().getPlayerObjectIndex();
+
+        allObjects.reserve(sceneObjects.size() + rockCount + detritusCount);
+        for (size_t i = 0; i < sceneObjects.size(); ++i) {
+            // Skip player character - rendered with skinned shadow pipeline
+            if (hasCharacter && i == playerIndex) {
+                continue;
+            }
+            allObjects.push_back(sceneObjects[i]);
+        }
     }
+
+    // Add rocks and detritus (these still use legacy Renderable)
     allObjects.insert(allObjects.end(), resources_.vegetation.rocks().getSceneObjects().begin(), resources_.vegetation.rocks().getSceneObjects().end());
     if (resources_.vegetation.hasDetritus()) {
         allObjects.insert(allObjects.end(), resources_.vegetation.detritus()->getSceneObjects().begin(), resources_.vegetation.detritus()->getSceneObjects().end());
@@ -103,14 +149,15 @@ void ShadowPassRecorder::record(VkCommandBuffer cmd, uint32_t frameIndex, float 
     // Skinned character shadow callback (renders with GPU skinning)
     ShadowSystem::DrawCallback skinnedCallback = nullptr;
     if (hasCharacter) {
-        skinnedCallback = [this, frameIndex, playerIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
+        skinnedCallback = [this, frameIndex](VkCommandBuffer cb, uint32_t cascade, const glm::mat4& lightMatrix) {
             (void)lightMatrix;  // Not used, cascade matrices are in UBO
             SceneBuilder& sceneBuilder = resources_.scene->getSceneBuilder();
             const auto& sceneObjs = sceneBuilder.getRenderables();
-            if (playerIndex >= sceneObjs.size()) return;
+            size_t playerIdx = sceneBuilder.getPlayerObjectIndex();
+            if (playerIdx >= sceneObjs.size()) return;
 
             resources_.profiler->beginGpuZone(cb, "Shadow:Skinned");
-            const Renderable& playerObj = sceneObjs[playerIndex];
+            const Renderable& playerObj = sceneObjs[playerIdx];
             AnimatedCharacter& character = sceneBuilder.getAnimatedCharacter();
             SkinnedMesh& skinnedMesh = character.getSkinnedMesh();
 

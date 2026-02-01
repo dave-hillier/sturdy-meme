@@ -762,4 +762,73 @@ struct LightFlickerComponent {
 // Tag component for entities that are light sources
 // Used for quick identification without checking each light component type
 struct LightSourceTag {};
+
+// =============================================================================
+// Render Data Helper (Phase 6: Renderable Elimination)
+// =============================================================================
+// POD struct containing all data needed to render an entity.
+// Extracted from ECS components by render systems to replace Renderable struct.
+
+struct RenderData {
+    glm::mat4 transform = glm::mat4(1.0f);
+    Mesh* mesh = nullptr;
+    MaterialId materialId = InvalidMaterialId;
+
+    // PBR properties (defaults match shader expectations)
+    float roughness = 0.5f;
+    float metallic = 0.0f;
+    float emissiveIntensity = 0.0f;
+    glm::vec3 emissiveColor = glm::vec3(1.0f);
+    float alphaTestThreshold = 0.0f;
+    uint32_t pbrFlags = 0;
+
+    // Rendering flags
+    bool castsShadow = true;
+    float opacity = 1.0f;
+    float hueShift = 0.0f;
+
+    // Entity reference for additional queries
+    Entity entity = NullEntity;
+};
+
+// Helper to extract RenderData from an entity's components
+inline RenderData extractRenderData(const World& world, Entity entity) {
+    RenderData data;
+    data.entity = entity;
+
+    if (world.has<Transform>(entity)) {
+        data.transform = world.get<Transform>(entity).matrix;
+    }
+
+    if (world.has<MeshRef>(entity)) {
+        data.mesh = world.get<MeshRef>(entity).mesh;
+    }
+
+    if (world.has<MaterialRef>(entity)) {
+        data.materialId = world.get<MaterialRef>(entity).id;
+    }
+
+    if (world.has<PBRProperties>(entity)) {
+        const auto& pbr = world.get<PBRProperties>(entity);
+        data.roughness = pbr.roughness;
+        data.metallic = pbr.metallic;
+        data.emissiveIntensity = pbr.emissiveIntensity;
+        data.emissiveColor = pbr.emissiveColor;
+        data.alphaTestThreshold = pbr.alphaTestThreshold;
+        data.pbrFlags = pbr.pbrFlags;
+    }
+
+    data.castsShadow = world.has<CastsShadow>(entity);
+
+    if (world.has<Opacity>(entity)) {
+        data.opacity = world.get<Opacity>(entity).value;
+    }
+
+    if (world.has<HueShift>(entity)) {
+        data.hueShift = world.get<HueShift>(entity).value;
+    }
+
+    return data;
+}
+
 } // namespace ecs

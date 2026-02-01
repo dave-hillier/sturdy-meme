@@ -25,6 +25,8 @@ class SkinnedMeshRenderer;
 
 class RendererSystems;
 
+namespace ecs { class World; }
+
 /**
  * Focused resource bundle for ShadowPassRecorder.
  *
@@ -46,6 +48,9 @@ struct ShadowPassResources {
     SceneManager* scene = nullptr;
     GlobalBufferManager* globalBuffers = nullptr;
     SkinnedMeshRenderer* skinnedMesh = nullptr;
+
+    // ECS world for Phase 6 rendering (optional - if null, uses legacy renderables)
+    ecs::World* ecsWorld = nullptr;
 
     /**
      * Factory: Collect resources from RendererSystems.
