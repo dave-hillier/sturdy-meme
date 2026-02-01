@@ -23,6 +23,8 @@ class PerformanceControlSubsystem;
 class SceneControlSubsystem;
 class PlayerControlSubsystem;
 
+namespace ecs { class World; }
+
 // Forward declarations for interfaces
 class ILocationControl;
 class IWeatherState;
@@ -437,7 +439,27 @@ public:
     // Set the sync callback for performance control (must be called after initControlSubsystems)
     void setPerformanceSyncCallback(std::function<void()> callback);
 
+    // ========================================================================
+    // ECS Integration (Phase 6: Renderable Elimination)
+    // ========================================================================
+
+    /**
+     * Set the ECS world reference for render passes to query entities directly.
+     * Must be called after the ECS world is created in Application.
+     * Pass nullptr to disable ECS rendering and fall back to legacy renderables.
+     */
+    void setECSWorld(ecs::World* world) { ecsWorld_ = world; }
+
+    /**
+     * Get the ECS world (may be null if not set).
+     */
+    ecs::World* ecsWorld() { return ecsWorld_; }
+    const ecs::World* ecsWorld() const { return ecsWorld_; }
+
 private:
+    // ECS world reference (not owned - Application owns the world)
+    ecs::World* ecsWorld_ = nullptr;
+
     // Tier 1 - Core rendering systems (initialize first)
     std::unique_ptr<PostProcessSystem> postProcessSystem_;
     std::unique_ptr<BloomSystem> bloomSystem_;

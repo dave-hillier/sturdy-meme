@@ -1298,6 +1298,9 @@ void Application::initECS() {
         }
     }
 
+    // Phase 6: Connect ECS world to renderer systems for direct entity queries
+    renderer_->getSystems().setECSWorld(&ecsWorld_);
+
     SDL_Log("ECS initialized with %zu entities from scene", sceneEntities_.size());
 }
 

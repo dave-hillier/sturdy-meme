@@ -382,3 +382,128 @@ void SkinnedMeshRenderer::recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex
     vkCmd.drawIndexed(lodMesh.indexCount, 1, 0, 0, 0);
     DIAG_RECORD_DRAW();
 }
+
+// Phase 6: ECS-compatible overloads that don't require Renderable
+void SkinnedMeshRenderer::record(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slotIndex,
+                                  const glm::mat4& transform, AnimatedCharacter& character) {
+    vk::CommandBuffer vkCmd(cmd);
+
+    // Bind skinned pipeline
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **pipeline_);
+
+    // Set dynamic viewport and scissor to handle window resize
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent.width))
+        .setHeight(static_cast<float>(extent.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
+
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent({extent.width, extent.height});
+    vkCmd.setScissor(0, scissor);
+
+    // Calculate dynamic offset to select this character's bone matrix slot
+    uint32_t dynamicOffset = boneMatricesBuffer_.getDynamicOffset(frameIndex, slotIndex);
+
+    // Bind skinned descriptor set with dynamic offset for bone matrices
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                             **pipelineLayout_, 0,
+                             vk::DescriptorSet(descriptorSets[frameIndex]),
+                             dynamicOffset);
+
+    // Push constants with default PBR values
+    PushConstants push{};
+    push.model = transform;
+    push.roughness = 0.5f;
+    push.metallic = 0.0f;
+    push.emissiveIntensity = 0.0f;
+    push.opacity = 1.0f;
+    push.emissiveColor = glm::vec4(1.0f);
+    push.pbrFlags = 0;
+    push.hueShift = 0.0f;
+
+    vkCmd.pushConstants<PushConstants>(
+        **pipelineLayout_,
+        vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+        0, push);
+
+    // Bind skinned mesh vertex and index buffers
+    SkinnedMesh& skinnedMesh = character.getSkinnedMesh();
+
+    vk::Buffer vertexBuffers[] = {skinnedMesh.getVertexBuffer()};
+    vk::DeviceSize offsets[] = {0};
+    vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
+    vkCmd.bindIndexBuffer(skinnedMesh.getIndexBuffer(), 0, vk::IndexType::eUint32);
+
+    vkCmd.drawIndexed(skinnedMesh.getIndexCount(), 1, 0, 0, 0);
+    DIAG_RECORD_DRAW();
+}
+
+void SkinnedMeshRenderer::recordWithLOD(VkCommandBuffer cmd, uint32_t frameIndex, uint32_t slotIndex,
+                                         const glm::mat4& transform, AnimatedCharacter& character,
+                                         const CharacterLODMesh& lodMesh) {
+    // Validate LOD mesh
+    if (!lodMesh.isValid()) {
+        // Fallback to normal record
+        record(cmd, frameIndex, slotIndex, transform, character);
+        return;
+    }
+
+    vk::CommandBuffer vkCmd(cmd);
+
+    // Bind skinned pipeline
+    vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **pipeline_);
+
+    // Set dynamic viewport and scissor to handle window resize
+    auto viewport = vk::Viewport{}
+        .setX(0.0f)
+        .setY(0.0f)
+        .setWidth(static_cast<float>(extent.width))
+        .setHeight(static_cast<float>(extent.height))
+        .setMinDepth(0.0f)
+        .setMaxDepth(1.0f);
+    vkCmd.setViewport(0, viewport);
+
+    auto scissor = vk::Rect2D{}
+        .setOffset({0, 0})
+        .setExtent({extent.width, extent.height});
+    vkCmd.setScissor(0, scissor);
+
+    // Calculate dynamic offset to select this character's bone matrix slot
+    uint32_t dynamicOffset = boneMatricesBuffer_.getDynamicOffset(frameIndex, slotIndex);
+
+    // Bind skinned descriptor set with dynamic offset for bone matrices
+    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                             **pipelineLayout_, 0,
+                             vk::DescriptorSet(descriptorSets[frameIndex]),
+                             dynamicOffset);
+
+    // Push constants with default PBR values
+    PushConstants push{};
+    push.model = transform;
+    push.roughness = 0.5f;
+    push.metallic = 0.0f;
+    push.emissiveIntensity = 0.0f;
+    push.opacity = 1.0f;
+    push.emissiveColor = glm::vec4(1.0f);
+    push.pbrFlags = 0;
+    push.hueShift = 0.0f;
+
+    vkCmd.pushConstants<PushConstants>(
+        **pipelineLayout_,
+        vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+        0, push);
+
+    // Bind LOD mesh vertex and index buffers
+    vk::Buffer vertexBuffers[] = {lodMesh.vertexBuffer};
+    vk::DeviceSize offsets[] = {0};
+    vkCmd.bindVertexBuffers(0, 1, vertexBuffers, offsets);
+    vkCmd.bindIndexBuffer(lodMesh.indexBuffer, 0, vk::IndexType::eUint32);
+
+    vkCmd.drawIndexed(lodMesh.indexCount, 1, 0, 0, 0);
+    DIAG_RECORD_DRAW();
+}

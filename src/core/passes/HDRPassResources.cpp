@@ -22,6 +22,7 @@ HDRPassResources HDRPassResources::collect(RendererSystems& systems) {
     resources.wind = &systems.wind();
     resources.debugLine = &systems.debugLine();
     resources.npcRenderer = systems.npcRenderer();  // May be null if no NPCs
+    resources.ecsWorld = systems.ecsWorld();  // Phase 6: ECS world for direct entity queries
 
     return resources;
 }
