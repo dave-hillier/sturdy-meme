@@ -6,6 +6,7 @@
 #include "SceneBuilder.h"
 #include "Light.h"
 #include "PhysicsSystem.h"
+#include "ecs/World.h"
 
 // Centralized scene management - handles visual objects, physics bodies, and lighting
 class SceneManager {
@@ -56,9 +57,16 @@ public:
     SceneBuilder& getSceneBuilder() { return *sceneBuilder; }
     const SceneBuilder& getSceneBuilder() const { return *sceneBuilder; }
 
-    // Light management
+    // Light management (deprecated - use ECS lights)
     LightManager& getLightManager() { return lightManager; }
     const LightManager& getLightManager() const { return lightManager; }
+
+    // ECS light management
+    void setECSWorld(ecs::World* world) { ecsWorld_ = world; }
+    ecs::Entity getOrbLightEntity() const { return orbLightEntity_; }
+
+    // Reinitialize lights with ECS (call after setECSWorld)
+    void initializeECSLights();
 
     // Orb light position (updated by physics)
     void setOrbLightPosition(const glm::vec3& position) { orbLightPosition = position; }
@@ -98,4 +106,10 @@ private:
 
     // Orb light position (follows emissive orb physics object)
     glm::vec3 orbLightPosition = glm::vec3(2.0f, 1.3f, 0.0f);
+
+    // ECS light integration
+    ecs::World* ecsWorld_ = nullptr;
+    ecs::Entity orbLightEntity_ = ecs::NullEntity;
+    ecs::Entity blueLightEntity_ = ecs::NullEntity;
+    ecs::Entity greenLightEntity_ = ecs::NullEntity;
 };

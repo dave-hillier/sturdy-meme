@@ -11,6 +11,8 @@
 #include "SceneManager.h"
 #include "controls/EnvironmentControlSubsystem.h"
 #include "Camera.h"
+#include "lighting/LightSystem.h"
+#include "ecs/World.h"
 
 UBOUpdater::Result UBOUpdater::update(
     RendererSystems& systems,
@@ -72,8 +74,22 @@ UBOUpdater::Result UBOUpdater::update(
     // Update light buffer with camera-based culling
     LightBuffer lightBuffer{};
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
-    systems.scene().getLightManager().buildLightBuffer(
-        lightBuffer, camera.getPosition(), camera.getForward(), viewProj, config.lightCullRadius);
+
+    // Use ECS lights if available, otherwise fall back to legacy LightManager
+    if (config.ecsWorld) {
+        // Update flicker animation for all lights with LightFlickerComponent
+        ecs::light::updateFlicker(*config.ecsWorld, config.deltaTime);
+
+        // Build light buffer from ECS with frustum culling
+        ecs::light::buildLightBuffer(
+            *config.ecsWorld, lightBuffer,
+            camera.getPosition(), camera.getForward(),
+            viewProj, config.lightCullRadius);
+    } else {
+        // Fallback to legacy LightManager
+        systems.scene().getLightManager().buildLightBuffer(
+            lightBuffer, camera.getPosition(), camera.getForward(), viewProj, config.lightCullRadius);
+    }
     systems.globalBuffers().updateLightBuffer(frameIndex, lightBuffer);
 
     // Calculate sun screen position (pure) and update post-process (state mutation)
