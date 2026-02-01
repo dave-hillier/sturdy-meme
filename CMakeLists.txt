@@ -235,6 +235,7 @@ set(SOURCES
     src/animation/SkinnedMeshRenderer.cpp
     src/animation/Animation.cpp
     src/animation/AnimatedCharacter.cpp
+    src/animation/AnimationArchetypeManager.cpp
     src/animation/AnimationStateMachine.cpp
     src/animation/AnimationEventLoader.cpp
     src/animation/AnimationBlend.cpp

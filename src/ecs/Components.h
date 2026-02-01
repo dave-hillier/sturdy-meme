@@ -481,4 +481,85 @@ struct NPCFacing {
     [[nodiscard]] float yawRadians() const { return glm::radians(yawDegrees); }
 };
 
+// =============================================================================
+// Animation Archetype Components (Phase 2.2)
+// =============================================================================
+// Components for shared animation archetypes, enabling O(character types)
+// memory usage instead of O(n NPCs).
+
+// Invalid archetype ID constant
+constexpr uint32_t InvalidArchetypeId = UINT32_MAX;
+
+// Reference to a shared animation archetype
+// NPCs with the same character type share skeleton and animation clip data
+struct AnimationArchetypeRef {
+    uint32_t archetypeId = InvalidArchetypeId;
+
+    AnimationArchetypeRef() = default;
+    explicit AnimationArchetypeRef(uint32_t id) : archetypeId(id) {}
+
+    [[nodiscard]] bool valid() const { return archetypeId != InvalidArchetypeId; }
+};
+
+// Per-NPC animation instance state when using shared archetypes
+// Contains only the per-instance data (time, blend state, cached matrices)
+struct NPCAnimationInstance {
+    // Current animation playback
+    size_t currentClipIndex = 0;
+    float currentTime = 0.0f;
+    float playbackSpeed = 1.0f;
+    bool looping = true;
+
+    // Transition/blend state
+    size_t previousClipIndex = 0;
+    float previousTime = 0.0f;
+    float blendWeight = 1.0f;
+    float blendDuration = 0.0f;
+    float blendElapsed = 0.0f;
+    bool isBlending = false;
+
+    // LOD level for bone detail
+    uint32_t lodLevel = 0;
+
+    // Cached bone matrices (computed during update)
+    std::vector<glm::mat4> boneMatrices;
+    uint32_t lastUpdateFrame = 0;
+
+    NPCAnimationInstance() = default;
+
+    // Start blending to a new animation
+    void startBlend(size_t newClipIndex, float duration) {
+        if (newClipIndex == currentClipIndex && !isBlending) return;
+
+        previousClipIndex = currentClipIndex;
+        previousTime = currentTime;
+        currentClipIndex = newClipIndex;
+        currentTime = 0.0f;
+        blendWeight = 0.0f;
+        blendDuration = duration;
+        blendElapsed = 0.0f;
+        isBlending = true;
+    }
+
+    // Update blend progress
+    void updateBlend(float deltaTime) {
+        if (!isBlending) return;
+
+        blendElapsed += deltaTime;
+        if (blendElapsed >= blendDuration) {
+            blendWeight = 1.0f;
+            isBlending = false;
+        } else {
+            blendWeight = blendElapsed / blendDuration;
+        }
+    }
+
+    // Resize bone matrix buffer
+    void resizeBoneMatrices(uint32_t boneCount) {
+        if (boneMatrices.size() != boneCount) {
+            boneMatrices.resize(boneCount, glm::mat4(1.0f));
+        }
+    }
+};
+
 } // namespace ecs

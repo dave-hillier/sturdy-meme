@@ -539,6 +539,61 @@ inline NPCLODStats getNPCLODStats(const World& world) {
     return stats;
 }
 
+// =============================================================================
+// Archetype-Based Animation System (Phase 2.2)
+// =============================================================================
+// Systems for NPC animation using shared archetypes instead of per-NPC
+// AnimatedCharacter instances.
+
+// Get NPCs that should update animation this frame (archetype mode)
+// Returns entities with AnimationArchetypeRef + NPCAnimationInstance + NPCLODController
+inline std::vector<Entity> getNPCsToUpdateArchetype(World& world) {
+    std::vector<Entity> toUpdate;
+    for (auto [entity, archetypeRef, lodCtrl] :
+         world.view<AnimationArchetypeRef, NPCLODController>().each()) {
+        if (archetypeRef.valid() && lodCtrl.shouldUpdate()) {
+            toUpdate.push_back(entity);
+        }
+    }
+    return toUpdate;
+}
+
+// Update LOD level for animation instance based on distance
+inline void updateNPCAnimationLOD(
+    NPCLODController& lodCtrl,
+    NPCAnimationInstance& animInstance,
+    float distance)
+{
+    // Map NPC LOD level to bone LOD level
+    // Real (close) = LOD 0 (full detail)
+    // Bulk (medium) = LOD 1 (reduced detail)
+    // Virtual (far) = LOD 2 (minimal detail)
+    uint32_t boneLOD = 0;
+    if (distance < NPCLODController::DISTANCE_REAL) {
+        boneLOD = 0;
+    } else if (distance < NPCLODController::DISTANCE_BULK) {
+        boneLOD = 1;
+    } else {
+        boneLOD = 2;
+    }
+    animInstance.lodLevel = boneLOD;
+}
+
+// Select animation clip based on NPC activity
+// Returns the clip index to use for the given activity
+inline size_t selectAnimationForActivity(
+    NPCActivity activity,
+    size_t idleClipIndex,
+    size_t walkClipIndex,
+    size_t runClipIndex)
+{
+    switch (activity) {
+        case NPCActivity::Walking: return walkClipIndex;
+        case NPCActivity::Running: return runClipIndex;
+        default: return idleClipIndex;
+    }
+}
+
 } // namespace systems
 
 // =============================================================================

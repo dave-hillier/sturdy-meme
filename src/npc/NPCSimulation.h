@@ -3,6 +3,7 @@
 #include "NPCData.h"
 #include "ecs/World.h"
 #include "ecs/Components.h"
+#include "animation/AnimationArchetypeManager.h"
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
@@ -10,9 +11,11 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <unordered_map>
 
 class AnimatedCharacter;
 class Renderable;
+struct SkinnedMesh;
 
 // Forward declare for height query function
 using HeightQueryFunc = std::function<float(float, float)>;
@@ -105,6 +108,44 @@ public:
     // ECS-based update (alternative to legacy update)
     void updateECS(float deltaTime, const glm::vec3& cameraPos);
 
+    // ==========================================================================
+    // Shared Archetype Mode (Phase 2.2)
+    // ==========================================================================
+    // When enabled, NPCs share animation data via archetypes instead of
+    // owning individual AnimatedCharacter instances.
+
+    // Enable shared archetype mode for new NPCs
+    // When enabled, spawnNPCs creates archetypes and uses NPCAnimationInstance
+    void setUseSharedArchetypes(bool enable) { useSharedArchetypes_ = enable; }
+    bool isUsingSharedArchetypes() const { return useSharedArchetypes_; }
+
+    // Spawn NPCs using shared archetypes (memory-efficient mode)
+    // Returns number of NPCs successfully created
+    size_t spawnNPCsWithArchetypes(const std::vector<NPCSpawnInfo>& spawnPoints);
+
+    // Update NPCs using shared archetypes
+    void updateArchetypeMode(float deltaTime, const glm::vec3& cameraPos, uint32_t currentFrame);
+
+    // Get archetype manager (for external access to shared data)
+    AnimationArchetypeManager& getArchetypeManager() { return archetypeManager_; }
+    const AnimationArchetypeManager& getArchetypeManager() const { return archetypeManager_; }
+
+    // Get skinned mesh for archetype (for rendering)
+    SkinnedMesh* getArchetypeSkinnedMesh(uint32_t archetypeId);
+
+    // Get bone matrices for an NPC (works in both modes)
+    const std::vector<glm::mat4>* getNPCBoneMatrices(size_t npcIndex) const;
+
+    // Statistics for archetype mode
+    struct ArchetypeStats {
+        size_t archetypeCount = 0;
+        size_t totalBones = 0;
+        size_t totalAnimations = 0;
+        size_t npcCount = 0;
+        size_t memorySaved = 0;  // Approximate bytes saved vs per-NPC mode
+    };
+    ArchetypeStats getArchetypeStats() const;
+
 private:
     bool initInternal(const InitInfo& info);
     void cleanup();
@@ -144,6 +185,28 @@ private:
 
     // LOD configuration
     bool lodEnabled_ = true;
+
+    // ==========================================================================
+    // Shared Archetype Mode (Phase 2.2)
+    // ==========================================================================
+    AnimationArchetypeManager archetypeManager_;
+    bool useSharedArchetypes_ = false;
+
+    // Archetype-specific data
+    struct ArchetypeData {
+        std::unique_ptr<SkinnedMesh> skinnedMesh;  // One per archetype
+        std::unique_ptr<Mesh> renderMesh;           // For bounds
+        size_t idleClipIndex = 0;
+        size_t walkClipIndex = 0;
+        size_t runClipIndex = 0;
+    };
+    std::unordered_map<uint32_t, ArchetypeData> archetypeRenderData_;
+
+    // Helper to create archetype from character
+    uint32_t createArchetypeFromCharacter(const std::string& name, AnimatedCharacter& character);
+
+    // Helper to find animation indices in archetype
+    void findAnimationIndices(const AnimationArchetype& archetype, ArchetypeData& data);
 
     // LOD distance thresholds (matching CharacterLODConfig)
     static constexpr float LOD_DISTANCE_REAL = 25.0f;     // Full quality
