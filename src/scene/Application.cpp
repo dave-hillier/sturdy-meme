@@ -1163,6 +1163,7 @@ void Application::updateCameraOcclusion(float deltaTime) {
 
     // Update opacities using ECS queries - entities with PhysicsBody and Opacity components
     auto& sceneObjects = renderer_->getSystems().scene().getRenderables();
+    const auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
 
     // Query entities with PhysicsBody component (excludes player via PlayerTag check)
     for (auto [entity, physicsBody] : ecsWorld_.view<ecs::PhysicsBody>().each()) {
