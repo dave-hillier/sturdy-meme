@@ -170,12 +170,29 @@ void MotionMatchingController::performSearch() {
         // Increase heading weight in strafe mode
         options.headingWeight = config_.featureConfig.headingWeight > 0.0f ?
             config_.featureConfig.headingWeight * 2.0f : 1.5f;
-        // Require strafe-tagged animations when moving in strafe mode
-        // This ensures strafe_forward/back/left/right are used instead of regular walk/run
-        // Only when there's significant movement (otherwise use regular idle)
-        float speed = glm::length(options.desiredMovement);
-        if (speed > 0.5f) {
-            options.requiredTags.push_back("strafe");
+
+        // Only require strafe tag when movement is predominantly sideways
+        // Use local-space velocity to determine movement direction relative to facing
+        // The localTrajectory has already been transformed so facing = Z+
+        if (localTrajectory.sampleCount > 0) {
+            // Find a future sample to get predicted velocity
+            glm::vec3 localVel(0.0f);
+            for (size_t i = 0; i < localTrajectory.sampleCount; ++i) {
+                if (localTrajectory.samples[i].timeOffset > 0.0f) {
+                    localVel = localTrajectory.samples[i].velocity;
+                    break;
+                }
+            }
+
+            float speed = glm::length(localVel);
+            float sidewaysSpeed = std::abs(localVel.x);  // X = sideways in local space
+            float forwardSpeed = std::abs(localVel.z);   // Z = forward in local space
+
+            // Only use strafe animations when moving predominantly sideways
+            // Forward/backward movement uses regular walk animations
+            if (speed > 0.5f && sidewaysSpeed > forwardSpeed * 0.7f) {
+                options.requiredTags.push_back("strafe");
+            }
         }
     }
 
