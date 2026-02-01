@@ -184,23 +184,28 @@ bool SceneBuilder::createMeshes(const InitInfo& info) {
     // Load animated character from FBX
     std::string characterPath = info.resourcePath + "/assets/characters/fbx/Y Bot.fbx";
     std::vector<std::string> additionalAnimations = {
-        // Core locomotion for motion matching
-        info.resourcePath + "/assets/characters/fbx/ss_idle.fbx",
-        info.resourcePath + "/assets/characters/fbx/ss_idle2.fbx",
-        info.resourcePath + "/assets/characters/fbx/ss_walk.fbx",
-        info.resourcePath + "/assets/characters/fbx/ss_walk2.fbx",
-        info.resourcePath + "/assets/characters/fbx/ss_run.fbx",
-        info.resourcePath + "/assets/characters/fbx/ss_run2.fbx",
-        info.resourcePath + "/assets/characters/fbx/ss_jump.fbx",
-        // Strafe animations for directional movement
-        info.resourcePath + "/assets/characters/fbx/ss_strafe_left.fbx",
-        info.resourcePath + "/assets/characters/fbx/ss_strafe_right.fbx",
-        info.resourcePath + "/assets/characters/fbx/ss_strafe_back.fbx",
-        info.resourcePath + "/assets/characters/fbx/ss_strafe_forward.fbx",
+        // Core locomotion - idle
+        info.resourcePath + "/assets/characters/fbx/sword and shield idle.fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield idle (2).fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield idle (3).fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield idle (4).fbx",
+        // Core locomotion - walk/run
+        info.resourcePath + "/assets/characters/fbx/sword and shield walk.fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield walk (2).fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield run.fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield run (2).fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield jump.fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield jump (2).fbx",
+        // Strafe animations
+        info.resourcePath + "/assets/characters/fbx/sword and shield strafe.fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield strafe (2).fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield strafe (3).fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield strafe (4).fbx",
         // Turn animations
-        info.resourcePath + "/assets/characters/fbx/ss_turn_left.fbx",
-        info.resourcePath + "/assets/characters/fbx/ss_turn_right.fbx",
-        info.resourcePath + "/assets/characters/fbx/ss_turn_180.fbx"
+        info.resourcePath + "/assets/characters/fbx/sword and shield turn.fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield turn (2).fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield 180 turn.fbx",
+        info.resourcePath + "/assets/characters/fbx/sword and shield 180 turn (2).fbx"
     };
 
     AnimatedCharacter::InitInfo charInfo{};
@@ -874,7 +879,8 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
                                             VkCommandPool commandPool, VkQueue queue,
                                             float movementSpeed, bool isGrounded, bool isJumping,
                                             const glm::vec3& position, const glm::vec3& facing,
-                                            const glm::vec3& inputDirection) {
+                                            const glm::vec3& inputDirection,
+                                            bool strafeMode, const glm::vec3& cameraDirection) {
     if (!hasAnimatedCharacter) return;
 
     // Get the character's current world transform for IK ground queries
@@ -900,6 +906,17 @@ void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocat
         } else {
             controller.setExcludedTags({"jump"});  // Exclude jump during normal locomotion
             controller.setRequiredTags({});
+        }
+
+        // Configure strafe mode (Unreal-style orientation lock)
+        controller.setStrafeMode(strafeMode);
+        if (strafeMode && glm::length(cameraDirection) > 0.001f) {
+            // In strafe mode, the character should face the camera direction
+            glm::vec3 normalizedCamDir = glm::normalize(cameraDirection);
+            normalizedCamDir.y = 0.0f;  // Keep horizontal only
+            if (glm::length(normalizedCamDir) > 0.001f) {
+                controller.setDesiredFacing(glm::normalize(normalizedCamDir));
+            }
         }
 
         // Get actual speed from input direction

@@ -62,11 +62,17 @@ public:
     // Get current velocity
     glm::vec3 getCurrentVelocity() const { return currentVelocity_; }
 
-    // Get current facing direction
-    glm::vec3 getCurrentFacing() const { return currentFacing_; }
+    // Get current facing direction (returns strafe facing when in strafe mode)
+    glm::vec3 getCurrentFacing() const { return strafeMode_ ? strafeFacing_ : currentFacing_; }
 
     // Get smoothed input direction
     glm::vec3 getSmoothedInput() const { return smoothedInput_; }
+
+    // Strafe mode: facing direction is locked instead of turning towards movement
+    void setStrafeMode(bool enabled) { strafeMode_ = enabled; }
+    bool isStrafeMode() const { return strafeMode_; }
+    void setStrafeFacing(const glm::vec3& facing) { strafeFacing_ = glm::normalize(facing); }
+    glm::vec3 getStrafeFacing() const { return strafeFacing_; }
 
     // Reset state (call when teleporting character)
     void reset();
@@ -80,6 +86,10 @@ private:
     glm::vec3 currentFacing_{0.0f, 0.0f, 1.0f};
     glm::vec3 smoothedInput_{0.0f};
     float currentTime_ = 0.0f;
+
+    // Strafe mode state
+    bool strafeMode_ = false;
+    glm::vec3 strafeFacing_{0.0f, 0.0f, 1.0f};
 
     // History for past trajectory
     std::deque<TrajectoryHistory> history_;

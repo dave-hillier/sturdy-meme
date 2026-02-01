@@ -6,6 +6,13 @@
 class IPlayerControl;
 class Camera;
 
+// Character facing mode - determines what direction the character faces
+enum class FacingMode {
+    FollowMovement,  // Character turns to face movement direction (default)
+    FollowCamera,    // Character faces camera direction (strafe mode)
+    FollowTarget     // Character faces a target position (lock-on)
+};
+
 // Player settings for GUI control
 struct PlayerSettings {
     // Cape
@@ -29,6 +36,12 @@ struct PlayerSettings {
     bool showMotionMatchingTrajectory = false;  // Show predicted and matched trajectory
     bool showMotionMatchingFeatures = false;   // Show feature bone positions
     bool showMotionMatchingStats = false;      // Show match cost statistics
+
+    // Character facing control
+    FacingMode facingMode = FacingMode::FollowMovement;  // What direction character faces
+    glm::vec3 targetPosition{0.0f};   // Target position for FollowTarget mode
+    bool hasTarget = false;           // Whether a target has been placed
+    bool thirdPersonCamera = false;   // Third-person camera mode (for strafe testing)
 };
 
 namespace GuiPlayerTab {

@@ -157,9 +157,44 @@ void MotionMatchingController::performSearch() {
         }
     }
 
-    // Set current pose in search options for continuity
+    // Set search options for continuity (Unreal-style continuing pose bias)
     SearchOptions options = config_.searchOptions;
     options.currentPoseIndex = playback_.matchedPoseIndex;
+    options.currentClipIndex = playback_.clipIndex;  // For continuing pose cost bias
+
+    // Configure strafe mode options
+    options.strafeMode = strafeMode_;
+    if (strafeMode_) {
+        options.desiredFacing = desiredFacing_;
+        options.desiredMovement = trajectoryPredictor_.getCurrentVelocity();
+        // Increase heading weight in strafe mode
+        options.headingWeight = config_.featureConfig.headingWeight > 0.0f ?
+            config_.featureConfig.headingWeight * 2.0f : 1.5f;
+
+        // Only require strafe tag when movement is predominantly sideways
+        // Use local-space velocity to determine movement direction relative to facing
+        // The localTrajectory has already been transformed so facing = Z+
+        if (localTrajectory.sampleCount > 0) {
+            // Find a future sample to get predicted velocity
+            glm::vec3 localVel(0.0f);
+            for (size_t i = 0; i < localTrajectory.sampleCount; ++i) {
+                if (localTrajectory.samples[i].timeOffset > 0.0f) {
+                    localVel = localTrajectory.samples[i].velocity;
+                    break;
+                }
+            }
+
+            float speed = glm::length(localVel);
+            float sidewaysSpeed = std::abs(localVel.x);  // X = sideways in local space
+            float forwardSpeed = std::abs(localVel.z);   // Z = forward in local space
+
+            // Only use strafe animations when moving predominantly sideways
+            // Forward/backward movement uses regular walk animations
+            if (speed > 0.5f && sidewaysSpeed > forwardSpeed * 0.7f) {
+                options.requiredTags.push_back("strafe");
+            }
+        }
+    }
 
     // Perform search with local-space trajectory
     MatchResult match = matcher_.findBestMatch(localTrajectory, queryPose_, options);
@@ -349,6 +384,32 @@ void MotionMatchingController::setRequiredTags(const std::vector<std::string>& t
 
 void MotionMatchingController::setExcludedTags(const std::vector<std::string>& tags) {
     config_.searchOptions.excludedTags = tags;
+}
+
+void MotionMatchingController::setStrafeMode(bool enabled) {
+    // Only update if value actually changed
+    if (strafeMode_ == enabled) {
+        return;
+    }
+
+    strafeMode_ = enabled;
+
+    // Update feature extractor strafe mode for heading extraction
+    featureExtractor_.setStrafeMode(enabled);
+
+    // Update trajectory predictor strafe mode
+    trajectoryPredictor_.setStrafeMode(enabled);
+
+    // Force a search to update matching based on new mode
+    forceSearchNextUpdate_ = true;
+
+    SDL_Log("MotionMatchingController: Strafe mode %s", enabled ? "enabled" : "disabled");
+}
+
+void MotionMatchingController::setDesiredFacing(const glm::vec3& facing) {
+    desiredFacing_ = facing;
+    // Also update trajectory predictor's strafe facing
+    trajectoryPredictor_.setStrafeFacing(facing);
 }
 
 const Trajectory& MotionMatchingController::getLastMatchedTrajectory() const {

@@ -607,6 +607,7 @@ float MotionMatcher::computeCost(size_t poseIndex,
     }
 
     const DatabasePose& pose = database_->getPose(poseIndex);
+    const DatabaseClip& clip = database_->getClip(pose.clipIndex);
     const FeatureConfig& config = database_->getFeatureExtractor().getConfig();
     const FeatureNormalization& norm = database_->getNormalization();
 
@@ -650,8 +651,44 @@ float MotionMatcher::computeCost(size_t poseIndex,
         ) * options.poseWeight * config.poseWeight;
     }
 
-    // Add cost bias
-    float totalCost = trajCost + poseCost + pose.costBias;
+    // Heading/Strafe cost (Unreal-style heading channel)
+    float headingCost = 0.0f;
+    float effectiveHeadingWeight = options.headingWeight > 0.0f ? options.headingWeight : config.headingWeight;
+    if (effectiveHeadingWeight > 0.0f) {
+        // Compute heading cost
+        headingCost = queryPose.computeHeadingCost(pose.poseFeatures, effectiveHeadingWeight);
+
+        // In strafe mode, add extra weight for facing direction match
+        if (options.strafeMode && glm::length(options.desiredMovement) > 0.001f) {
+            // Compute strafe-specific cost: how well does this pose's heading
+            // align with the desired facing direction (camera-locked strafe)
+            glm::vec3 poseHeading = pose.poseFeatures.heading.direction;
+            glm::vec3 desiredFacing = glm::normalize(options.desiredFacing);
+
+            float facingDot = glm::dot(poseHeading, desiredFacing);
+            // 0 for perfect match, 2 for opposite
+            float strafeCost = (1.0f - facingDot) * options.strafeFacingWeight;
+            headingCost += strafeCost;
+        }
+    }
+
+    // Add cost bias from pose
+    float totalCost = trajCost + poseCost + headingCost + pose.costBias;
+
+    // Apply Continuing Pose Cost Bias (Unreal-style)
+    // Negative bias = prefer staying in current animation (more stable)
+    float biasCost = 0.0f;
+    if (options.currentClipIndex != SIZE_MAX && pose.clipIndex == options.currentClipIndex) {
+        // This pose is from the currently playing clip - apply continuing bias
+        biasCost = options.continuingPoseCostBias;
+        totalCost += biasCost;
+    }
+
+    // Apply looping animation bias
+    if (clip.looping) {
+        totalCost += options.loopingCostBias;
+        biasCost += options.loopingCostBias;
+    }
 
     // Penalty for reselecting current pose too soon
     if (options.currentPoseIndex != SIZE_MAX) {

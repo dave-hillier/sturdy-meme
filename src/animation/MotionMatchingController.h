@@ -118,6 +118,17 @@ public:
     // Set excluded tags for search
     void setExcludedTags(const std::vector<std::string>& tags);
 
+    // Strafe mode (Unreal-style orientation lock)
+    void setStrafeMode(bool enabled);
+    bool isStrafeMode() const { return strafeMode_; }
+
+    // Set desired facing direction (for strafe mode - locked to camera direction)
+    void setDesiredFacing(const glm::vec3& facing);
+
+    // Get/set continuing pose cost bias
+    void setContinuingPoseCostBias(float bias) { config_.searchOptions.continuingPoseCostBias = bias; }
+    float getContinuingPoseCostBias() const { return config_.searchOptions.continuingPoseCostBias; }
+
     // Getters
     const MotionDatabase& getDatabase() const { return database_; }
     const PlaybackState& getPlaybackState() const { return playback_; }
@@ -160,6 +171,10 @@ private:
     // Flags
     bool initialized_ = false;
     bool forceSearchNextUpdate_ = false;
+
+    // Strafe mode (Unreal-style)
+    bool strafeMode_ = false;
+    glm::vec3 desiredFacing_{0.0f, 0.0f, 1.0f};  // Locked facing direction in strafe mode
 
     // Internal methods
     void performSearch();

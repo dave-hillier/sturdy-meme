@@ -122,8 +122,11 @@ TrajectorySample TrajectoryPredictor::predictFuture(float timeOffset) const {
 
     // Predict facing direction
     glm::vec3 predictedFacing = currentFacing_;
-    if (glm::length(smoothedInput_) > 0.1f) {
-        // Turn towards movement direction
+    if (strafeMode_) {
+        // In strafe mode, facing stays locked to strafe direction (camera direction)
+        predictedFacing = strafeFacing_;
+    } else if (glm::length(smoothedInput_) > 0.1f) {
+        // Normal mode: turn towards movement direction
         glm::vec3 targetFacing = glm::normalize(glm::vec3(smoothedInput_.x, 0.0f, smoothedInput_.z));
         float turnAngle = glm::radians(config_.turnSpeed) * timeOffset;
 

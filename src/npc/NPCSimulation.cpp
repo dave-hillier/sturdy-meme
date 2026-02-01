@@ -62,10 +62,10 @@ size_t NPCSimulation::spawnNPCs(const std::vector<NPCSpawnInfo>& spawnPoints) {
 
     // Additional animation files to load (same as player character)
     std::vector<std::string> additionalAnimations = {
-        resourcePath_ + "/assets/characters/fbx/ss_idle.fbx",
-        resourcePath_ + "/assets/characters/fbx/ss_walk.fbx",
-        resourcePath_ + "/assets/characters/fbx/ss_run.fbx",
-        resourcePath_ + "/assets/characters/fbx/ss_jump.fbx"
+        resourcePath_ + "/assets/characters/fbx/sword and shield idle.fbx",
+        resourcePath_ + "/assets/characters/fbx/sword and shield walk.fbx",
+        resourcePath_ + "/assets/characters/fbx/sword and shield run.fbx",
+        resourcePath_ + "/assets/characters/fbx/sword and shield jump.fbx"
     };
 
     size_t createdCount = 0;

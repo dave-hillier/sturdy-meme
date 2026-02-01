@@ -177,6 +177,8 @@ struct MatchResult {
     float cost = 0.0f;                // Total matching cost
     float trajectoryCost = 0.0f;      // Trajectory component
     float poseCost = 0.0f;            // Pose component
+    float headingCost = 0.0f;         // Heading/strafe component
+    float biasCost = 0.0f;            // Continuing/looping bias applied
 
     const DatabasePose* pose = nullptr;
     const DatabaseClip* clip = nullptr;
@@ -189,6 +191,7 @@ struct SearchOptions {
     // Weights for cost components
     float trajectoryWeight = 1.0f;
     float poseWeight = 1.0f;
+    float headingWeight = 0.0f;              // Weight for heading channel (strafe)
 
     // Filtering
     std::vector<std::string> requiredTags;   // Pose must have all these tags
@@ -197,7 +200,22 @@ struct SearchOptions {
 
     // Current pose info (for continuity)
     size_t currentPoseIndex = SIZE_MAX;      // SIZE_MAX = no current pose
+    size_t currentClipIndex = SIZE_MAX;      // Current clip index for bias
     float minTimeSinceLastSelect = 0.1f;     // Minimum time before reselecting same pose
+
+    // Continuing Pose Cost Bias (Unreal-style)
+    // Negative = prefer continuing current animation (more stable)
+    // Positive = switch animations more readily
+    float continuingPoseCostBias = -0.3f;
+
+    // Looping animation bias
+    float loopingCostBias = -0.1f;
+
+    // Strafe mode
+    bool strafeMode = false;                 // When true, use strafe-oriented matching
+    float strafeFacingWeight = 2.0f;         // Extra weight on facing during strafe
+    glm::vec3 desiredFacing{0.0f, 0.0f, 1.0f}; // Desired facing direction (strafe target)
+    glm::vec3 desiredMovement{0.0f};         // Desired movement direction
 
     // Performance - KD-tree acceleration
     bool useKDTree = true;                   // Use KD-tree for accelerated search

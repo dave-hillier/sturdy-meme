@@ -520,14 +520,31 @@ void Application::run() {
             // Temporarily lock orientation if holding trigger/middle mouse
             bool effectiveLock = playerMovement.orientationLocked || input.isOrientationLockHeld();
 
+            // Get facing mode settings
+            auto& playerSettings = gui_->getPlayerSettings();
+            FacingMode facingMode = playerSettings.facingMode;
+            bool guiStrafeEnabled = (facingMode != FacingMode::FollowMovement);
+
+            // Handle FollowTarget mode - place target if not set
+            if (facingMode == FacingMode::FollowTarget && !playerSettings.hasTarget) {
+                // Place target 5m in front of player
+                glm::vec3 forward = playerTransform.getForward();
+                playerSettings.targetPosition = playerTransform.position + forward * 5.0f;
+                playerSettings.hasTarget = true;
+                SDL_Log("Target placed at (%.1f, %.1f, %.1f)",
+                    playerSettings.targetPosition.x,
+                    playerSettings.targetPosition.y,
+                    playerSettings.targetPosition.z);
+            }
+
             glm::vec3 moveDir = input.getMovementDirection();
             if (glm::length(moveDir) > 0.001f) {
                 moveDir = glm::normalize(moveDir);
                 float currentSpeed = input.isSprinting() ? sprintSpeed : moveSpeed;
                 desiredVelocity = moveDir * currentSpeed;
 
-                // Only rotate player to face movement direction if not locked
-                if (!effectiveLock) {
+                // Only rotate player to face movement direction if not locked and not in GUI strafe mode
+                if (!effectiveLock && !guiStrafeEnabled) {
                     float newYaw = glm::degrees(atan2(moveDir.x, moveDir.z));
                     float currentYaw = playerTransform.getYaw();
                     float yawDiff = newYaw - currentYaw;
@@ -536,6 +553,35 @@ void Application::run() {
                     while (yawDiff < -180.0f) yawDiff += 360.0f;
                     float smoothedYaw = currentYaw + yawDiff * 10.0f * deltaTime;  // Smooth rotation
                     // Keep yaw in reasonable range
+                    while (smoothedYaw > 360.0f) smoothedYaw -= 360.0f;
+                    while (smoothedYaw < 0.0f) smoothedYaw += 360.0f;
+                    playerTransform.setYaw(smoothedYaw);
+                }
+            }
+
+            // Handle strafe/lock-on facing modes
+            if (guiStrafeEnabled) {
+                glm::vec3 targetDir;
+                if (facingMode == FacingMode::FollowCamera) {
+                    // Face camera direction
+                    targetDir = camera.getForward();
+                } else if (facingMode == FacingMode::FollowTarget && playerSettings.hasTarget) {
+                    // Face target position
+                    targetDir = playerSettings.targetPosition - playerTransform.position;
+                } else {
+                    targetDir = playerTransform.getForward();
+                }
+
+                targetDir.y = 0.0f;
+                if (glm::length(targetDir) > 0.001f) {
+                    targetDir = glm::normalize(targetDir);
+                    float targetYaw = glm::degrees(atan2(targetDir.x, targetDir.z));
+                    float currentYaw = playerTransform.getYaw();
+                    float yawDiff = targetYaw - currentYaw;
+                    while (yawDiff > 180.0f) yawDiff -= 360.0f;
+                    while (yawDiff < -180.0f) yawDiff += 360.0f;
+                    // Faster rotation for strafe mode responsiveness
+                    float smoothedYaw = currentYaw + yawDiff * 15.0f * deltaTime;
                     while (smoothedYaw > 360.0f) smoothedYaw -= 360.0f;
                     while (smoothedYaw < 0.0f) smoothedYaw += 360.0f;
                     playerTransform.setYaw(smoothedYaw);
@@ -610,11 +656,52 @@ void Application::run() {
         glm::vec3 inputDirection = glm::vec3(desiredVelocity.x, 0.0f, desiredVelocity.z);
         glm::vec3 facingDirection = playerTransform.getForward();
 
+        // Determine strafe mode (GUI-enabled or orientation lock is active)
+        auto& settings = gui_->getPlayerSettings();
+        bool strafeMode = (settings.facingMode != FacingMode::FollowMovement) ||
+            (input.isThirdPersonMode() &&
+             (playerMovement.orientationLocked || input.isOrientationLockHeld()));
+
+        // Get facing direction for strafe mode
+        glm::vec3 strafeFacingDirection;
+        if (settings.facingMode == FacingMode::FollowTarget && settings.hasTarget) {
+            // Face toward target
+            strafeFacingDirection = settings.targetPosition - playerTransform.position;
+        } else {
+            // Face camera direction
+            strafeFacingDirection = camera.getForward();
+        }
+        strafeFacingDirection.y = 0.0f;  // Horizontal only
+        if (glm::length(strafeFacingDirection) > 0.001f) {
+            strafeFacingDirection = glm::normalize(strafeFacingDirection);
+        } else {
+            strafeFacingDirection = glm::vec3(0.0f, 0.0f, 1.0f);
+        }
+
         renderer_->getSystems().scene().getSceneBuilder().updateAnimatedCharacter(
             deltaTime, renderer_->getVulkanContext().getAllocator(), renderer_->getVulkanContext().getVkDevice(),
             renderer_->getCommandPool(), renderer_->getVulkanContext().getVkGraphicsQueue(),
             movementSpeed, isGrounded, isJumping,
-            playerTransform.position, facingDirection, inputDirection);
+            playerTransform.position, facingDirection, inputDirection,
+            strafeMode, strafeFacingDirection);
+
+        // Draw debug target indicator when in FollowTarget mode
+        if (settings.facingMode == FacingMode::FollowTarget && settings.hasTarget) {
+            auto& debugLines = renderer_->getSystems().debugControl().getDebugLineSystem();
+            glm::vec3 targetPos = settings.targetPosition;
+
+            // Draw a small sphere at target position
+            debugLines.addSphere(targetPos, 0.3f, glm::vec4(1.0f, 0.3f, 0.3f, 1.0f), 12);
+
+            // Draw a vertical line to make it more visible
+            debugLines.addLine(targetPos, targetPos + glm::vec3(0.0f, 2.0f, 0.0f),
+                               glm::vec4(1.0f, 0.3f, 0.3f, 1.0f));
+
+            // Draw line from player to target
+            debugLines.addLine(playerTransform.position + glm::vec3(0.0f, 1.0f, 0.0f),
+                               targetPos + glm::vec3(0.0f, 1.0f, 0.0f),
+                               glm::vec4(1.0f, 0.5f, 0.0f, 0.5f));
+        }
 
         // Update NPC animations with LOD based on camera position
         renderer_->getSystems().scene().getSceneBuilder().updateNPCs(

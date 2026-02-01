@@ -242,9 +242,22 @@ void FeatureExtractor::initialize(const Skeleton& skeleton, const FeatureConfig&
         }
     }
 
+    // Find heading bone for orientation queries (strafe support)
+    headingBoneIndex_ = skeleton.findJointIndex(config_.headingBoneName);
+    if (headingBoneIndex_ < 0) {
+        headingBoneIndex_ = skeleton.findJointIndex("mixamorig:" + config_.headingBoneName);
+    }
+    if (headingBoneIndex_ < 0) {
+        // Fall back to root bone if heading bone not found
+        headingBoneIndex_ = rootBoneIndex_;
+    }
+
+    // Set strafe mode from config
+    strafeMode_ = config_.strafeMode;
+
     initialized_ = true;
-    SDL_Log("MotionMatching: FeatureExtractor initialized with %zu feature bones",
-            featureBoneIndices_.size());
+    SDL_Log("MotionMatching: FeatureExtractor initialized with %zu feature bones, heading bone: %d",
+            featureBoneIndices_.size(), headingBoneIndex_);
 }
 
 glm::vec3 FeatureExtractor::computeBonePosition(const Skeleton& skeleton,
@@ -329,6 +342,12 @@ PoseFeatures FeatureExtractor::extractFromPose(const Skeleton& skeleton,
             }
             features.rootAngularVelocity = angle / deltaTime;
         }
+    }
+
+    // Extract heading feature for strafe/orientation queries
+    if (config_.headingWeight > 0.0f) {
+        // Use root velocity as movement direction for heading calculation
+        features.heading = extractHeadingFromPose(skeleton, pose, features.rootVelocity);
     }
 
     return features;
@@ -439,6 +458,106 @@ Trajectory FeatureExtractor::extractTrajectoryFromClip(const AnimationClip& clip
     }
 
     return trajectory;
+}
+
+glm::mat4 FeatureExtractor::computeBoneWorldTransform(const Skeleton& skeleton,
+                                                        const SkeletonPose& pose,
+                                                        int32_t boneIndex) const {
+    if (boneIndex < 0 || static_cast<size_t>(boneIndex) >= pose.size()) {
+        return glm::mat4(1.0f);
+    }
+
+    // Walk up the hierarchy to compute world transform
+    glm::mat4 worldTransform = pose[boneIndex].toMatrix(skeleton.joints[boneIndex].preRotation);
+    int32_t parentIdx = skeleton.joints[boneIndex].parentIndex;
+
+    while (parentIdx >= 0 && static_cast<size_t>(parentIdx) < pose.size()) {
+        glm::mat4 parentMat = pose[parentIdx].toMatrix(skeleton.joints[parentIdx].preRotation);
+        worldTransform = parentMat * worldTransform;
+        parentIdx = skeleton.joints[parentIdx].parentIndex;
+    }
+
+    return worldTransform;
+}
+
+glm::vec3 FeatureExtractor::extractHeadingDirection(const glm::mat4& boneTransform,
+                                                      HeadingAxis axis,
+                                                      ComponentStrip strip) const {
+    // Extract the appropriate axis from the transform
+    glm::vec3 direction;
+    switch (axis) {
+        case HeadingAxis::X:
+            direction = glm::vec3(boneTransform[0]);  // X axis
+            break;
+        case HeadingAxis::Y:
+            direction = glm::vec3(boneTransform[1]);  // Y axis
+            break;
+        case HeadingAxis::Z:
+        default:
+            direction = glm::vec3(boneTransform[2]);  // Z axis (forward)
+            break;
+    }
+
+    // Apply component stripping
+    switch (strip) {
+        case ComponentStrip::StripY:
+            direction.y = 0.0f;  // Horizontal only
+            break;
+        case ComponentStrip::StripXZ:
+            direction.x = 0.0f;
+            direction.z = 0.0f;  // Vertical only
+            break;
+        case ComponentStrip::None:
+        default:
+            break;
+    }
+
+    // Normalize the result
+    float len = glm::length(direction);
+    if (len > 0.001f) {
+        direction /= len;
+    } else {
+        // Default to forward if zero length
+        direction = glm::vec3(0.0f, 0.0f, 1.0f);
+    }
+
+    return direction;
+}
+
+HeadingFeature FeatureExtractor::extractHeadingFromPose(const Skeleton& skeleton,
+                                                          const SkeletonPose& pose,
+                                                          const glm::vec3& movementDirection) const {
+    HeadingFeature heading;
+
+    if (!initialized_ || headingBoneIndex_ < 0) {
+        return heading;
+    }
+
+    // Compute heading bone world transform
+    glm::mat4 boneTransform = computeBoneWorldTransform(skeleton, pose, headingBoneIndex_);
+
+    // Extract heading direction based on config
+    heading.direction = extractHeadingDirection(boneTransform,
+                                                  config_.headingAxis,
+                                                  config_.headingComponentStrip);
+
+    // Store movement direction
+    heading.movementDirection = movementDirection;
+
+    // Compute angle between heading and movement
+    if (glm::length(movementDirection) > 0.001f) {
+        glm::vec3 normMovement = glm::normalize(movementDirection);
+        float dot = glm::clamp(glm::dot(heading.direction, normMovement), -1.0f, 1.0f);
+        heading.angleDifference = std::acos(dot);
+
+        // Determine sign using cross product (for left vs right strafe)
+        float cross = heading.direction.x * normMovement.z - heading.direction.z * normMovement.x;
+        if (cross < 0.0f) {
+            heading.angleDifference = -heading.angleDifference;
+        }
+    }
+
+    return heading;
 }
 
 } // namespace MotionMatching
