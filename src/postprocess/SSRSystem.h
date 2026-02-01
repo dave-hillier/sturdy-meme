@@ -116,6 +116,9 @@ public:
     void setBlurRadius(float radius) { blurRadius = radius; }
     void setBlurDepthThreshold(float threshold) { blurDepthThreshold = threshold; }
 
+    // Reset temporal history (call when window regains focus to prevent ghost frames)
+    void resetTemporalHistory() { temporalHistoryValid = false; }
+
     float getMaxDistance() const { return maxDistance; }
     float getThickness() const { return thickness; }
     int getMaxSteps() const { return maxSteps; }

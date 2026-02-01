@@ -277,13 +277,38 @@ bool VulkanContext::createAllocator() {
 }
 
 bool VulkanContext::createSwapchain() {
+    // Query surface capabilities to understand composite alpha support
+    VkSurfaceCapabilitiesKHR surfaceCaps;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCaps);
+
+    // Log supported composite alpha modes for debugging ghost frame issues
+    SDL_Log("Swapchain: Supported composite alpha modes: %s%s%s%s",
+        (surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) ? "OPAQUE " : "",
+        (surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) ? "PRE_MULTIPLIED " : "",
+        (surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR) ? "POST_MULTIPLIED " : "",
+        (surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) ? "INHERIT " : "");
+
+    // Prefer OPAQUE to prevent compositor alpha blending, fall back to INHERIT if not supported
+    VkCompositeAlphaFlagBitsKHR compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    if (!(surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)) {
+        if (surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) {
+            compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "Swapchain: OPAQUE composite alpha not supported, using INHERIT. "
+                "Ghost frames may occur on window background/restore.");
+        } else if (surfaceCaps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) {
+            compositeAlpha = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "Swapchain: Using PRE_MULTIPLIED composite alpha");
+        }
+    }
+
     vkb::SwapchainBuilder swapchainBuilder{vkbDevice};
     auto swapRet = swapchainBuilder
         .set_desired_format({VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
         .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
-        // Use opaque composite alpha to prevent ghost frames caused by compositor
-        // blending rendered content with cached window content based on alpha values
-        .set_composite_alpha_flags(VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
+        // Use selected composite alpha mode to prevent ghost frames
+        .set_composite_alpha_flags(compositeAlpha)
         .build();
 
     if (!swapRet) {
@@ -297,6 +322,12 @@ bool VulkanContext::createSwapchain() {
     swapchainImageViews = vkbSwapchain.get_image_views().value();
     swapchainImageFormat = vkbSwapchain.image_format;
     swapchainExtent = vkbSwapchain.extent;
+
+    SDL_Log("Swapchain: Created with composite alpha mode: %s",
+        compositeAlpha == VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR ? "OPAQUE" :
+        compositeAlpha == VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR ? "INHERIT" :
+        compositeAlpha == VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR ? "PRE_MULTIPLIED" :
+        "POST_MULTIPLIED");
 
     return true;
 }

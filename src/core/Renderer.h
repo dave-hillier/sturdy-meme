@@ -122,6 +122,14 @@ public:
 
     bool isWindowSuspended() const { return windowSuspended; }
 
+    // Notify renderer that window lost focus (user clicked another app)
+    // On macOS, this can cause compositor to cache stale content
+    void notifyWindowFocusLost() { windowFocusLost_ = true; }
+
+    // Notify renderer that window regained focus - invalidate all temporal history
+    // to prevent ghost frames from blending with stale compositor-cached content
+    void notifyWindowFocusGained();
+
     // Vulkan handle getters for GUI integration
     vk::Instance getInstance() const { return vulkanContext_->getVkInstance(); }
     vk::PhysicalDevice getPhysicalDevice() const { return vulkanContext_->getVkPhysicalDevice(); }
@@ -278,6 +286,7 @@ private:
 
     bool framebufferResized = false;       // true = window resized, need to recreate swapchain
     bool windowSuspended = false;          // true = window minimized/hidden (macOS screen lock)
+    bool windowFocusLost_ = false;         // true = window lost focus, need to invalidate temporal on regain
 
 
     // Dynamic lights

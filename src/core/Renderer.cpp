@@ -818,6 +818,36 @@ bool Renderer::handleResize() {
     return success;
 }
 
+void Renderer::notifyWindowFocusGained() {
+    // When window regains focus (especially on macOS), the compositor may have
+    // cached stale content. Invalidate all temporal history to prevent ghost frames
+    // from temporal blending systems (SSR, Froxel fog).
+
+    if (!windowFocusLost_) {
+        // Focus wasn't lost, nothing to do
+        return;
+    }
+
+    windowFocusLost_ = false;
+
+    SDL_Log("Window focus gained - invalidating temporal history to prevent ghost frames");
+
+    // Invalidate SSR temporal history
+    if (systems_) {
+        systems_->ssr().resetTemporalHistory();
+
+        // Invalidate Froxel volumetric fog temporal history
+        if (systems_->hasFroxel()) {
+            systems_->froxel().resetTemporalHistory();
+        }
+    }
+
+    // Force swapchain clear on next frame to flush compositor cache
+    // We set framebufferResized to trigger a full swapchain recreation
+    // which includes clearing all swapchain images
+    framebufferResized = true;
+}
+
 // Render pass recording helpers - pure command recording, no state mutation
 
 void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime, const glm::vec3& cameraPosition) {

@@ -799,8 +799,19 @@ void Application::processEvents() {
             case SDL_EVENT_WINDOW_HIDDEN:
             case SDL_EVENT_WINDOW_OCCLUDED:
                 // Window minimized or hidden (e.g., macOS screen lock)
-                SDL_Log("Window suspended");
+                SDL_Log("Window suspended (minimized/hidden/occluded)");
                 renderer_->notifyWindowSuspended();
+                break;
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
+                // Window lost focus (user clicked on another app) - macOS-specific handling
+                // On macOS, this can cause compositor caching issues with ghost frames
+                SDL_Log("Window focus lost");
+                renderer_->notifyWindowFocusLost();
+                break;
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                // Window regained focus
+                SDL_Log("Window focus gained");
+                renderer_->notifyWindowFocusGained();
                 break;
             case SDL_EVENT_WINDOW_RESTORED:
             case SDL_EVENT_WINDOW_SHOWN:
