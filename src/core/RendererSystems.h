@@ -176,6 +176,7 @@ public:
     void setAtmosphereLUT(std::unique_ptr<AtmosphereLUTSystem> system);
     FroxelSystem& froxel() { return *froxelSystem_; }
     const FroxelSystem& froxel() const { return *froxelSystem_; }
+    bool hasFroxel() const { return froxelSystem_ != nullptr; }
     void setFroxel(std::unique_ptr<FroxelSystem> system);
     CloudShadowSystem& cloudShadow() { return *cloudShadowSystem_; }
     const CloudShadowSystem& cloudShadow() const { return *cloudShadowSystem_; }
