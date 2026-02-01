@@ -67,7 +67,7 @@ public:
     glm::mat4 getProjectionMatrix() const;
 
     glm::vec3 getPosition() const { return position_; }
-    glm::vec3 getFront() const { return front_; }
+    glm::vec3 getForward() const { return front_; }
     glm::vec3 getRight() const { return right_; }
     glm::vec3 getUp() const { return up_; }
 

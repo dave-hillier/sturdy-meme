@@ -73,7 +73,7 @@ UBOUpdater::Result UBOUpdater::update(
     LightBuffer lightBuffer{};
     glm::mat4 viewProj = camera.getProjectionMatrix() * camera.getViewMatrix();
     systems.scene().getLightManager().buildLightBuffer(
-        lightBuffer, camera.getPosition(), camera.getFront(), viewProj, config.lightCullRadius);
+        lightBuffer, camera.getPosition(), camera.getForward(), viewProj, config.lightCullRadius);
     systems.globalBuffers().updateLightBuffer(frameIndex, lightBuffer);
 
     // Calculate sun screen position (pure) and update post-process (state mutation)

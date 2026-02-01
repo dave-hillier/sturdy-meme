@@ -76,7 +76,7 @@ void GuiIKTab::render(ISceneControl& sceneControl, const Camera& camera, IKDebug
                 break;
             case IKDebugSettings::LookAtMode::Mouse:
                 // Project mouse into world (simplified - uses camera front direction)
-                lookTarget = camera.getPosition() + camera.getFront() * 5.0f;
+                lookTarget = camera.getPosition() + camera.getForward() * 5.0f;
                 break;
         }
         ikSystem.setLookAtTarget(lookTarget);
