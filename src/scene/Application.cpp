@@ -519,14 +519,17 @@ void Application::run() {
             // Temporarily lock orientation if holding trigger/middle mouse
             bool effectiveLock = playerMovement.orientationLocked || input.isOrientationLockHeld();
 
+            // Check if GUI strafe mode is enabled
+            bool guiStrafeEnabled = gui_->getPlayerSettings().strafeModeEnabled;
+
             glm::vec3 moveDir = input.getMovementDirection();
             if (glm::length(moveDir) > 0.001f) {
                 moveDir = glm::normalize(moveDir);
                 float currentSpeed = input.isSprinting() ? sprintSpeed : moveSpeed;
                 desiredVelocity = moveDir * currentSpeed;
 
-                // Only rotate player to face movement direction if not locked
-                if (!effectiveLock) {
+                // Only rotate player to face movement direction if not locked and not in GUI strafe mode
+                if (!effectiveLock && !guiStrafeEnabled) {
                     float newYaw = glm::degrees(atan2(moveDir.x, moveDir.z));
                     float currentYaw = playerTransform.getYaw();
                     float yawDiff = newYaw - currentYaw;
@@ -535,6 +538,25 @@ void Application::run() {
                     while (yawDiff < -180.0f) yawDiff += 360.0f;
                     float smoothedYaw = currentYaw + yawDiff * 10.0f * deltaTime;  // Smooth rotation
                     // Keep yaw in reasonable range
+                    while (smoothedYaw > 360.0f) smoothedYaw -= 360.0f;
+                    while (smoothedYaw < 0.0f) smoothedYaw += 360.0f;
+                    playerTransform.setYaw(smoothedYaw);
+                }
+            }
+
+            // In GUI strafe mode, rotate player to face camera direction
+            if (guiStrafeEnabled) {
+                glm::vec3 camForward = camera.getForward();
+                camForward.y = 0.0f;
+                if (glm::length(camForward) > 0.001f) {
+                    camForward = glm::normalize(camForward);
+                    float targetYaw = glm::degrees(atan2(camForward.x, camForward.z));
+                    float currentYaw = playerTransform.getYaw();
+                    float yawDiff = targetYaw - currentYaw;
+                    while (yawDiff > 180.0f) yawDiff -= 360.0f;
+                    while (yawDiff < -180.0f) yawDiff += 360.0f;
+                    // Faster rotation for strafe mode responsiveness
+                    float smoothedYaw = currentYaw + yawDiff * 15.0f * deltaTime;
                     while (smoothedYaw > 360.0f) smoothedYaw -= 360.0f;
                     while (smoothedYaw < 0.0f) smoothedYaw += 360.0f;
                     playerTransform.setYaw(smoothedYaw);

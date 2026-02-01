@@ -62,8 +62,8 @@ public:
     // Get current velocity
     glm::vec3 getCurrentVelocity() const { return currentVelocity_; }
 
-    // Get current facing direction
-    glm::vec3 getCurrentFacing() const { return currentFacing_; }
+    // Get current facing direction (returns strafe facing when in strafe mode)
+    glm::vec3 getCurrentFacing() const { return strafeMode_ ? strafeFacing_ : currentFacing_; }
 
     // Get smoothed input direction
     glm::vec3 getSmoothedInput() const { return smoothedInput_; }
