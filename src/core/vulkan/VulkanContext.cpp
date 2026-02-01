@@ -323,6 +323,104 @@ bool VulkanContext::recreateSwapchain() {
     return createSwapchain();
 }
 
+void VulkanContext::clearSwapchainImages() {
+    // Clear all swapchain images to black to prevent ghost frames after resize
+    // This ensures no stale content is visible when the swapchain is first used
+
+    if (swapchainImages.empty() || commandPool == VK_NULL_HANDLE) {
+        return;
+    }
+
+    vk::Device vkDevice(device);
+    vk::Queue vkQueue(graphicsQueue);
+
+    // Allocate a temporary command buffer
+    auto allocInfo = vk::CommandBufferAllocateInfo{}
+        .setCommandPool(commandPool)
+        .setLevel(vk::CommandBufferLevel::ePrimary)
+        .setCommandBufferCount(1);
+
+    std::vector<vk::CommandBuffer> cmdBuffers;
+    try {
+        cmdBuffers = vkDevice.allocateCommandBuffers(allocInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate command buffer for swapchain clear: %s", e.what());
+        return;
+    }
+
+    vk::CommandBuffer cmd = cmdBuffers[0];
+
+    // Record the clear commands
+    try {
+        cmd.begin(vk::CommandBufferBeginInfo{}.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit));
+
+        // Clear color value (black with full alpha)
+        vk::ClearColorValue clearColor{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
+
+        vk::ImageSubresourceRange range{};
+        range.aspectMask = vk::ImageAspectFlagBits::eColor;
+        range.baseMipLevel = 0;
+        range.levelCount = 1;
+        range.baseArrayLayer = 0;
+        range.layerCount = 1;
+
+        // Clear each swapchain image
+        for (size_t i = 0; i < swapchainImages.size(); i++) {
+            VkImage image = swapchainImages[i];
+
+            // Transition to TRANSFER_DST for clearing
+            auto toTransfer = vk::ImageMemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlagBits::eNone)
+                .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
+                .setOldLayout(vk::ImageLayout::eUndefined)
+                .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
+                .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setImage(image)
+                .setSubresourceRange(range);
+
+            cmd.pipelineBarrier(
+                vk::PipelineStageFlagBits::eTopOfPipe,
+                vk::PipelineStageFlagBits::eTransfer,
+                {}, {}, {}, toTransfer);
+
+            // Clear the image
+            cmd.clearColorImage(image, vk::ImageLayout::eTransferDstOptimal, clearColor, range);
+
+            // Transition to PRESENT_SRC for presentation
+            auto toPresent = vk::ImageMemoryBarrier{}
+                .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+                .setDstAccessMask(vk::AccessFlagBits::eNone)
+                .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
+                .setNewLayout(vk::ImageLayout::ePresentSrcKHR)
+                .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
+                .setImage(image)
+                .setSubresourceRange(range);
+
+            cmd.pipelineBarrier(
+                vk::PipelineStageFlagBits::eTransfer,
+                vk::PipelineStageFlagBits::eBottomOfPipe,
+                {}, {}, {}, toPresent);
+        }
+
+        cmd.end();
+
+        // Submit and wait for completion
+        auto submitInfo = vk::SubmitInfo{}.setCommandBuffers(cmd);
+        vkQueue.submit(submitInfo, nullptr);
+        vkQueue.waitIdle();
+
+        SDL_Log("Cleared %zu swapchain images to prevent ghost frames", swapchainImages.size());
+
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to clear swapchain images: %s", e.what());
+    }
+
+    // Free the temporary command buffer
+    vkDevice.freeCommandBuffers(commandPool, cmd);
+}
+
 void VulkanContext::waitIdle() {
     if (device != VK_NULL_HANDLE) {
         vk::Device(device).waitIdle();

@@ -429,10 +429,11 @@ bool Renderer::render(const Camera& camera) {
 
         // After swapchain recreation (especially after window restore), ensure frame sync
         // is in a clean state. vkDeviceWaitIdle in handleResize ensures GPU is idle,
-        // but we also need to reset frame index to ensure semaphores are used correctly.
-        // This prevents ghost frames caused by semaphore state inconsistencies.
+        // but we also need to reset frame index and timeline values to ensure
+        // semaphores are used correctly. This prevents ghost frames caused by
+        // semaphore state inconsistencies.
         frameSync_.waitForAllFrames();
-        frameSync_.reset();
+        frameSync_.resetForResize();
     }
 
     // Skip rendering if window is minimized

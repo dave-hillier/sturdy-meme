@@ -97,6 +97,16 @@ public:
     void advance() { frames_.advance(); }
     void reset() { frames_.reset(); }
 
+    // Reset for resize - clears frame index and timeline values to start fresh
+    // Call after waitForAllFrames() when recreating swapchain
+    void resetForResize() {
+        frames_.reset();
+        // Clear all frame signal values so we don't wait for old values
+        // The timeline semaphore counter stays where it is, but future frames
+        // will use values starting from globalFrameCounter_
+        frameSignalValues_.fill(0);
+    }
+
     // Get pointer to current frame index (for legacy code needing pointer access)
     const uint32_t* currentIndexPtr() const { return frames_.currentIndexPtr(); }
 

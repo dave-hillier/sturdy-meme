@@ -51,6 +51,9 @@ public:
     void destroySwapchain();
     bool recreateSwapchain();
 
+    // Clear all swapchain images to black (call after recreateSwapchain to prevent ghost frames)
+    void clearSwapchainImages();
+
     // Swapchain-dependent resource creation (render pass, depth buffer, framebuffers)
     bool createSwapchainResources();
     void destroySwapchainResources();

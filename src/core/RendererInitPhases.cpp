@@ -652,6 +652,10 @@ void Renderer::initResizeCoordinator() {
             return {0, 0};
         }
 
+        // Clear all swapchain images to prevent ghost frames from stale content
+        // This is especially important after window restore (e.g., from screen lock)
+        vulkanContext_->clearSwapchainImages();
+
         // Recreate swapchain-dependent resources (depth buffer and framebuffers)
         if (!vulkanContext_->recreateSwapchainResources()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate swapchain resources during resize");
