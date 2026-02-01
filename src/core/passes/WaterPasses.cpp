@@ -28,6 +28,7 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& con
 
             if (perfToggles->waterGBuffer &&
                 systemsPtr->waterGBuffer().getPipeline() != VK_NULL_HANDLE &&
+                systemsPtr->waterGBuffer().hasDescriptorSets() &&
                 systemsPtr->hasWaterTileCull() &&
                 systemsPtr->waterTileCull().wasWaterVisibleLastFrame(ctx.frameIndex)) {
                 systemsPtr->profiler().beginGpuZone(ctx.commandBuffer, "WaterGBuffer");

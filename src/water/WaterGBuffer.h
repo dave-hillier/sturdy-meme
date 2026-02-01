@@ -85,6 +85,7 @@ public:
     // Get pipeline resources
     VkPipeline getPipeline() const { return pipeline_ ? **pipeline_ : VK_NULL_HANDLE; }
     VkPipelineLayout getPipelineLayout() const { return pipelineLayout_ ? **pipelineLayout_ : VK_NULL_HANDLE; }
+    bool hasDescriptorSets() const { return !descriptorSets.empty(); }
     VkDescriptorSet getDescriptorSet(uint32_t frameIndex) const { return descriptorSets[frameIndex]; }
 
     // Create descriptor sets after resources are available
