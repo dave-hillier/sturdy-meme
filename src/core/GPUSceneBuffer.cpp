@@ -1,6 +1,5 @@
 #include "GPUSceneBuffer.h"
 #include "Mesh.h"
-#include "AABB.h"
 #include <SDL3/SDL_log.h>
 #include <cstring>
 #include <algorithm>
