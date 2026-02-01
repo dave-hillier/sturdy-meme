@@ -225,6 +225,7 @@ private:
     bool initSubsystems(const InitContext& initCtx);  // terrain, grass, weather, snow, water, etc.
     bool initSubsystemsAsync();  // Async version using AsyncSystemLoader (uses asyncInitContext_)
     void initResizeCoordinator();         // resize registration
+    void initTemporalSystems();           // temporal system registration (for ghost frame prevention)
 
     bool createSyncObjects();
     bool createDescriptorSets();

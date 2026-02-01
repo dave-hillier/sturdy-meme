@@ -442,6 +442,25 @@ void RendererSystems::setPerformanceSyncCallback(std::function<void()> callback)
     }
 }
 
+// ============================================================================
+// Temporal system management
+// ============================================================================
+
+void RendererSystems::registerTemporalSystem(ITemporalSystem* system) {
+    if (system) {
+        temporalSystems_.push_back(system);
+    }
+}
+
+void RendererSystems::resetAllTemporalHistory() {
+    SDL_Log("Resetting temporal history for %zu systems", temporalSystems_.size());
+    for (auto* system : temporalSystems_) {
+        if (system) {
+            system->resetTemporalHistory();
+        }
+    }
+}
+
 // Control subsystem accessors
 // Systems that directly implement their interfaces:
 ILocationControl& RendererSystems::locationControl() { return *celestialCalculator_; }

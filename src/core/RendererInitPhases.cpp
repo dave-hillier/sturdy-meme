@@ -673,3 +673,24 @@ void Renderer::initControlSubsystems() {
     // These subsystems implement GUI-facing interfaces directly
     systems_->initControlSubsystems(*vulkanContext_, perfToggles);
 }
+
+void Renderer::initTemporalSystems() {
+    // Register all systems that implement ITemporalSystem
+    // These systems have temporal state (history buffers, ping-pong buffers, frame counters)
+    // that needs to be reset when the window regains focus to prevent ghost frames
+
+    // SSR - has temporal filtering with 90% previous frame blend
+    systems_->registerTemporalSystem(&systems_->ssr());
+
+    // Froxel - has temporal reprojection for volumetric fog
+    if (systems_->hasFroxel()) {
+        systems_->registerTemporalSystem(&systems_->froxel());
+    }
+
+    // Water systems with temporal state
+    systems_->registerTemporalSystem(&systems_->foam());
+    systems_->registerTemporalSystem(&systems_->waterDisplacement());
+
+    SDL_Log("Registered %zu temporal systems for ghost frame prevention",
+            systems_->getTemporalSystemCount());
+}

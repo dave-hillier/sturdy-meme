@@ -14,13 +14,14 @@
 #include "InitContext.h"
 #include "VmaImage.h"
 #include "interfaces/IFogControl.h"
+#include "interfaces/ITemporalSystem.h"
 
 // Froxel-based volumetric fog system (Phase 4.3)
 // Implements frustum-aligned voxel grid for efficient volumetric rendering
 
 static constexpr uint32_t FROXEL_NUM_CASCADES = 4;
 
-class FroxelSystem : public IFogControl {
+class FroxelSystem : public IFogControl, public ITemporalSystem {
 public:
     struct InitInfo {
         VkDevice device;
@@ -116,8 +117,8 @@ public:
     void setUnderwaterColorMult(float m) { underwaterColorMult = m; resetTemporalHistory(); }
     float getUnderwaterColorMult() const { return underwaterColorMult; }
 
-    // Reset temporal history (call when fog parameters change significantly)
-    void resetTemporalHistory() { frameCounter = 0; }
+    // ITemporalSystem: Reset temporal history to prevent ghost frames
+    void resetTemporalHistory() override { frameCounter = 0; }
 
 private:
     bool createScatteringVolume();

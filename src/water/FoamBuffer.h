@@ -10,6 +10,7 @@
 #include <optional>
 
 #include "VmaBuffer.h"
+#include "interfaces/ITemporalSystem.h"
 
 /**
  * FoamBuffer - Phase 14 & 16: Temporal Foam Persistence + Wake System
@@ -41,7 +42,7 @@ struct WakeSource {
     float padding;          // Alignment padding
 };
 
-class FoamBuffer {
+class FoamBuffer : public ITemporalSystem {
 public:
     // Passkey for controlled construction via make_unique
     struct ConstructToken { explicit ConstructToken() = default; };
@@ -113,8 +114,8 @@ public:
     // Clear foam buffer
     void clear(VkCommandBuffer cmd);
 
-    // Reset temporal state (call when window regains focus to prevent ghost frames)
-    void resetTemporalHistory() { currentBuffer = 0; }
+    // ITemporalSystem: Reset temporal history to prevent ghost frames
+    void resetTemporalHistory() override { currentBuffer = 0; }
 
     // Phase 16: Wake System
     // Add a wake source for this frame (cleared after compute pass)

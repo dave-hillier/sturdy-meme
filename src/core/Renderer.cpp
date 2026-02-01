@@ -225,6 +225,12 @@ bool Renderer::initInternal(const InitInfo& info) {
         initResizeCoordinator();
     }
 
+    // Phase 5b: Temporal system registration (for ghost frame prevention)
+    {
+        INIT_PROFILE_PHASE("TemporalSystems");
+        initTemporalSystems();
+    }
+
     // Initialize pass recorders (must be after systems_ is set up)
     // Note: These use stateless recording - config is passed to record() each frame
     reportProgress(0.97f, "Creating pass recorders");
@@ -830,22 +836,11 @@ void Renderer::notifyWindowFocusGained() {
 
     windowFocusLost_ = false;
 
-    SDL_Log("Window focus gained - invalidating ALL temporal history to prevent ghost frames");
+    SDL_Log("Window focus gained - invalidating temporal history to prevent ghost frames");
 
+    // Use the temporal system registry to reset all registered systems
     if (systems_) {
-        // SSR (Screen-Space Reflections) - has temporal blending
-        systems_->ssr().resetTemporalHistory();
-
-        // Froxel volumetric fog - has temporal blending
-        if (systems_->hasFroxel()) {
-            systems_->froxel().resetTemporalHistory();
-        }
-
-        // Water systems with temporal state
-        systems_->foam().resetTemporalHistory();
-        systems_->waterDisplacement().resetTemporalHistory();
-
-        SDL_Log("Reset temporal history for: SSR, Froxel, FoamBuffer, WaterDisplacement");
+        systems_->resetAllTemporalHistory();
     }
 
     // Force swapchain clear on next frame to flush compositor cache
@@ -1180,6 +1175,12 @@ bool Renderer::pollAsyncInit() {
         {
             INIT_PROFILE_PHASE("ResizeCoordinator");
             initResizeCoordinator();
+        }
+
+        // Phase 5b: Temporal systems
+        {
+            INIT_PROFILE_PHASE("TemporalSystems");
+            initTemporalSystems();
         }
 
         // Initialize pass recorders
