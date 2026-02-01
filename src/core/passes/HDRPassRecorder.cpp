@@ -277,6 +277,12 @@ void HDRPassRecorder::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameInde
         return;
     }
 
+    // Use GPU-driven indirect rendering if enabled
+    if (params.useIndirectDraw && params.gpuSceneBuffer && params.gpuSceneBuffer->getObjectCount() > 0) {
+        recordSceneObjectsIndirect(cmd, frameIndex, params);
+        return;
+    }
+
     vk::CommandBuffer vkCmd(cmd);
 
     // Get MaterialRegistry for descriptor set lookup

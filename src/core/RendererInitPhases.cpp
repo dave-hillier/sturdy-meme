@@ -25,6 +25,8 @@
 #include "SnowSystemGroup.h"
 #include "GeometrySystemGroup.h"
 #include "HiZSystem.h"
+#include "GPUSceneBuffer.h"
+#include "culling/GPUCullPass.h"
 #include "ScatterSystem.h"
 #include "ScatterSystemFactory.h"
 #include "TreeSystem.h"
@@ -429,6 +431,49 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
         // Initialize object data for culling
         systems_->hiZ().gatherObjects(systems_->scene().getRenderables(),
                                        systems_->rocks().getSceneObjects());
+    }
+
+    // Initialize GPU scene buffer for GPU-driven rendering
+    {
+        auto gpuSceneBuffer = std::make_unique<GPUSceneBuffer>();
+        if (gpuSceneBuffer->init(vulkanContext_->getAllocator(), MAX_FRAMES_IN_FLIGHT)) {
+            systems_->setGPUSceneBuffer(std::move(gpuSceneBuffer));
+            SDL_Log("GPUSceneBuffer: Initialized for GPU-driven rendering");
+        } else {
+            SDL_Log("Warning: GPUSceneBuffer initialization failed, GPU-driven rendering disabled");
+        }
+    }
+
+    // Initialize GPU culling pass
+    if (systems_->hasGPUSceneBuffer()) {
+        GPUCullPass::InitInfo cullInfo{};
+        cullInfo.device = device;
+        cullInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
+        cullInfo.allocator = vulkanContext_->getAllocator();
+        cullInfo.shaderPath = resourcePath + "/shaders";
+        cullInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+        cullInfo.descriptorPool = descriptorInfra_.getDescriptorPool();
+
+        auto gpuCullPass = GPUCullPass::create(cullInfo);
+        if (gpuCullPass) {
+            // Wire Hi-Z pyramid to GPU cull pass if Hi-Z is available
+            if (systems_->hiZ().getHiZPyramidView() != VK_NULL_HANDLE) {
+                gpuCullPass->setHiZPyramid(
+                    systems_->hiZ().getHiZPyramidView(),
+                    systems_->hiZ().getHiZSampler());
+            }
+            // Set placeholder image for MoltenVK compatibility (all bindings must be valid)
+            const auto* whiteTexture = systems_->scene().getSceneBuilder().getWhiteTexture();
+            if (whiteTexture) {
+                gpuCullPass->setPlaceholderImage(
+                    whiteTexture->getImageView(),
+                    whiteTexture->getSampler());
+            }
+            systems_->setGPUCullPass(std::move(gpuCullPass));
+            SDL_Log("GPUCullPass: Initialized for frustum culling");
+        } else {
+            SDL_Log("Warning: GPUCullPass initialization failed, GPU culling disabled");
+        }
     }
 
     // Initialize profiler for GPU and CPU timing

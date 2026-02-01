@@ -20,6 +20,7 @@ struct Config {
 struct PassIds {
     FrameGraph::PassId compute = FrameGraph::INVALID_PASS;
     FrameGraph::PassId froxel = FrameGraph::INVALID_PASS;
+    FrameGraph::PassId gpuCull = FrameGraph::INVALID_PASS;  // GPU-driven culling pass
 };
 
 PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& config);

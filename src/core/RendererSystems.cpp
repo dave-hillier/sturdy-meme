@@ -29,6 +29,8 @@
 #include "DeferredTerrainObjects.h"
 #include "CloudShadowSystem.h"
 #include "HiZSystem.h"
+#include "GPUSceneBuffer.h"
+#include "culling/GPUCullPass.h"
 #include "WaterSystem.h"
 #include "WaterDisplacement.h"
 #include "FlowMapGenerator.h"
@@ -169,6 +171,14 @@ void RendererSystems::setSSR(std::unique_ptr<SSRSystem> system) {
 
 void RendererSystems::setHiZ(std::unique_ptr<HiZSystem> system) {
     hiZSystem_ = std::move(system);
+}
+
+void RendererSystems::setGPUSceneBuffer(std::unique_ptr<GPUSceneBuffer> buffer) {
+    gpuSceneBuffer_ = std::move(buffer);
+}
+
+void RendererSystems::setGPUCullPass(std::unique_ptr<GPUCullPass> pass) {
+    gpuCullPass_ = std::move(pass);
 }
 
 void RendererSystems::setSky(std::unique_ptr<SkySystem> system) {
@@ -320,6 +330,13 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
 
     // Destroy in reverse dependency order
     // Tier 2+ first, then Tier 1
+
+    // GPU-driven rendering (must be destroyed before allocator shutdown)
+    gpuCullPass_.reset();  // RAII cleanup via destructor
+    if (gpuSceneBuffer_) {
+        gpuSceneBuffer_->cleanup();
+        gpuSceneBuffer_.reset();
+    }
 
     // debugLineSystem_ cleanup handled by destructor (RAII)
     debugLineSystem_.reset();

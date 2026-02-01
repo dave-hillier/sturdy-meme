@@ -20,6 +20,8 @@
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
 #include "HiZSystem.h"
+#include "GPUSceneBuffer.h"
+#include "culling/GPUCullPass.h"
 #include "FlowMapGenerator.h"
 #include "FoamBuffer.h"
 #include "CloudShadowSystem.h"
@@ -229,6 +231,62 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& con
         .mainThreadOnly = false,  // Can run parallel with Shadow
         .priority = 50
     });
+
+    // GPU culling pass - frustum culling for indirect draw
+    if (systems.hasGPUSceneBuffer() && systems.hasGPUCullPass()) {
+        ids.gpuCull = graph.addPass({
+            .name = "GPUCull",
+            .execute = [&systems](FrameGraph::RenderContext& ctx) {
+                RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+                if (!renderCtx) return;
+                VkCommandBuffer cmd = renderCtx->cmd;
+                uint32_t frameIndex = renderCtx->frameIndex;
+
+                GPUSceneBuffer& sceneBuffer = systems.gpuSceneBuffer();
+                GPUCullPass& cullPass = systems.gpuCullPass();
+
+                // Skip if no objects to cull
+                if (sceneBuffer.getObjectCount() == 0) {
+                    return;
+                }
+
+                systems.profiler().beginGpuZone(cmd, "GPUCull");
+
+                // Reset draw count to zero before culling
+                sceneBuffer.resetDrawCount(vk::CommandBuffer(cmd));
+
+                // Update culling uniforms
+                cullPass.updateUniforms(
+                    frameIndex,
+                    renderCtx->frame.view,
+                    renderCtx->frame.projection,
+                    renderCtx->frame.cameraPosition,
+                    sceneBuffer.getObjectCount()
+                );
+
+                // Bind scene buffer
+                cullPass.bindSceneBuffer(&sceneBuffer, frameIndex);
+
+                // Record the culling compute dispatch
+                cullPass.recordCulling(cmd, frameIndex);
+
+                // Memory barrier: compute write -> indirect read
+                auto memoryBarrier = vk::MemoryBarrier{}
+                    .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
+                    .setDstAccessMask(vk::AccessFlagBits::eIndirectCommandRead);
+                vk::CommandBuffer(cmd).pipelineBarrier(
+                    vk::PipelineStageFlagBits::eComputeShader,
+                    vk::PipelineStageFlagBits::eDrawIndirect,
+                    vk::DependencyFlags{},
+                    memoryBarrier, {}, {});
+
+                systems.profiler().endGpuZone(cmd, "GPUCull");
+            },
+            .canUseSecondary = false,
+            .mainThreadOnly = true,
+            .priority = 90  // Run after main compute, before HDR
+        });
+    }
 
     return ids;
 }

@@ -8,6 +8,7 @@
 #include "shaders/bindings.h"
 #include <SDL3/SDL_log.h>
 #include <cstring>
+#include <array>
 
 std::unique_ptr<GPUCullPass> GPUCullPass::create(const InitInfo& info) {
     auto pass = std::make_unique<GPUCullPass>(ConstructToken{});
@@ -182,19 +183,102 @@ void GPUCullPass::bindSceneBuffer(GPUSceneBuffer* sceneBuffer, uint32_t frameInd
 
     currentSceneBuffer_ = sceneBuffer;
 
-    // Update descriptor set with scene buffer bindings
-    auto writer = DescriptorManager::SetWriter(device_, descSets_[frameIndex])
-        .writeBuffer(BINDING_SCENE_CULL_UNIFORMS, uniformBuffers_.buffers[frameIndex], 0, sizeof(GPUCullUniforms))
-        .writeBuffer(BINDING_SCENE_CULL_OBJECTS, sceneBuffer->getCullObjectBuffer(), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .writeBuffer(BINDING_SCENE_CULL_INDIRECT, sceneBuffer->getIndirectBuffer(frameIndex), 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-        .writeBuffer(BINDING_SCENE_CULL_COUNT, sceneBuffer->getDrawCountBuffer(frameIndex), 0, sizeof(uint32_t), VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
-
-    // Add Hi-Z pyramid if available
-    if (hiZPyramidView_ != VK_NULL_HANDLE && hiZSampler_ != VK_NULL_HANDLE) {
-        writer.writeImage(BINDING_SCENE_CULL_HIZ, hiZPyramidView_, hiZSampler_);
+    // Validate frame index
+    if (frameIndex >= framesInFlight_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GPUCullPass::bindSceneBuffer: Invalid frame index %u (max %u)", frameIndex, framesInFlight_);
+        return;
     }
 
-    writer.update();
+    // Validate descriptor set
+    if (descSets_.empty() || descSets_[frameIndex] == VK_NULL_HANDLE) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GPUCullPass::bindSceneBuffer: Descriptor set is null for frame %u", frameIndex);
+        return;
+    }
+
+    // Validate uniform buffer
+    if (uniformBuffers_.buffers.empty() || uniformBuffers_.buffers[frameIndex] == VK_NULL_HANDLE) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GPUCullPass::bindSceneBuffer: Uniform buffer is null for frame %u", frameIndex);
+        return;
+    }
+
+    // Validate buffers before writing descriptor set
+    vk::Buffer cullObjBuffer = sceneBuffer->getCullObjectBuffer();
+    vk::Buffer indirectBuffer = sceneBuffer->getIndirectBuffer(frameIndex);
+    vk::Buffer countBuffer = sceneBuffer->getDrawCountBuffer(frameIndex);
+
+    if (!cullObjBuffer) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GPUCullPass::bindSceneBuffer: Cull object buffer is null");
+        return;
+    }
+    if (!indirectBuffer) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GPUCullPass::bindSceneBuffer: Indirect buffer is null for frame %u", frameIndex);
+        return;
+    }
+    if (!countBuffer) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GPUCullPass::bindSceneBuffer: Count buffer is null for frame %u", frameIndex);
+        return;
+    }
+
+    // Validate device
+    if (device_ == VK_NULL_HANDLE) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GPUCullPass::bindSceneBuffer: Device is null");
+        return;
+    }
+
+    // Build descriptor buffer infos
+    std::array<vk::DescriptorBufferInfo, 4> bufferInfos = {{
+        {uniformBuffers_.buffers[frameIndex], 0, sizeof(GPUCullUniforms)},
+        {cullObjBuffer, 0, VK_WHOLE_SIZE},
+        {indirectBuffer, 0, VK_WHOLE_SIZE},
+        {countBuffer, 0, sizeof(uint32_t)}
+    }};
+
+    // Get Hi-Z or placeholder image
+    vk::ImageView imageView = hiZPyramidView_ != VK_NULL_HANDLE ? vk::ImageView(hiZPyramidView_) : vk::ImageView(placeholderImageView_);
+    vk::Sampler sampler = hiZSampler_ != VK_NULL_HANDLE ? vk::Sampler(hiZSampler_) : vk::Sampler(placeholderSampler_);
+
+    if (!imageView || !sampler) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "GPUCullPass::bindSceneBuffer: No Hi-Z or placeholder image available for binding 4");
+        return;
+    }
+
+    vk::DescriptorImageInfo imageInfo{sampler, imageView, vk::ImageLayout::eShaderReadOnlyOptimal};
+
+    // Build descriptor writes using vulkan-hpp
+    std::array<vk::WriteDescriptorSet, 5> writes = {{
+        vk::WriteDescriptorSet{}
+            .setDstSet(descSets_[frameIndex])
+            .setDstBinding(BINDING_SCENE_CULL_UNIFORMS)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setPBufferInfo(&bufferInfos[0]),
+        vk::WriteDescriptorSet{}
+            .setDstSet(descSets_[frameIndex])
+            .setDstBinding(BINDING_SCENE_CULL_OBJECTS)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setPBufferInfo(&bufferInfos[1]),
+        vk::WriteDescriptorSet{}
+            .setDstSet(descSets_[frameIndex])
+            .setDstBinding(BINDING_SCENE_CULL_INDIRECT)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setPBufferInfo(&bufferInfos[2]),
+        vk::WriteDescriptorSet{}
+            .setDstSet(descSets_[frameIndex])
+            .setDstBinding(BINDING_SCENE_CULL_COUNT)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setPBufferInfo(&bufferInfos[3]),
+        vk::WriteDescriptorSet{}
+            .setDstSet(descSets_[frameIndex])
+            .setDstBinding(BINDING_SCENE_CULL_HIZ)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(1)
+            .setPImageInfo(&imageInfo)
+    }};
+
+    vk::Device(device_).updateDescriptorSets(writes, {});
 }
 
 void GPUCullPass::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex) {
@@ -240,6 +324,11 @@ GPUCullPass::CullingStats GPUCullPass::getStats(uint32_t frameIndex) const {
 void GPUCullPass::setHiZPyramid(VkImageView pyramidView, VkSampler sampler) {
     hiZPyramidView_ = pyramidView;
     hiZSampler_ = sampler;
+}
+
+void GPUCullPass::setPlaceholderImage(VkImageView view, VkSampler sampler) {
+    placeholderImageView_ = view;
+    placeholderSampler_ = sampler;
 }
 
 void GPUCullPass::extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]) {

@@ -103,6 +103,9 @@ public:
     // Set Hi-Z pyramid for occlusion culling (optional)
     void setHiZPyramid(VkImageView pyramidView, VkSampler sampler);
 
+    // Set placeholder image for when Hi-Z is not available (required for MoltenVK)
+    void setPlaceholderImage(VkImageView view, VkSampler sampler);
+
 private:
     bool initInternal(const InitInfo& info);
     void cleanup();
@@ -143,6 +146,10 @@ private:
     VkImageView hiZPyramidView_ = VK_NULL_HANDLE;
     VkSampler hiZSampler_ = VK_NULL_HANDLE;
     bool hiZEnabled_ = false;
+
+    // Placeholder image for descriptor binding when Hi-Z is unavailable
+    VkImageView placeholderImageView_ = VK_NULL_HANDLE;
+    VkSampler placeholderSampler_ = VK_NULL_HANDLE;
 
     // Workgroup size (must match shader)
     static constexpr uint32_t WORKGROUP_SIZE = 64;

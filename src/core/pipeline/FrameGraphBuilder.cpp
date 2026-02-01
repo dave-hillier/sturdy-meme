@@ -60,10 +60,18 @@ bool FrameGraphBuilder::build(
     frameGraph.addDependency(computeIds.compute, computeIds.froxel);
     frameGraph.addDependency(computeIds.compute, waterIds.waterGBuffer);
 
-    // HDR depends on Shadow, Froxel, Water GBuffer
+    // GPU cull depends on Compute (needs scene data uploaded)
+    if (computeIds.gpuCull != FrameGraph::INVALID_PASS) {
+        frameGraph.addDependency(computeIds.compute, computeIds.gpuCull);
+    }
+
+    // HDR depends on Shadow, Froxel, Water GBuffer, and GPU Cull
     frameGraph.addDependency(shadow, hdr);
     frameGraph.addDependency(computeIds.froxel, hdr);
     frameGraph.addDependency(waterIds.waterGBuffer, hdr);
+    if (computeIds.gpuCull != FrameGraph::INVALID_PASS) {
+        frameGraph.addDependency(computeIds.gpuCull, hdr);
+    }
 
     // Post-HDR passes depend on HDR
     frameGraph.addDependency(hdr, waterIds.ssr);

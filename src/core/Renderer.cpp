@@ -43,8 +43,11 @@
 // Animation and debug
 #include "SkinnedMeshRenderer.h"
 #include "npc/NPCRenderer.h"
+#include "npc/NPCSimulation.h"
 #include "DebugLineSystem.h"
 #include "HiZSystem.h"
+#include "GPUSceneBuffer.h"
+#include "culling/GPUCullPass.h"
 #include "interfaces/IDebugControl.h"
 #include "controls/DebugControlSubsystem.h"
 #include "threading/TaskScheduler.h"
@@ -566,6 +569,43 @@ bool Renderer::render(const Camera& camera) {
     snowConfig.useVolumetricSnow = useVolumetricSnow;
     FrameUpdater::updateAllSystems(*systems_, frame, extent, snowConfig);
 
+    // Populate GPU scene buffer for GPU-driven rendering
+    if (systems_->hasGPUSceneBuffer()) {
+        systems_->profiler().beginCpuZone("GPUSceneBuffer");
+        GPUSceneBuffer& sceneBuffer = systems_->gpuSceneBuffer();
+        sceneBuffer.beginFrame(frame.frameIndex);
+
+        // Add all static scene objects to the GPU buffer
+        const auto& sceneObjects = systems_->scene().getRenderables();
+        SceneBuilder& sceneBuilder = systems_->scene().getSceneBuilder();
+        size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
+        bool hasCharacter = sceneBuilder.hasCharacter();
+        const NPCSimulation* npcSim = sceneBuilder.getNPCSimulation();
+
+        for (size_t i = 0; i < sceneObjects.size(); ++i) {
+            // Skip player character (rendered with GPU skinning)
+            if (hasCharacter && i == playerIndex) continue;
+
+            // Skip NPC characters (rendered with GPU skinning)
+            if (npcSim) {
+                bool isNPC = false;
+                const auto& npcData = npcSim->getData();
+                for (size_t npcIdx = 0; npcIdx < npcData.count(); ++npcIdx) {
+                    if (i == npcData.renderableIndices[npcIdx]) {
+                        isNPC = true;
+                        break;
+                    }
+                }
+                if (isNPC) continue;
+            }
+
+            sceneBuffer.addObject(sceneObjects[i]);
+        }
+
+        sceneBuffer.finalize();
+        systems_->profiler().endCpuZone("GPUSceneBuffer");
+    }
+
     // Begin command buffer recording
     systems_->profiler().beginCpuZone("CmdBufferRecord");
     auto recordStart = std::chrono::high_resolution_clock::now();
@@ -784,6 +824,17 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     params.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
     params.viewProj = lastViewProj;
 
+    // GPU-driven rendering params
+    // Note: useIndirectDraw is disabled for now as the full GPU-driven rendering path
+    // requires mesh batching and proper indirect draw command generation.
+    // The GPUCullPass runs to populate visibility data, but rendering uses the traditional path.
+    if (systems_->hasGPUSceneBuffer() && systems_->hasGPUCullPass()) {
+        params.gpuSceneBuffer = &systems_->gpuSceneBuffer();
+        params.instancedPipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
+        params.instancedPipeline = descriptorInfra_.getGraphicsPipelinePtr();
+        // params.useIndirectDraw = true;  // TODO: Enable when indirect draw path is fully implemented
+    }
+
     // Delegate to the recorder
     hdrPassRecorder_->record(cmd, frameIndex, grassTime, params);
 }
@@ -797,6 +848,16 @@ void Renderer::recordHDRPassWithSecondaries(VkCommandBuffer cmd, uint32_t frameI
     params.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
     params.viewProj = lastViewProj;
 
+    // GPU-driven rendering params
+    // Note: useIndirectDraw is disabled for now as the full GPU-driven rendering path
+    // requires mesh batching and proper indirect draw command generation.
+    if (systems_->hasGPUSceneBuffer() && systems_->hasGPUCullPass()) {
+        params.gpuSceneBuffer = &systems_->gpuSceneBuffer();
+        params.instancedPipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
+        params.instancedPipeline = descriptorInfra_.getGraphicsPipelinePtr();
+        // params.useIndirectDraw = true;  // TODO: Enable when indirect draw path is fully implemented
+    }
+
     // Delegate to the recorder
     hdrPassRecorder_->recordWithSecondaries(cmd, frameIndex, grassTime, secondaries, params);
 }
@@ -808,6 +869,16 @@ void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
     params.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
     params.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
     params.viewProj = lastViewProj;
+
+    // GPU-driven rendering params
+    // Note: useIndirectDraw is disabled for now as the full GPU-driven rendering path
+    // requires mesh batching and proper indirect draw command generation.
+    if (systems_->hasGPUSceneBuffer() && systems_->hasGPUCullPass()) {
+        params.gpuSceneBuffer = &systems_->gpuSceneBuffer();
+        params.instancedPipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
+        params.instancedPipeline = descriptorInfra_.getGraphicsPipelinePtr();
+        // params.useIndirectDraw = true;  // TODO: Enable when indirect draw path is fully implemented
+    }
 
     // Delegate to the recorder
     hdrPassRecorder_->recordSecondarySlot(cmd, frameIndex, grassTime, slot, params);
@@ -1574,6 +1645,49 @@ bool Renderer::initSubsystemsAsync() {
                 systems_->hiZ().setDepthBuffer(core.hdr.depthView, vulkanContext_->getDepthSampler());
                 systems_->hiZ().gatherObjects(systems_->scene().getRenderables(),
                                               systems_->rocks().getSceneObjects());
+            }
+
+            // GPU scene buffer for GPU-driven rendering
+            {
+                auto gpuSceneBuffer = std::make_unique<GPUSceneBuffer>();
+                if (gpuSceneBuffer->init(vulkanContext_->getAllocator(), MAX_FRAMES_IN_FLIGHT)) {
+                    systems_->setGPUSceneBuffer(std::move(gpuSceneBuffer));
+                    SDL_Log("GPUSceneBuffer: Initialized for GPU-driven rendering");
+                } else {
+                    SDL_Log("Warning: GPUSceneBuffer initialization failed, GPU-driven rendering disabled");
+                }
+            }
+
+            // GPU culling pass
+            if (systems_->hasGPUSceneBuffer()) {
+                GPUCullPass::InitInfo cullInfo{};
+                cullInfo.device = device;
+                cullInfo.raiiDevice = &vulkanContext_->getRaiiDevice();
+                cullInfo.allocator = vulkanContext_->getAllocator();
+                cullInfo.shaderPath = resourcePath + "/shaders";
+                cullInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
+                cullInfo.descriptorPool = descriptorInfra_.getDescriptorPool();
+
+                auto gpuCullPass = GPUCullPass::create(cullInfo);
+                if (gpuCullPass) {
+                    // Wire Hi-Z pyramid to GPU cull pass if Hi-Z is available
+                    if (systems_->hiZ().getHiZPyramidView() != VK_NULL_HANDLE) {
+                        gpuCullPass->setHiZPyramid(
+                            systems_->hiZ().getHiZPyramidView(),
+                            systems_->hiZ().getHiZSampler());
+                    }
+                    // Set placeholder image for MoltenVK compatibility (all bindings must be valid)
+                    const auto* whiteTexture = systems_->scene().getSceneBuilder().getWhiteTexture();
+                    if (whiteTexture) {
+                        gpuCullPass->setPlaceholderImage(
+                            whiteTexture->getImageView(),
+                            whiteTexture->getSampler());
+                    }
+                    systems_->setGPUCullPass(std::move(gpuCullPass));
+                    SDL_Log("GPUCullPass: Initialized for frustum culling");
+                } else {
+                    SDL_Log("Warning: GPUCullPass initialization failed, GPU culling disabled");
+                }
             }
 
             // Profiler

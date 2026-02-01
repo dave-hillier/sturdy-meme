@@ -64,6 +64,8 @@ class TreeLODSystem;
 class ImpostorCullSystem;
 class CloudShadowSystem;
 class HiZSystem;
+class GPUSceneBuffer;
+class GPUCullPass;
 class WaterSystem;
 class WaterDisplacement;
 class FlowMapGenerator;
@@ -262,6 +264,14 @@ public:
     HiZSystem& hiZ() { return *hiZSystem_; }
     const HiZSystem& hiZ() const { return *hiZSystem_; }
     void setHiZ(std::unique_ptr<HiZSystem> system);
+    GPUSceneBuffer& gpuSceneBuffer() { return *gpuSceneBuffer_; }
+    const GPUSceneBuffer& gpuSceneBuffer() const { return *gpuSceneBuffer_; }
+    bool hasGPUSceneBuffer() const { return gpuSceneBuffer_ != nullptr; }
+    void setGPUSceneBuffer(std::unique_ptr<GPUSceneBuffer> buffer);
+    GPUCullPass& gpuCullPass() { return *gpuCullPass_; }
+    const GPUCullPass& gpuCullPass() const { return *gpuCullPass_; }
+    bool hasGPUCullPass() const { return gpuCullPass_ != nullptr; }
+    void setGPUCullPass(std::unique_ptr<GPUCullPass> pass);
 
     // Scene and resources
     SceneManager& scene() { return *sceneManager_; }
@@ -488,6 +498,8 @@ private:
 
     // Tier 2 - Culling
     std::unique_ptr<HiZSystem> hiZSystem_;
+    std::unique_ptr<GPUSceneBuffer> gpuSceneBuffer_;
+    std::unique_ptr<GPUCullPass> gpuCullPass_;
 
     // Infrastructure (needed throughout)
     std::unique_ptr<SceneManager> sceneManager_;
