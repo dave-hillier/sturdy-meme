@@ -19,6 +19,10 @@
 class Camera;
 class RendererSystems;
 
+namespace ecs {
+class World;
+}
+
 class UBOUpdater {
 public:
     // Configuration for UBO updates
@@ -30,6 +34,8 @@ public:
         bool hdrEnabled = true;
         float maxSnowHeight = 0.3f;
         float lightCullRadius = 100.0f;
+        ecs::World* ecsWorld = nullptr;  // Optional: ECS world for light updates
+        float deltaTime = 0.016f;         // For flicker animation
     };
 
     // Output data from UBO update (for state that needs to be tracked)

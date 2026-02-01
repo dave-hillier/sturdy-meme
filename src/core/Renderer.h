@@ -24,6 +24,10 @@
 // Forward declarations
 class PhysicsWorld;
 
+namespace ecs {
+class World;
+}
+
 namespace Loading {
     class AsyncSystemLoader;
 }
@@ -175,6 +179,10 @@ public:
     PerformanceToggles& getPerformanceToggles() { return perfToggles; }
     const PerformanceToggles& getPerformanceToggles() const { return perfToggles; }
 
+    // ECS integration for light updates
+    void setECSWorld(ecs::World* world) { ecsWorld_ = world; }
+    ecs::World* getECSWorld() const { return ecsWorld_; }
+
 #ifdef JPH_DEBUG_RENDERER
     // Update physics debug visualization (call before render)
     void updatePhysicsDebug(PhysicsWorld& physics, const glm::vec3& cameraPos);
@@ -274,6 +282,10 @@ private:
 
     // Dynamic lights
     float lightCullRadius = 100.0f;        // Radius from camera for light culling
+
+    // ECS world for light updates
+    ecs::World* ecsWorld_ = nullptr;
+    float lastDeltaTime_ = 0.016f;         // For flicker animation
 
     // GUI rendering callback
     GuiRenderCallback guiRenderCallback;

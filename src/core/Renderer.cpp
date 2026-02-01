@@ -516,6 +516,8 @@ bool Renderer::render(const Camera& camera) {
         uboConfig.hdrEnabled = hdrEnabled;
         uboConfig.maxSnowHeight = MAX_SNOW_HEIGHT;
         uboConfig.lightCullRadius = lightCullRadius;
+        uboConfig.ecsWorld = ecsWorld_;
+        uboConfig.deltaTime = timing.deltaTime;
         auto uboResult = UBOUpdater::update(*systems_, frameSync_.currentIndex(), camera, uboConfig);
         lastSunIntensity = uboResult.sunIntensity;
         // Track bandwidth: main UBO + dynamic UBO copy + snow + cloudShadow + lights

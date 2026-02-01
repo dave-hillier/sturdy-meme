@@ -1,4 +1,6 @@
 #include "SceneManager.h"
+#include "lighting/LightSystem.h"
+#include "ecs/Components.h"
 #include <SDL3/SDL.h>
 
 std::unique_ptr<SceneManager> SceneManager::create(SceneBuilder::InitInfo& builderInfo) {
@@ -155,8 +157,19 @@ void SceneManager::initializeScenePhysics(PhysicsWorld& physics) {
     SDL_Log("Scene physics initialized with %zu physics-enabled objects", physicsIndices.size());
 }
 
+void SceneManager::initializeECSLights() {
+    // Only initialize if ECS world is available
+    if (!ecsWorld_) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "initializeECSLights called without ECS world");
+        return;
+    }
+
+    // Re-initialize scene lights using ECS
+    initializeSceneLights();
+}
+
 void SceneManager::initializeSceneLights() {
-    // Clear any existing lights
+    // Clear any existing lights from legacy system
     lightManager.clear();
 
     // Helper to apply scene origin offset
@@ -164,40 +177,66 @@ void SceneManager::initializeSceneLights() {
         return glm::vec2(localX + sceneOrigin.x, localZ + sceneOrigin.y);
     };
 
-    // Add the glowing orb point light (follows the emissive sphere on the crate)
-    auto orbPos = worldPos(2.0f, 0.0f);
-    Light orbLight;
-    orbLight.type = LightType::Point;
-    orbLight.position = glm::vec3(orbPos.x, 1.3f, orbPos.y);
-    orbLight.color = glm::vec3(1.0f, 0.9f, 0.7f);  // Warm white
-    orbLight.intensity = 5.0f;
-    orbLight.radius = 8.0f;
-    orbLight.priority = 10.0f;  // High priority - always visible
-    lightManager.addLight(orbLight);
+    // Create ECS light entities if world is available
+    if (ecsWorld_) {
+        // Orb light - flickering torch that follows the emissive sphere
+        auto orbPos = worldPos(2.0f, 0.0f);
+        glm::vec3 orbPosition(orbPos.x, 1.3f, orbPos.y);
+        orbLightEntity_ = ecs::light::createTorch(*ecsWorld_, orbPosition, 5.0f);
 
-    // Add blue light
-    auto bluePos = worldPos(-3.0f, 2.0f);
-    Light blueLight;
-    blueLight.type = LightType::Point;
-    blueLight.position = glm::vec3(bluePos.x, 2.0f, bluePos.y);
-    blueLight.color = glm::vec3(0.3f, 0.5f, 1.0f);  // Blue
-    blueLight.intensity = 3.0f;
-    blueLight.radius = 6.0f;
-    blueLight.priority = 5.0f;
-    lightManager.addLight(blueLight);
+        // Blue point light
+        auto bluePos = worldPos(-3.0f, 2.0f);
+        glm::vec3 bluePosition(bluePos.x, 2.0f, bluePos.y);
+        blueLightEntity_ = ecs::light::createPointLight(
+            *ecsWorld_, bluePosition,
+            glm::vec3(0.3f, 0.5f, 1.0f),  // Blue color
+            3.0f,                          // Intensity
+            6.0f);                         // Radius
 
-    // Add green light
-    auto greenPos = worldPos(4.0f, -2.0f);
-    Light greenLight;
-    greenLight.type = LightType::Point;
-    greenLight.position = glm::vec3(greenPos.x, 1.5f, greenPos.y);
-    greenLight.color = glm::vec3(0.4f, 1.0f, 0.4f);  // Green
-    greenLight.intensity = 2.5f;
-    greenLight.radius = 5.0f;
-    greenLight.priority = 5.0f;
-    lightManager.addLight(greenLight);
+        // Green point light
+        auto greenPos = worldPos(4.0f, -2.0f);
+        glm::vec3 greenPosition(greenPos.x, 1.5f, greenPos.y);
+        greenLightEntity_ = ecs::light::createPointLight(
+            *ecsWorld_, greenPosition,
+            glm::vec3(0.4f, 1.0f, 0.4f),  // Green color
+            2.5f,                          // Intensity
+            5.0f);                         // Radius
 
-    SDL_Log("Scene lights initialized (%zu lights)", lightManager.getLightCount());
+        SDL_Log("ECS scene lights initialized (3 light entities)");
+    } else {
+        // Fallback to legacy LightManager if ECS world not available
+        auto orbPos = worldPos(2.0f, 0.0f);
+        Light orbLight;
+        orbLight.type = LightType::Point;
+        orbLight.position = glm::vec3(orbPos.x, 1.3f, orbPos.y);
+        orbLight.color = glm::vec3(1.0f, 0.9f, 0.7f);  // Warm white
+        orbLight.intensity = 5.0f;
+        orbLight.radius = 8.0f;
+        orbLight.priority = 10.0f;
+        lightManager.addLight(orbLight);
+
+        auto bluePos = worldPos(-3.0f, 2.0f);
+        Light blueLight;
+        blueLight.type = LightType::Point;
+        blueLight.position = glm::vec3(bluePos.x, 2.0f, bluePos.y);
+        blueLight.color = glm::vec3(0.3f, 0.5f, 1.0f);
+        blueLight.intensity = 3.0f;
+        blueLight.radius = 6.0f;
+        blueLight.priority = 5.0f;
+        lightManager.addLight(blueLight);
+
+        auto greenPos = worldPos(4.0f, -2.0f);
+        Light greenLight;
+        greenLight.type = LightType::Point;
+        greenLight.position = glm::vec3(greenPos.x, 1.5f, greenPos.y);
+        greenLight.color = glm::vec3(0.4f, 1.0f, 0.4f);
+        greenLight.intensity = 2.5f;
+        greenLight.radius = 5.0f;
+        greenLight.priority = 5.0f;
+        lightManager.addLight(greenLight);
+
+        SDL_Log("Scene lights initialized (legacy LightManager: %zu lights)", lightManager.getLightCount());
+    }
 }
 
 void SceneManager::updatePhysicsToScene(PhysicsWorld& physics) {
@@ -232,8 +271,14 @@ void SceneManager::updatePhysicsToScene(PhysicsWorld& physics) {
             glm::vec3 orbPosition = glm::vec3(physicsTransform[3]);
             orbLightPosition = orbPosition;
 
-            // Update light manager's orb light position (light index 0)
-            if (lightManager.getLightCount() > 0) {
+            // Update ECS light entity position
+            if (ecsWorld_ && orbLightEntity_ != ecs::NullEntity && ecsWorld_->valid(orbLightEntity_)) {
+                if (ecsWorld_->has<ecs::Transform>(orbLightEntity_)) {
+                    ecsWorld_->get<ecs::Transform>(orbLightEntity_).matrix =
+                        ecs::Transform::fromPosition(orbPosition).matrix;
+                }
+            } else if (lightManager.getLightCount() > 0) {
+                // Fallback to legacy light manager
                 lightManager.getLight(0).position = orbPosition;
             }
         }

@@ -423,6 +423,11 @@ bool Application::init(const std::string& title, int width, int height) {
     // Initialize ECS world with scene entities
     initECS();
 
+    // Wire up ECS world for lighting
+    renderer_->setECSWorld(&ecsWorld_);
+    renderer_->getSystems().scene().setECSWorld(&ecsWorld_);
+    renderer_->getSystems().scene().initializeECSLights();
+
     // Initialize GUI system via factory
     {
         INIT_PROFILE_PHASE("GUI");
