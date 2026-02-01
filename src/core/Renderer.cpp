@@ -448,6 +448,17 @@ bool Renderer::render(const Camera& camera) {
         return false;
     }
 
+    // After window restore, skip a few frames and just present cleared images
+    // This forces the macOS compositor to flush any cached content
+    if (skipFramesAfterRestore_ > 0) {
+        skipFramesAfterRestore_--;
+        SDL_Log("Skipping frame to flush compositor (%d remaining)", skipFramesAfterRestore_);
+
+        // Present a cleared swapchain image
+        vulkanContext_->clearSwapchainImages();
+        return true;  // Frame was "rendered" (cleared)
+    }
+
     // Begin CPU profiling for this frame (must be before any CPU zones)
     systems_->profiler().beginCpuFrame();
 
@@ -847,6 +858,12 @@ void Renderer::notifyWindowFocusGained() {
     // We set framebufferResized to trigger a full swapchain recreation
     // which includes clearing all swapchain images
     framebufferResized = true;
+
+    // Skip a few frames after restore to ensure compositor flushes any cached content
+    // On macOS, the compositor may blend old cached content with new frames
+    // Presenting multiple cleared frames forces it to update
+    skipFramesAfterRestore_ = 3;
+    SDL_Log("Will skip %d frames after restore to flush compositor", skipFramesAfterRestore_);
 }
 
 // Render pass recording helpers - pure command recording, no state mutation
