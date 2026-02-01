@@ -36,8 +36,6 @@ private:
     void processEvents();
     void applyInputToCamera();
     std::string getResourcePath();
-    void initPhysics();
-    void updatePhysicsToScene();
     void initFlag();
     void updateFlag(float deltaTime);
     void updateCameraOcclusion(float deltaTime);
@@ -56,9 +54,6 @@ private:
 
     // Input system
     InputSystem input;
-
-    // Physics body IDs for scene objects (mapped to scene object indices)
-    std::vector<PhysicsBodyID> scenePhysicsBodies;
 
     // Breadcrumb tracker for fast respawn (Ghost of Tsushima optimization)
     // Tracks safe player positions so respawns load most content from cache

@@ -1010,127 +1010,6 @@ std::string Application::getResourcePath() {
 #endif
 }
 
-void Application::initPhysics() {
-    physics_ = PhysicsWorld::create();
-    if (!physics_) {
-        SDL_Log("Failed to initialize physics system");
-        return;
-    }
-
-    // Helper to get terrain height at a position
-    auto getTerrainY = [this](float x, float z) -> float {
-        return renderer_->getSystems().terrain().getHeightAt(x, z);
-    };
-
-    // Scene object layout from SceneBuilder (after multi-lights update):
-    // 0: Ground disc (static terrain - already created above)
-    // 1: Wooden crate 1 at (2.0, terrain+0.5, 0.0) - unit cube
-    // 2: Rotated wooden crate at (-1.5, terrain+0.5, 1.0)
-    // 3: Polished metal sphere at (0.0, terrain+0.5, -2.0) - radius 0.5
-    // 4: Rough metal sphere at (-3.0, terrain+0.5, -1.0) - radius 0.5
-    // 5: Polished metal cube at (3.0, terrain+0.5, -2.0)
-    // 6: Brushed metal cube at (-3.0, terrain+0.5, -3.0)
-    // 7: Emissive sphere at (2.0, terrain+1.3, 0.0) - scaled 0.3, visual radius 0.15
-    // 8: Blue light at (-3.0, 2.0, 2.0) - fixed, no physics
-    // 9: Green light at (4.0, 1.5, -2.0) - fixed, no physics
-    // 10: Player capsule (handled by character controller)
-    // 11: Flag pole at (5.0, terrain+1.5, 0.0) - static physics
-    // 12: Flag cloth - no physics (soft body simulation handles it)
-
-    const size_t numSceneObjects = 13;
-    scenePhysicsBodies.resize(numSceneObjects, INVALID_BODY_ID);
-
-    // Box half-extent for unit cube
-    glm::vec3 cubeHalfExtents(0.5f, 0.5f, 0.5f);
-    float boxMass = 10.0f;
-    float sphereMass = 5.0f;
-
-    // Spawn objects slightly above terrain to let them settle
-    const float spawnOffset = 0.1f;
-
-    // Index 1: Wooden crate 1
-    float x1 = 2.0f, z1 = 0.0f;
-    scenePhysicsBodies[1] = physics().createBox(glm::vec3(x1, getTerrainY(x1, z1) + 0.5f + spawnOffset, z1), cubeHalfExtents, boxMass);
-
-    // Index 2: Rotated wooden crate
-    float x2 = -1.5f, z2 = 1.0f;
-    scenePhysicsBodies[2] = physics().createBox(glm::vec3(x2, getTerrainY(x2, z2) + 0.5f + spawnOffset, z2), cubeHalfExtents, boxMass);
-
-    // Index 3: Polished metal sphere (mesh radius 0.5)
-    float x3 = 0.0f, z3 = -2.0f;
-    scenePhysicsBodies[3] = physics().createSphere(glm::vec3(x3, getTerrainY(x3, z3) + 0.5f + spawnOffset, z3), 0.5f, sphereMass);
-
-    // Index 4: Rough metal sphere (mesh radius 0.5)
-    float x4 = -3.0f, z4 = -1.0f;
-    scenePhysicsBodies[4] = physics().createSphere(glm::vec3(x4, getTerrainY(x4, z4) + 0.5f + spawnOffset, z4), 0.5f, sphereMass);
-
-    // Index 5: Polished metal cube
-    float x5 = 3.0f, z5 = -2.0f;
-    scenePhysicsBodies[5] = physics().createBox(glm::vec3(x5, getTerrainY(x5, z5) + 0.5f + spawnOffset, z5), cubeHalfExtents, boxMass);
-
-    // Index 6: Brushed metal cube
-    float x6 = -3.0f, z6 = -3.0f;
-    scenePhysicsBodies[6] = physics().createBox(glm::vec3(x6, getTerrainY(x6, z6) + 0.5f + spawnOffset, z6), cubeHalfExtents, boxMass);
-
-    // Index 7: Emissive sphere - mesh radius 0.5, scaled 0.3 = visual radius 0.15
-    float x7 = 2.0f, z7 = 0.0f;
-    scenePhysicsBodies[7] = physics().createSphere(glm::vec3(x7, getTerrainY(x7, z7) + 1.3f + spawnOffset, z7), 0.5f * 0.3f, 1.0f);
-
-    // Index 8 & 9: Blue and green lights - NO PHYSICS (fixed light indicators)
-    // scenePhysicsBodies[8] and [9] remain INVALID_BODY_ID
-
-    // Index 11: Flag pole - static cylinder (radius 0.05m, height 3m)
-    // Create as a static box approximation for simplicity
-    float x11 = 5.0f, z11 = 0.0f;
-    glm::vec3 poleHalfExtents(0.05f, 1.5f, 0.05f);  // Half of 3m height
-    scenePhysicsBodies[11] = physics().createStaticBox(glm::vec3(x11, getTerrainY(x11, z11) + 1.5f, z11), poleHalfExtents);
-
-    // Index 12: Flag cloth - NO PHYSICS (soft body simulation)
-    // scenePhysicsBodies[12] remains INVALID_BODY_ID
-
-    // Create character controller for player at terrain height
-    float playerX = 0.0f, playerZ = 0.0f;
-    float playerTerrainY = getTerrainY(playerX, playerZ);
-    physics().createCharacter(glm::vec3(playerX, playerTerrainY + spawnOffset, playerZ),
-                              PlayerMovement::CAPSULE_HEIGHT, PlayerMovement::CAPSULE_RADIUS);
-
-    SDL_Log("Physics initialized with %d active bodies", physics().getActiveBodyCount());
-}
-
-void Application::updatePhysicsToScene() {
-    // Update scene object transforms from physics simulation
-    auto& sceneObjects = renderer_->getSystems().scene().getRenderables();
-
-    for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
-        PhysicsBodyID bodyID = scenePhysicsBodies[i];
-        if (bodyID == INVALID_BODY_ID) continue;
-
-        // Skip player object (handled separately)
-        if (i == renderer_->getSystems().scene().getPlayerObjectIndex()) continue;
-
-        // Get transform from physics (position and rotation only)
-        glm::mat4 physicsTransform = physics().getBodyTransform(bodyID);
-
-        // Extract scale from current transform to preserve it
-        glm::vec3 scale;
-        scale.x = glm::length(glm::vec3(sceneObjects[i].transform[0]));
-        scale.y = glm::length(glm::vec3(sceneObjects[i].transform[1]));
-        scale.z = glm::length(glm::vec3(sceneObjects[i].transform[2]));
-
-        // Apply scale to physics transform
-        physicsTransform = glm::scale(physicsTransform, scale);
-
-        // Update scene object transform
-        sceneObjects[i].transform = physicsTransform;
-
-        // Update orb light position to follow the emissive sphere (index 7)
-        if (i == 7) {
-            glm::vec3 orbPosition = glm::vec3(physicsTransform[3]);
-            renderer_->getSystems().scene().setOrbLightPosition(orbPosition);
-        }
-    }
-}
-
 void Application::initFlag() {
     // Create cloth simulation: 20x15 grid, 0.15m spacing
     const int clothWidth = 20;
@@ -1188,21 +1067,28 @@ void Application::updateCameraOcclusion(float deltaTime) {
         currentlyOccluding.insert(hit.bodyId);
     }
 
-    // Update opacities for all scene objects
+    // Update opacities using ECS queries - entities with PhysicsBody and Opacity components
     auto& sceneObjects = renderer_->getSystems().scene().getRenderables();
-    for (size_t i = 0; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
-        PhysicsBodyID bodyID = scenePhysicsBodies[i];
-        if (bodyID == INVALID_BODY_ID) continue;
 
-        // Skip player (handled separately)
-        if (i == renderer_->getSystems().scene().getPlayerObjectIndex()) continue;
+    // Query entities with PhysicsBody component (excludes player via PlayerTag check)
+    for (auto [entity, physicsBody] : ecsWorld_.view<ecs::PhysicsBody>().each()) {
+        // Skip player entity
+        if (ecsWorld_.has<ecs::PlayerTag>(entity)) continue;
+
+        PhysicsBodyID bodyID = static_cast<PhysicsBodyID>(physicsBody.bodyId);
+        if (bodyID == INVALID_BODY_ID) continue;
 
         bool isOccluding = currentlyOccluding.count(bodyID) > 0;
         float targetOpacity = isOccluding ? occludedOpacity : 1.0f;
 
-        // Smooth fade
-        float fadeFactor = 1.0f - std::exp(-occlusionFadeSpeed * deltaTime);
-        sceneObjects[i].opacity += (targetOpacity - sceneObjects[i].opacity) * fadeFactor;
+        // Find the renderable index for this entity and update opacity
+        for (size_t i = 0; i < sceneEntities_.size(); ++i) {
+            if (sceneEntities_[i] == entity && i < sceneObjects.size()) {
+                float fadeFactor = 1.0f - std::exp(-occlusionFadeSpeed * deltaTime);
+                sceneObjects[i].opacity += (targetOpacity - sceneObjects[i].opacity) * fadeFactor;
+                break;
+            }
+        }
     }
 
     // Update tracking set
@@ -1223,13 +1109,15 @@ void Application::updateFlag(float deltaTime) {
     clothSim.addSphereCollision(playerPos + glm::vec3(0, playerHeight * 0.5f, 0), playerRadius);
     clothSim.addSphereCollision(playerPos + glm::vec3(0, playerHeight - playerRadius, 0), playerRadius);
 
-    // Add collision spheres for dynamic physics objects
-    auto& sceneObjects = renderer_->getSystems().scene().getRenderables();
-    for (size_t i = 1; i < scenePhysicsBodies.size() && i < sceneObjects.size(); i++) {
-        PhysicsBodyID bodyID = scenePhysicsBodies[i];
+    // Add collision spheres for dynamic physics objects using ECS query
+    for (auto [entity, physicsBody] : ecsWorld_.view<ecs::PhysicsBody>().each()) {
+        // Skip player, flag pole, and flag cloth
+        if (ecsWorld_.has<ecs::PlayerTag>(entity)) continue;
+        if (ecsWorld_.has<ecs::FlagPoleTag>(entity)) continue;
+        if (ecsWorld_.has<ecs::FlagClothTag>(entity)) continue;
+
+        PhysicsBodyID bodyID = static_cast<PhysicsBodyID>(physicsBody.bodyId);
         if (bodyID == INVALID_BODY_ID) continue;
-        if (i == renderer_->getSystems().scene().getPlayerObjectIndex()) continue; // Skip player (already handled)
-        if (i == 11 || i == 12) continue; // Skip flag pole and cloth itself
 
         PhysicsBodyInfo info = physics().getBodyInfo(bodyID);
 
@@ -1252,17 +1140,61 @@ void Application::updateFlag(float deltaTime) {
 void Application::initECS() {
     INIT_PROFILE_PHASE("ECS");
 
+    auto& sceneManager = renderer_->getSystems().scene();
+    const auto& renderables = sceneManager.getRenderables();
+    const auto& sceneBuilder = sceneManager.getSceneBuilder();
+
     // Create ECS entities from scene renderables
-    const auto& renderables = renderer_->getSystems().scene().getRenderables();
     ecs::EntityFactory factory(ecsWorld_);
     sceneEntities_ = factory.createFromRenderables(renderables);
 
-    // Link physics bodies to ECS entities
-    for (size_t i = 0; i < scenePhysicsBodies.size() && i < sceneEntities_.size(); ++i) {
-        PhysicsBodyID bodyId = scenePhysicsBodies[i];
+    // Link physics bodies from SceneManager to ECS entities
+    const auto& physicsBodies = sceneManager.getPhysicsBodies();
+    for (size_t i = 0; i < physicsBodies.size() && i < sceneEntities_.size(); ++i) {
+        PhysicsBodyID bodyId = physicsBodies[i];
         if (bodyId != INVALID_BODY_ID) {
             ecsWorld_.add<ecs::PhysicsBody>(sceneEntities_[i], static_cast<ecs::PhysicsBodyId>(bodyId));
         }
+    }
+
+    // Add tag components for special entities (eliminates hardcoded index tracking)
+    if (sceneBuilder.getPlayerObjectIndex() < sceneEntities_.size()) {
+        ecsWorld_.add<ecs::PlayerTag>(sceneEntities_[sceneBuilder.getPlayerObjectIndex()]);
+    }
+    if (sceneBuilder.getEmissiveOrbIndex() < sceneEntities_.size()) {
+        ecsWorld_.add<ecs::OrbTag>(sceneEntities_[sceneBuilder.getEmissiveOrbIndex()]);
+    }
+    if (sceneBuilder.getFlagPoleIndex() < sceneEntities_.size()) {
+        ecsWorld_.add<ecs::FlagPoleTag>(sceneEntities_[sceneBuilder.getFlagPoleIndex()]);
+    }
+    if (sceneBuilder.getFlagClothIndex() < sceneEntities_.size()) {
+        ecsWorld_.add<ecs::FlagClothTag>(sceneEntities_[sceneBuilder.getFlagClothIndex()]);
+    }
+    if (sceneBuilder.hasCape() && sceneBuilder.getCapeIndex() < sceneEntities_.size()) {
+        ecsWorld_.add<ecs::CapeTag>(sceneEntities_[sceneBuilder.getCapeIndex()]);
+    }
+    if (sceneBuilder.hasWeapons()) {
+        if (sceneBuilder.getSwordIndex() < sceneEntities_.size()) {
+            ecsWorld_.add<ecs::WeaponTag>(sceneEntities_[sceneBuilder.getSwordIndex()], ecs::WeaponSlot::RightHand);
+        }
+        if (sceneBuilder.getShieldIndex() < sceneEntities_.size()) {
+            ecsWorld_.add<ecs::WeaponTag>(sceneEntities_[sceneBuilder.getShieldIndex()], ecs::WeaponSlot::LeftHand);
+        }
+    }
+
+    // Add NPCTag to NPC entities (enables ECS-based NPC queries)
+    if (sceneBuilder.hasNPCs()) {
+        size_t npcCount = sceneBuilder.getNPCCount();
+        for (size_t npcIdx = 0; npcIdx < npcCount; ++npcIdx) {
+            size_t renderableIdx = sceneBuilder.getNPCRenderableIndex(npcIdx);
+            if (renderableIdx < sceneEntities_.size()) {
+                // Get template index from NPCSimulation data
+                const auto* npcSim = sceneBuilder.getNPCSimulation();
+                uint32_t templateIndex = npcSim ? npcSim->getData().templateIndices[npcIdx] : 0;
+                ecsWorld_.add<ecs::NPCTag>(sceneEntities_[renderableIdx], templateIndex);
+            }
+        }
+        SDL_Log("ECS: Tagged %zu NPC entities", npcCount);
     }
 
     // Add bounding spheres for culling (approximate based on mesh type)
@@ -1304,32 +1236,20 @@ void Application::updateECS(float deltaTime) {
         SDL_Log("ECS: Populated %zu entities from deferred renderables", sceneEntities_.size());
     }
 
-    // Set up bone attachments for weapons (once, after entities are populated)
+    // Set up bone attachments for weapons using tag queries (once, after entities are populated)
     if (!ecsWeaponsInitialized_ && !sceneEntities_.empty() && sceneBuilder.hasWeapons()) {
-        size_t swordIdx = sceneBuilder.getSwordIndex();
-        size_t shieldIdx = sceneBuilder.getShieldIndex();
-
-        // Add bone attachment to sword entity
-        if (swordIdx < sceneEntities_.size()) {
-            ecs::Entity swordEntity = sceneEntities_[swordIdx];
-            if (ecsWorld_.valid(swordEntity)) {
-                ecsWorld_.add<ecs::BoneAttachment>(swordEntity,
+        // Find and attach sword (right hand weapon) using WeaponTag query
+        for (auto [entity, weaponTag] : ecsWorld_.view<ecs::WeaponTag>().each()) {
+            if (weaponTag.slot == ecs::WeaponSlot::RightHand) {
+                ecsWorld_.add<ecs::BoneAttachment>(entity,
                     sceneBuilder.getRightHandBoneIndex(),
                     sceneBuilder.getSwordOffset());
-                SDL_Log("ECS: Attached sword (entity %zu) to right hand bone %d",
-                        swordIdx, sceneBuilder.getRightHandBoneIndex());
-            }
-        }
-
-        // Add bone attachment to shield entity
-        if (shieldIdx < sceneEntities_.size()) {
-            ecs::Entity shieldEntity = sceneEntities_[shieldIdx];
-            if (ecsWorld_.valid(shieldEntity)) {
-                ecsWorld_.add<ecs::BoneAttachment>(shieldEntity,
+                SDL_Log("ECS: Attached sword to right hand bone %d", sceneBuilder.getRightHandBoneIndex());
+            } else if (weaponTag.slot == ecs::WeaponSlot::LeftHand) {
+                ecsWorld_.add<ecs::BoneAttachment>(entity,
                     sceneBuilder.getLeftHandBoneIndex(),
                     sceneBuilder.getShieldOffset());
-                SDL_Log("ECS: Attached shield (entity %zu) to left hand bone %d",
-                        shieldIdx, sceneBuilder.getLeftHandBoneIndex());
+                SDL_Log("ECS: Attached shield to left hand bone %d", sceneBuilder.getLeftHandBoneIndex());
             }
         }
 

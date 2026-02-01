@@ -973,6 +973,17 @@ bool SceneBuilder::hasNPCs() const {
     return npcSimulation_ && npcSimulation_->hasNPCs();
 }
 
+size_t SceneBuilder::getNPCRenderableIndex(size_t npcIndex) const {
+    if (!npcSimulation_ || npcIndex >= npcSimulation_->getNPCCount()) {
+        return SIZE_MAX;
+    }
+    const auto& npcData = npcSimulation_->getData();
+    if (npcIndex >= npcData.renderableIndices.size()) {
+        return SIZE_MAX;
+    }
+    return npcData.renderableIndices[npcIndex];
+}
+
 void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     if (!hasAnimatedCharacter) return;
 

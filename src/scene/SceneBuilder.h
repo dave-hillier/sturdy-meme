@@ -144,6 +144,10 @@ public:
     size_t getNPCCount() const;
     bool hasNPCs() const;
 
+    // Get NPC renderable info for ECS integration
+    // Returns the renderable index for a given NPC, or SIZE_MAX if invalid
+    size_t getNPCRenderableIndex(size_t npcIndex) const;
+
     // Player weapons access
     bool hasWeapons() const { return rightHandBoneIndex >= 0 && leftHandBoneIndex >= 0; }
     size_t getSwordIndex() const { return swordIndex; }

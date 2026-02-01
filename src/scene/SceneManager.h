@@ -64,6 +64,12 @@ public:
     void setOrbLightPosition(const glm::vec3& position) { orbLightPosition = position; }
     const glm::vec3& getOrbLightPosition() const { return orbLightPosition; }
 
+    // Physics body access for ECS integration
+    const std::vector<PhysicsBodyID>& getPhysicsBodies() const { return scenePhysicsBodies; }
+    PhysicsBodyID getPhysicsBody(size_t index) const {
+        return index < scenePhysicsBodies.size() ? scenePhysicsBodies[index] : INVALID_BODY_ID;
+    }
+
 private:
     bool initInternal(SceneBuilder::InitInfo& builderInfo);
     void cleanup();

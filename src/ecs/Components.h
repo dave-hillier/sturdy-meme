@@ -332,4 +332,47 @@ struct DebugName {
     explicit DebugName(const char* n) : name(n) {}
 };
 
+// =============================================================================
+// Tag Components for Special Entities
+// =============================================================================
+// Zero-size markers for querying specific entity types.
+// Eliminates need for hardcoded index tracking.
+
+// Player character entity
+struct PlayerTag {};
+
+// Player cape (cloth simulation)
+struct CapeTag {};
+
+// Flag pole and cloth
+struct FlagPoleTag {};
+struct FlagClothTag {};
+
+// Emissive orb (has corresponding light)
+struct OrbTag {};
+
+// Weapon slots
+enum class WeaponSlot : uint8_t {
+    RightHand = 0,  // Sword
+    LeftHand = 1    // Shield
+};
+
+struct WeaponTag {
+    WeaponSlot slot;
+
+    WeaponTag() : slot(WeaponSlot::RightHand) {}
+    explicit WeaponTag(WeaponSlot s) : slot(s) {}
+};
+
+// NPC entity marker
+struct NPCTag {
+    uint32_t templateIndex = 0;  // Index into character templates
+
+    NPCTag() = default;
+    explicit NPCTag(uint32_t idx) : templateIndex(idx) {}
+};
+
+// Well entrance (terrain hole marker)
+struct WellEntranceTag {};
+
 } // namespace ecs
