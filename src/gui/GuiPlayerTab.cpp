@@ -435,10 +435,9 @@ void GuiPlayerTab::renderMotionMatchingOverlay(IPlayerControl& playerControl, co
         for (size_t i = 0; i < queryTrajectory.sampleCount; ++i) {
             const auto& sample = queryTrajectory.samples[i];
 
-            // Transform sample position from character space to world space
-            // Samples are relative to ground position, apply rotation from worldTransform
-            glm::vec3 rotatedPos = glm::mat3(worldTransform) * sample.position;
-            glm::vec3 worldPos = groundPos + rotatedPos;
+            // Trajectory positions are world-space offsets from current position
+            // (predictor works in world space), so just add directly
+            glm::vec3 worldPos = groundPos + sample.position;
             ImVec2 screenPos = worldToScreen(worldPos, viewProj, width, height);
 
             // Draw line from previous point
@@ -451,9 +450,8 @@ void GuiPlayerTab::renderMotionMatchingOverlay(IPlayerControl& playerControl, co
                 float radius = sample.timeOffset >= 0 ? 5.0f : 3.0f;  // Future points larger
                 drawList->AddCircleFilled(screenPos, radius, queryPointColor);
 
-                // Draw facing direction (transform direction, not position)
-                glm::vec3 facingWorld = glm::mat3(worldTransform) * sample.facing;
-                glm::vec3 facingEnd = worldPos + facingWorld * 0.3f;
+                // Draw facing direction (already in world space)
+                glm::vec3 facingEnd = worldPos + sample.facing * 0.3f;
                 ImVec2 facingScreenPos = worldToScreen(facingEnd, viewProj, width, height);
                 if (facingScreenPos.x > -500) {
                     drawList->AddLine(screenPos, facingScreenPos, IM_COL32(0, 150, 200, 150), 1.0f);
@@ -471,8 +469,8 @@ void GuiPlayerTab::renderMotionMatchingOverlay(IPlayerControl& playerControl, co
         for (size_t i = 0; i < matchedTrajectory.sampleCount; ++i) {
             const auto& sample = matchedTrajectory.samples[i];
 
-            glm::vec3 rotatedPos = glm::mat3(worldTransform) * sample.position;
-            glm::vec3 worldPos = groundPos + rotatedPos;
+            // Matched trajectory is also in world-space offsets
+            glm::vec3 worldPos = groundPos + sample.position;
             ImVec2 screenPos = worldToScreen(worldPos, viewProj, width, height);
 
             // Draw line (offset slightly for visibility)
