@@ -75,9 +75,8 @@ private:
     static constexpr float occlusionFadeSpeed = 8.0f;
     static constexpr float occludedOpacity = 0.3f;
 
-    // ECS world and entity tracking
+    // ECS world and entity tracking (entities now stored in SceneBuilder)
     ecs::World ecsWorld_;
-    std::vector<ecs::Entity> sceneEntities_;  // Maps scene object indices to ECS entities
     bool ecsWeaponsInitialized_ = false;      // Track if weapon bone attachments are set up
     std::unique_ptr<ecs::ECSMaterialDemo> ecsMaterialDemo_;  // ECS material demo entities
 

@@ -4,6 +4,7 @@
 #include "asset/AssetRegistry.h"
 #include "npc/NPCSimulation.h"
 #include "npc/NPCData.h"
+#include "ecs/EntityFactory.h"
 #include <SDL3/SDL_log.h>
 
 // Constructor must be defined in .cpp to allow unique_ptr<NPCSimulation> with incomplete type in header
@@ -66,6 +67,102 @@ void SceneBuilder::createRenderablesDeferred() {
     if (onRenderablesCreated_) {
         onRenderablesCreated_();
     }
+}
+
+void SceneBuilder::createEntitiesFromRenderables() {
+    if (!ecsWorld_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "SceneBuilder: ECS world not set");
+        return;
+    }
+
+    if (sceneObjects.empty()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "SceneBuilder: No renderables to create entities from");
+        return;
+    }
+
+    SDL_Log("SceneBuilder: Creating %zu ECS entities from renderables", sceneObjects.size());
+
+    ecs::EntityFactory factory(*ecsWorld_);
+    sceneEntities_.reserve(sceneObjects.size());
+
+    // Create entities from each renderable
+    for (size_t i = 0; i < sceneObjects.size(); ++i) {
+        ecs::Entity entity = factory.createFromRenderable(sceneObjects[i]);
+        sceneEntities_.push_back(entity);
+
+        // Store special entity handles
+        if (i == playerObjectIndex) {
+            playerEntity_ = entity;
+            ecsWorld_->add<ecs::PlayerTag>(entity);
+        }
+        if (i == emissiveOrbIndex) {
+            emissiveOrbEntity_ = entity;
+            ecsWorld_->add<ecs::OrbTag>(entity);
+        }
+        if (i == flagPoleIndex) {
+            flagPoleEntity_ = entity;
+            ecsWorld_->add<ecs::FlagPoleTag>(entity);
+        }
+        if (i == flagClothIndex) {
+            flagClothEntity_ = entity;
+            ecsWorld_->add<ecs::FlagClothTag>(entity);
+        }
+        if (i == capeIndex) {
+            capeEntity_ = entity;
+            ecsWorld_->add<ecs::CapeTag>(entity);
+        }
+        if (i == swordIndex) {
+            swordEntity_ = entity;
+            ecsWorld_->add<ecs::WeaponTag>(entity, ecs::WeaponSlot::RightHand);
+            // Add bone attachment for sword
+            if (rightHandBoneIndex >= 0) {
+                ecsWorld_->add<ecs::BoneAttachment>(entity, rightHandBoneIndex, glm::mat4(1.0f));
+            }
+        }
+        if (i == shieldIndex) {
+            shieldEntity_ = entity;
+            ecsWorld_->add<ecs::WeaponTag>(entity, ecs::WeaponSlot::LeftHand);
+            // Add bone attachment for shield
+            if (leftHandBoneIndex >= 0) {
+                ecsWorld_->add<ecs::BoneAttachment>(entity, leftHandBoneIndex, glm::mat4(1.0f));
+            }
+        }
+        if (i == wellEntranceIndex) {
+            wellEntranceEntity_ = entity;
+            ecsWorld_->add<ecs::WellEntranceTag>(entity);
+        }
+
+        // Add bounding sphere for culling (estimated from mesh)
+        glm::vec3 pos = glm::vec3(sceneObjects[i].transform[3]);
+        float radius = 2.0f;  // Default radius, could be computed from mesh bounds
+        if (sceneObjects[i].mesh) {
+            // Estimate radius from mesh scale in transform
+            float scale = glm::length(glm::vec3(sceneObjects[i].transform[0]));
+            radius = scale * 2.0f;  // Rough estimate
+        }
+        ecsWorld_->add<ecs::BoundingSphere>(entity, pos, radius);
+
+        // Mark as visible by default
+        ecsWorld_->add<ecs::Visible>(entity);
+    }
+
+    // Create NPC entities with tags
+    if (npcSimulation_) {
+        const auto& npcData = npcSimulation_->getData();
+        npcEntities_.reserve(npcData.count());
+
+        for (size_t i = 0; i < npcData.count(); ++i) {
+            size_t renderableIndex = npcData.renderableIndices[i];
+            if (renderableIndex < sceneEntities_.size()) {
+                ecs::Entity npcEntity = sceneEntities_[renderableIndex];
+                ecsWorld_->add<ecs::NPCTag>(npcEntity, static_cast<uint32_t>(npcData.templateIndices[i]));
+                npcEntities_.push_back(npcEntity);
+            }
+        }
+        SDL_Log("SceneBuilder: Tagged %zu NPC entities", npcEntities_.size());
+    }
+
+    SDL_Log("SceneBuilder: Created ECS entities successfully");
 }
 
 void SceneBuilder::registerMaterials() {

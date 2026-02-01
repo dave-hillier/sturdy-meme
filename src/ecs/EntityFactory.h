@@ -354,4 +354,219 @@ inline void syncRenderableFromTransform(
     }
 }
 
+// =============================================================================
+// Entity Builder - Fluent API for creating ECS entities
+// =============================================================================
+// Mirrors RenderableBuilder API for easy migration from Renderable-based system
+// to direct ECS entity creation.
+
+class EntityBuilder {
+public:
+    explicit EntityBuilder(World& world) : world_(world) {}
+
+    // Required: Set the mesh for this entity
+    EntityBuilder& withMesh(Mesh* mesh) {
+        mesh_ = mesh;
+        return *this;
+    }
+
+    // Required: Set material ID (for MaterialRegistry-based rendering)
+    EntityBuilder& withMaterialId(MaterialId id) {
+        materialId_ = id;
+        return *this;
+    }
+
+    // Required: Set the world transform
+    EntityBuilder& withTransform(const glm::mat4& transform) {
+        transform_ = transform;
+        return *this;
+    }
+
+    // Convenience: Set position only (creates translation matrix)
+    EntityBuilder& atPosition(const glm::vec3& position) {
+        transform_ = glm::translate(glm::mat4(1.0f), position);
+        return *this;
+    }
+
+    // Optional: Set PBR roughness (default: 0.5)
+    EntityBuilder& withRoughness(float roughness) {
+        roughness_ = roughness;
+        hasCustomPBR_ = true;
+        return *this;
+    }
+
+    // Optional: Set PBR metallic (default: 0.0)
+    EntityBuilder& withMetallic(float metallic) {
+        metallic_ = metallic;
+        hasCustomPBR_ = true;
+        return *this;
+    }
+
+    // Optional: Set emissive intensity (default: 0.0, no emission)
+    EntityBuilder& withEmissiveIntensity(float intensity) {
+        emissiveIntensity_ = intensity;
+        hasCustomPBR_ = true;
+        return *this;
+    }
+
+    // Optional: Set emissive color (default: white)
+    EntityBuilder& withEmissiveColor(const glm::vec3& color) {
+        emissiveColor_ = color;
+        hasCustomPBR_ = true;
+        return *this;
+    }
+
+    // Optional: Set whether entity casts shadows (default: true)
+    EntityBuilder& withCastsShadow(bool casts) {
+        castsShadow_ = casts;
+        return *this;
+    }
+
+    // Optional: Set alpha test threshold (default: 0.0 = disabled)
+    EntityBuilder& withAlphaTest(float threshold) {
+        alphaTestThreshold_ = threshold;
+        hasCustomPBR_ = true;
+        return *this;
+    }
+
+    // Optional: Set hue shift in radians (for NPC tinting)
+    EntityBuilder& withHueShift(float shift) {
+        hueShift_ = shift;
+        return *this;
+    }
+
+    // Optional: Set opacity (for fade effects)
+    EntityBuilder& withOpacity(float opacity) {
+        opacity_ = opacity;
+        return *this;
+    }
+
+    // Optional: Set tree instance index
+    EntityBuilder& withTreeInstanceIndex(int index) {
+        treeInstanceIndex_ = index;
+        return *this;
+    }
+
+    // Optional: Set leaf instance index
+    EntityBuilder& withLeafInstanceIndex(int index) {
+        leafInstanceIndex_ = index;
+        return *this;
+    }
+
+    // Optional: Set leaf tint
+    EntityBuilder& withLeafTint(const glm::vec3& tint) {
+        leafTint_ = tint;
+        return *this;
+    }
+
+    // Optional: Set autumn hue shift
+    EntityBuilder& withAutumnHueShift(float shift) {
+        autumnHueShift_ = shift;
+        return *this;
+    }
+
+    // Optional: Mark as having bounding sphere
+    EntityBuilder& withBoundingSphere(const glm::vec3& center, float radius) {
+        boundCenter_ = center;
+        boundRadius_ = radius;
+        hasBounds_ = true;
+        return *this;
+    }
+
+    // Build the entity - asserts if required fields are missing
+    [[nodiscard]] Entity build() {
+        // Assert that all required fields are set
+        assert(mesh_ != nullptr && "EntityBuilder: mesh is required");
+        assert(materialId_ != InvalidMaterialId && "EntityBuilder: materialId is required");
+        assert(transform_.has_value() && "EntityBuilder: transform is required");
+
+        Entity entity = world_.create();
+
+        // Core components - always present
+        world_.add<Transform>(entity, transform_.value());
+        world_.add<MeshRef>(entity, mesh_);
+        world_.add<MaterialRef>(entity, materialId_);
+
+        // Shadow casting
+        if (castsShadow_) {
+            world_.add<CastsShadow>(entity);
+        }
+
+        // PBR properties - only add if non-default (sparse component pattern)
+        if (hasCustomPBR_) {
+            PBRProperties pbr;
+            pbr.roughness = roughness_;
+            pbr.metallic = metallic_;
+            pbr.emissiveIntensity = emissiveIntensity_;
+            pbr.emissiveColor = emissiveColor_;
+            pbr.alphaTestThreshold = alphaTestThreshold_;
+            world_.add<PBRProperties>(entity, pbr);
+        }
+
+        // Hue shift for NPCs
+        if (hueShift_ != 0.0f) {
+            world_.add<HueShift>(entity, hueShift_);
+        }
+
+        // Opacity for fade effects
+        if (opacity_ != 1.0f) {
+            world_.add<Opacity>(entity, opacity_);
+        }
+
+        // Tree-specific data
+        if (treeInstanceIndex_ >= 0 || leafInstanceIndex_ >= 0) {
+            TreeData treeData;
+            treeData.leafInstanceIndex = leafInstanceIndex_;
+            treeData.treeInstanceIndex = treeInstanceIndex_;
+            treeData.leafTint = leafTint_;
+            treeData.autumnHueShift = autumnHueShift_;
+            world_.add<TreeData>(entity, treeData);
+        }
+
+        // Bounding sphere for culling
+        if (hasBounds_) {
+            world_.add<BoundingSphere>(entity, boundCenter_, boundRadius_);
+        }
+
+        // Mark as visible by default
+        world_.add<Visible>(entity);
+
+        return entity;
+    }
+
+    // Check if all required fields are set
+    [[nodiscard]] bool isValid() const {
+        return mesh_ != nullptr && materialId_ != InvalidMaterialId && transform_.has_value();
+    }
+
+private:
+    World& world_;
+    std::optional<glm::mat4> transform_;
+    Mesh* mesh_ = nullptr;
+    MaterialId materialId_ = InvalidMaterialId;
+
+    // PBR properties
+    float roughness_ = 0.5f;
+    float metallic_ = 0.0f;
+    float emissiveIntensity_ = 0.0f;
+    glm::vec3 emissiveColor_ = glm::vec3(1.0f);
+    float alphaTestThreshold_ = 0.0f;
+    bool hasCustomPBR_ = false;
+
+    bool castsShadow_ = true;
+    float hueShift_ = 0.0f;
+    float opacity_ = 1.0f;
+
+    // Tree properties
+    int treeInstanceIndex_ = -1;
+    int leafInstanceIndex_ = -1;
+    glm::vec3 leafTint_ = glm::vec3(1.0f);
+    float autumnHueShift_ = 0.0f;
+
+    // Bounds
+    glm::vec3 boundCenter_ = glm::vec3(0.0f);
+    float boundRadius_ = 1.0f;
+    bool hasBounds_ = false;
+};
+
 } // namespace ecs

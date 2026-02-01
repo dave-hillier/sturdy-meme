@@ -1,7 +1,8 @@
 #include "NPCRenderer.h"
 #include "NPCSimulation.h"
 #include "SkinnedMeshRenderer.h"
-#include "RenderableBuilder.h"
+#include "ecs/World.h"
+#include "ecs/Components.h"
 #include <SDL3/SDL.h>
 
 NPCRenderer::NPCRenderer(ConstructToken) {}
@@ -28,9 +29,8 @@ bool NPCRenderer::initInternal(const InitInfo& info) {
 
 void NPCRenderer::prepare(uint32_t frameIndex,
                           NPCSimulation& npcSim,
-                          const std::vector<Renderable>& sceneObjects) {
+                          ecs::World* ecsWorld) {
     currentNpcSim_ = &npcSim;
-    currentSceneObjects_ = &sceneObjects;
     currentFrameIndex_ = frameIndex;
 
     // Clear previous frame's render data
@@ -60,12 +60,6 @@ void NPCRenderer::prepare(uint32_t frameIndex,
             continue;
         }
 
-        // Skip NPCs without valid renderable
-        size_t renderableIndex = npcData.renderableIndices[i];
-        if (renderableIndex >= sceneObjects.size()) {
-            continue;
-        }
-
         // Skip NPCs without valid character
         auto* character = npcSim.getCharacter(i);
         if (!character) {
@@ -86,7 +80,8 @@ void NPCRenderer::prepare(uint32_t frameIndex,
 
         NPCRenderData data{};
         data.npcIndex = i;
-        data.renderableIndex = renderableIndex;
+        // Get transform directly from NPCSimulation
+        data.transform = npcSim.buildNPCTransform(i);
         data.lodLevel = npcData.lodLevels[i];
         data.boneSlot = nextBoneSlot;
 
@@ -107,7 +102,7 @@ void NPCRenderer::prepare(uint32_t frameIndex,
 }
 
 void NPCRenderer::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
-    if (!currentNpcSim_ || !currentSceneObjects_ || !skinnedMeshRenderer_) {
+    if (!currentNpcSim_ || !skinnedMeshRenderer_) {
         return;
     }
 
@@ -117,7 +112,7 @@ void NPCRenderer::recordDraw(VkCommandBuffer cmd, uint32_t frameIndex) {
         auto* character = currentNpcSim_->getCharacter(data.npcIndex);
         if (!character) continue;
 
-        const Renderable& npcObj = (*currentSceneObjects_)[data.renderableIndex];
-        skinnedMeshRenderer_->record(cmd, frameIndex, data.boneSlot, npcObj, *character);
+        // Use the ECS-compatible record() method with the stored transform
+        skinnedMeshRenderer_->record(cmd, frameIndex, data.boneSlot, data.transform, *character);
     }
 }

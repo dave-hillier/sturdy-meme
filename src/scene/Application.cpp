@@ -1176,8 +1176,9 @@ void Application::updateCameraOcclusion(float deltaTime) {
         float targetOpacity = isOccluding ? occludedOpacity : 1.0f;
 
         // Find the renderable index for this entity and update opacity
-        for (size_t i = 0; i < sceneEntities_.size(); ++i) {
-            if (sceneEntities_[i] == entity && i < sceneObjects.size()) {
+        const auto& sceneEntities = sceneBuilder.getSceneEntities();
+        for (size_t i = 0; i < sceneEntities.size(); ++i) {
+            if (sceneEntities[i] == entity && i < sceneObjects.size()) {
                 float fadeFactor = 1.0f - std::exp(-occlusionFadeSpeed * deltaTime);
                 sceneObjects[i].opacity += (targetOpacity - sceneObjects[i].opacity) * fadeFactor;
                 break;
@@ -1236,78 +1237,28 @@ void Application::initECS() {
 
     auto& sceneManager = renderer_->getSystems().scene();
     const auto& renderables = sceneManager.getRenderables();
-    const auto& sceneBuilder = sceneManager.getSceneBuilder();
+    SceneBuilder& sceneBuilder = sceneManager.getSceneBuilder();
 
-    // Create ECS entities from scene renderables
-    ecs::EntityFactory factory(ecsWorld_);
-    sceneEntities_ = factory.createFromRenderables(renderables);
+    // Phase 6: Let SceneBuilder create ECS entities directly
+    sceneBuilder.setECSWorld(&ecsWorld_);
+    sceneBuilder.createEntitiesFromRenderables();
+
+    // Get entity references from SceneBuilder
+    const auto& sceneEntities = sceneBuilder.getSceneEntities();
 
     // Link physics bodies from SceneManager to ECS entities
     const auto& physicsBodies = sceneManager.getPhysicsBodies();
-    for (size_t i = 0; i < physicsBodies.size() && i < sceneEntities_.size(); ++i) {
+    for (size_t i = 0; i < physicsBodies.size() && i < sceneEntities.size(); ++i) {
         PhysicsBodyID bodyId = physicsBodies[i];
         if (bodyId != INVALID_BODY_ID) {
-            ecsWorld_.add<ecs::PhysicsBody>(sceneEntities_[i], static_cast<ecs::PhysicsBodyId>(bodyId));
-        }
-    }
-
-    // Add tag components for special entities (eliminates hardcoded index tracking)
-    if (sceneBuilder.getPlayerObjectIndex() < sceneEntities_.size()) {
-        ecsWorld_.add<ecs::PlayerTag>(sceneEntities_[sceneBuilder.getPlayerObjectIndex()]);
-    }
-    if (sceneBuilder.getEmissiveOrbIndex() < sceneEntities_.size()) {
-        ecsWorld_.add<ecs::OrbTag>(sceneEntities_[sceneBuilder.getEmissiveOrbIndex()]);
-    }
-    if (sceneBuilder.getFlagPoleIndex() < sceneEntities_.size()) {
-        ecsWorld_.add<ecs::FlagPoleTag>(sceneEntities_[sceneBuilder.getFlagPoleIndex()]);
-    }
-    if (sceneBuilder.getFlagClothIndex() < sceneEntities_.size()) {
-        ecsWorld_.add<ecs::FlagClothTag>(sceneEntities_[sceneBuilder.getFlagClothIndex()]);
-    }
-    if (sceneBuilder.hasCape() && sceneBuilder.getCapeIndex() < sceneEntities_.size()) {
-        ecsWorld_.add<ecs::CapeTag>(sceneEntities_[sceneBuilder.getCapeIndex()]);
-    }
-    if (sceneBuilder.hasWeapons()) {
-        if (sceneBuilder.getSwordIndex() < sceneEntities_.size()) {
-            ecsWorld_.add<ecs::WeaponTag>(sceneEntities_[sceneBuilder.getSwordIndex()], ecs::WeaponSlot::RightHand);
-        }
-        if (sceneBuilder.getShieldIndex() < sceneEntities_.size()) {
-            ecsWorld_.add<ecs::WeaponTag>(sceneEntities_[sceneBuilder.getShieldIndex()], ecs::WeaponSlot::LeftHand);
-        }
-    }
-
-    // Add NPCTag to NPC entities (enables ECS-based NPC queries)
-    if (sceneBuilder.hasNPCs()) {
-        size_t npcCount = sceneBuilder.getNPCCount();
-        for (size_t npcIdx = 0; npcIdx < npcCount; ++npcIdx) {
-            size_t renderableIdx = sceneBuilder.getNPCRenderableIndex(npcIdx);
-            if (renderableIdx < sceneEntities_.size()) {
-                // Get template index from NPCSimulation data
-                const auto* npcSim = sceneBuilder.getNPCSimulation();
-                uint32_t templateIndex = npcSim ? npcSim->getData().templateIndices[npcIdx] : 0;
-                ecsWorld_.add<ecs::NPCTag>(sceneEntities_[renderableIdx], templateIndex);
-            }
-        }
-        SDL_Log("ECS: Tagged %zu NPC entities", npcCount);
-    }
-
-    // Add bounding spheres for culling (approximate based on mesh type)
-    // For now, use a default radius - could be computed from mesh bounds later
-    for (size_t i = 0; i < sceneEntities_.size(); ++i) {
-        ecs::Entity entity = sceneEntities_[i];
-        if (ecsWorld_.valid(entity)) {
-            // Default bounding sphere centered at origin with 1m radius
-            // This can be refined per-object if needed
-            ecsWorld_.add<ecs::BoundingSphere>(entity, glm::vec3(0.0f), 1.0f);
-            // Mark all entities as initially visible
-            ecsWorld_.add<ecs::Visible>(entity);
+            ecsWorld_.add<ecs::PhysicsBody>(sceneEntities[i], static_cast<ecs::PhysicsBodyId>(bodyId));
         }
     }
 
     // Phase 6: Connect ECS world to renderer systems for direct entity queries
     renderer_->getSystems().setECSWorld(&ecsWorld_);
 
-    SDL_Log("ECS initialized with %zu entities from scene", sceneEntities_.size());
+    SDL_Log("ECS initialized with %zu entities from scene", sceneEntities.size());
 
     // Initialize ECS Material Demo to showcase material components
     if (!renderables.empty()) {
@@ -1342,36 +1293,37 @@ void Application::updateECS(float deltaTime) {
     auto& sceneBuilder = sceneManager.getSceneBuilder();
     auto& renderables = sceneManager.getRenderables();
 
-    // Lazy initialization: populate ECS entities when renderables become available
-    // This handles deferred renderable creation (after terrain is ready)
-    if (sceneEntities_.empty() && !renderables.empty()) {
-        ecs::EntityFactory factory(ecsWorld_);
-        sceneEntities_ = factory.createFromRenderables(renderables);
+    // Get scene entities from SceneBuilder (Phase 6: entities managed by SceneBuilder)
+    const auto& sceneEntities = sceneBuilder.getSceneEntities();
 
-        // Add bounding spheres and visibility for culling
-        for (ecs::Entity entity : sceneEntities_) {
-            if (ecsWorld_.valid(entity)) {
-                ecsWorld_.add<ecs::BoundingSphere>(entity, glm::vec3(0.0f), 1.0f);
-                ecsWorld_.add<ecs::Visible>(entity);
-            }
-        }
-        SDL_Log("ECS: Populated %zu entities from deferred renderables", sceneEntities_.size());
+    // Lazy initialization: if ECS world was set but entities not yet created (deferred mode)
+    if (sceneEntities.empty() && !renderables.empty() && sceneBuilder.getECSWorld() == nullptr) {
+        sceneBuilder.setECSWorld(&ecsWorld_);
+        sceneBuilder.createEntitiesFromRenderables();
+        SDL_Log("ECS: Populated %zu entities from deferred renderables", sceneBuilder.getSceneEntities().size());
     }
 
+    // Re-fetch after potential creation
+    const auto& currentEntities = sceneBuilder.getSceneEntities();
+
     // Set up bone attachments for weapons using tag queries (once, after entities are populated)
-    if (!ecsWeaponsInitialized_ && !sceneEntities_.empty() && sceneBuilder.hasWeapons()) {
+    if (!ecsWeaponsInitialized_ && !currentEntities.empty() && sceneBuilder.hasWeapons()) {
         // Find and attach sword (right hand weapon) using WeaponTag query
         for (auto [entity, weaponTag] : ecsWorld_.view<ecs::WeaponTag>().each()) {
             if (weaponTag.slot == ecs::WeaponSlot::RightHand) {
-                ecsWorld_.add<ecs::BoneAttachment>(entity,
-                    sceneBuilder.getRightHandBoneIndex(),
-                    sceneBuilder.getSwordOffset());
-                SDL_Log("ECS: Attached sword to right hand bone %d", sceneBuilder.getRightHandBoneIndex());
+                if (!ecsWorld_.has<ecs::BoneAttachment>(entity)) {
+                    ecsWorld_.add<ecs::BoneAttachment>(entity,
+                        sceneBuilder.getRightHandBoneIndex(),
+                        sceneBuilder.getSwordOffset());
+                    SDL_Log("ECS: Attached sword to right hand bone %d", sceneBuilder.getRightHandBoneIndex());
+                }
             } else if (weaponTag.slot == ecs::WeaponSlot::LeftHand) {
-                ecsWorld_.add<ecs::BoneAttachment>(entity,
-                    sceneBuilder.getLeftHandBoneIndex(),
-                    sceneBuilder.getShieldOffset());
-                SDL_Log("ECS: Attached shield to left hand bone %d", sceneBuilder.getLeftHandBoneIndex());
+                if (!ecsWorld_.has<ecs::BoneAttachment>(entity)) {
+                    ecsWorld_.add<ecs::BoneAttachment>(entity,
+                        sceneBuilder.getLeftHandBoneIndex(),
+                        sceneBuilder.getShieldOffset());
+                    SDL_Log("ECS: Attached shield to left hand bone %d", sceneBuilder.getLeftHandBoneIndex());
+                }
             }
         }
 
@@ -1379,8 +1331,8 @@ void Application::updateECS(float deltaTime) {
     }
 
     // Sync transforms from Renderables to ECS (for objects NOT driven by bone attachments)
-    for (size_t i = 0; i < sceneEntities_.size() && i < renderables.size(); ++i) {
-        ecs::Entity entity = sceneEntities_[i];
+    for (size_t i = 0; i < currentEntities.size() && i < renderables.size(); ++i) {
+        ecs::Entity entity = currentEntities[i];
         if (ecsWorld_.valid(entity) && ecsWorld_.has<ecs::Transform>(entity)) {
             // Skip if entity has BoneAttachment (skeleton drives it) or LocalTransform (hierarchy drives it)
             if (!ecsWorld_.has<ecs::BoneAttachment>(entity) && !ecsWorld_.has<ecs::LocalTransform>(entity)) {
@@ -1405,8 +1357,8 @@ void Application::updateECS(float deltaTime) {
         for (auto [entity, attachment, transform] :
              ecsWorld_.view<ecs::BoneAttachment, ecs::Transform>().each()) {
             // Find the renderable index for this entity
-            for (size_t i = 0; i < sceneEntities_.size(); ++i) {
-                if (sceneEntities_[i] == entity && i < renderables.size()) {
+            for (size_t i = 0; i < currentEntities.size(); ++i) {
+                if (currentEntities[i] == entity && i < renderables.size()) {
                     renderables[i].transform = transform.matrix;
                     break;
                 }

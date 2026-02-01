@@ -15,13 +15,13 @@
 #include "AnimatedCharacter.h"
 #include "MaterialRegistry.h"
 #include "PlayerCape.h"
+#include "ecs/World.h"
+#include "ecs/Components.h"
 #include <optional>
 #include <memory>
 
 class AssetRegistry;
 class NPCSimulation;
-
-namespace ecs { class World; }
 
 // Holds all scene resources (meshes, textures) and provides scene objects
 class SceneBuilder {
@@ -65,11 +65,39 @@ public:
     SceneBuilder(SceneBuilder&&) = delete;
     SceneBuilder& operator=(SceneBuilder&&) = delete;
 
-    // Access to built scene
+    // Access to built scene (legacy - for backwards compatibility)
     const std::vector<Renderable>& getRenderables() const { return sceneObjects; }
     std::vector<Renderable>& getRenderables() { return sceneObjects; }
     size_t getPlayerObjectIndex() const { return playerObjectIndex; }
     size_t getEmissiveOrbIndex() const { return emissiveOrbIndex; }
+
+    // ECS entity accessors (Phase 6: direct entity access)
+    ecs::Entity getPlayerEntity() const { return playerEntity_; }
+    ecs::Entity getEmissiveOrbEntity() const { return emissiveOrbEntity_; }
+    ecs::Entity getFlagPoleEntity() const { return flagPoleEntity_; }
+    ecs::Entity getFlagClothEntity() const { return flagClothEntity_; }
+    ecs::Entity getCapeEntity() const { return capeEntity_; }
+    ecs::Entity getSwordEntity() const { return swordEntity_; }
+    ecs::Entity getShieldEntity() const { return shieldEntity_; }
+    ecs::Entity getWellEntranceEntity() const { return wellEntranceEntity_; }
+
+    // Get all scene entities (for ECS-based iteration)
+    const std::vector<ecs::Entity>& getSceneEntities() const { return sceneEntities_; }
+
+    // Get NPC entity by index
+    ecs::Entity getNPCEntity(size_t npcIndex) const {
+        if (npcIndex < npcEntities_.size()) {
+            return npcEntities_[npcIndex];
+        }
+        return ecs::NullEntity;
+    }
+
+    // Set the ECS world (must be called before createRenderables if ECS is used)
+    void setECSWorld(ecs::World* world) { ecsWorld_ = world; }
+    ecs::World* getECSWorld() const { return ecsWorld_; }
+
+    // Create entities from renderables (for legacy compatibility during transition)
+    void createEntitiesFromRenderables();
 
     // Check if renderables have been created (false if deferred and not yet triggered)
     bool hasRenderables() const { return renderablesCreated_; }
@@ -284,6 +312,19 @@ private:
     size_t leftHandAxisZ = 0;
     int32_t rightHandBoneIndex = -1;  // Bone index for sword attachment
     int32_t leftHandBoneIndex = -1;   // Bone index for shield attachment
+
+    // ECS entity handles (Phase 6: direct entity storage)
+    ecs::World* ecsWorld_ = nullptr;  // Pointer to ECS world (not owned)
+    std::vector<ecs::Entity> sceneEntities_;  // All scene entities
+    std::vector<ecs::Entity> npcEntities_;    // NPC entities
+    ecs::Entity playerEntity_ = ecs::NullEntity;
+    ecs::Entity emissiveOrbEntity_ = ecs::NullEntity;
+    ecs::Entity flagPoleEntity_ = ecs::NullEntity;
+    ecs::Entity flagClothEntity_ = ecs::NullEntity;
+    ecs::Entity capeEntity_ = ecs::NullEntity;
+    ecs::Entity swordEntity_ = ecs::NullEntity;
+    ecs::Entity shieldEntity_ = ecs::NullEntity;
+    ecs::Entity wellEntranceEntity_ = ecs::NullEntity;
 
     // Indices of objects that should have physics bodies (dynamic objects)
     // Objects NOT in this list are either static (lights, flags) or handled separately (player)

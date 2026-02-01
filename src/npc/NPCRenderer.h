@@ -9,7 +9,8 @@
 
 class NPCSimulation;
 class SkinnedMeshRenderer;
-class Renderable;
+
+namespace ecs { class World; }
 
 // NPC Renderer - Handles batched draw commands for NPCs
 // Implements IRecordable for integration with render pass system
@@ -43,11 +44,11 @@ public:
      *
      * @param frameIndex Current frame index for triple-buffered resources
      * @param npcSim The NPC simulation (non-const as we need character access for rendering)
-     * @param sceneObjects Scene objects containing NPC renderables
+     * @param ecsWorld ECS world for querying NPC entity transforms (optional, can be nullptr)
      */
     void prepare(uint32_t frameIndex,
                  NPCSimulation& npcSim,
-                 const std::vector<Renderable>& sceneObjects);
+                 ecs::World* ecsWorld = nullptr);
 
     /**
      * Record draw commands to the command buffer.
@@ -72,7 +73,7 @@ private:
     // Render data prepared each frame
     struct NPCRenderData {
         size_t npcIndex;           // Index into NPCSimulation
-        size_t renderableIndex;    // Index into sceneObjects
+        glm::mat4 transform;       // World transform for this NPC
         NPCLODLevel lodLevel;      // Current LOD level
         uint32_t boneSlot;         // Bone matrix slot in dynamic buffer (1-63, 0 reserved for player)
     };
@@ -82,7 +83,6 @@ private:
     // Per-frame render data
     std::vector<NPCRenderData> renderData_;
     NPCSimulation* currentNpcSim_ = nullptr;
-    const std::vector<Renderable>* currentSceneObjects_ = nullptr;
     uint32_t currentFrameIndex_ = 0;
 
     // Statistics
