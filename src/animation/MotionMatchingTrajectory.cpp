@@ -19,10 +19,49 @@ void TrajectoryPredictor::update(const glm::vec3& position,
         currentFacing_ = glm::normalize(glm::vec3(facing.x, 0.0f, facing.z));
     }
 
-    // Smooth input direction
-    glm::vec3 targetInput = inputDirection * inputMagnitude;
+    // Smooth direction and magnitude separately to avoid idle animation during direction changes
+    // When changing direction (e.g. forward to backward), linear interpolation of vectors
+    // causes the magnitude to drop momentarily, which incorrectly triggers idle animations.
     float smoothFactor = 1.0f - std::exp(-deltaTime / std::max(0.001f, config_.inputSmoothing));
-    smoothedInput_ = glm::mix(smoothedInput_, targetInput, smoothFactor);
+
+    // Smooth the magnitude independently
+    smoothedMagnitude_ = glm::mix(smoothedMagnitude_, inputMagnitude, smoothFactor);
+
+    // Smooth the direction using spherical interpolation (on the horizontal plane)
+    // This prevents the magnitude from collapsing during direction changes
+    if (inputMagnitude > 0.01f) {
+        glm::vec3 targetDir = glm::normalize(glm::vec3(inputDirection.x, 0.0f, inputDirection.z));
+
+        if (glm::length(smoothedDirection_) < 0.01f) {
+            // No previous direction, just use the new one
+            smoothedDirection_ = targetDir;
+        } else {
+            // Spherical lerp on the horizontal plane (rotate towards target)
+            glm::vec3 normSmoothed = glm::normalize(smoothedDirection_);
+            float dotProduct = glm::clamp(glm::dot(normSmoothed, targetDir), -1.0f, 1.0f);
+            float angleDiff = std::acos(dotProduct);
+
+            if (angleDiff > 0.001f) {
+                // Interpolate the angle, not the vector
+                float maxAngleChange = smoothFactor * angleDiff;
+                float cross = normSmoothed.x * targetDir.z - normSmoothed.z * targetDir.x;
+                float sign = cross >= 0.0f ? 1.0f : -1.0f;
+                float actualAngle = sign * std::min(maxAngleChange, angleDiff);
+
+                float cosA = std::cos(actualAngle);
+                float sinA = std::sin(actualAngle);
+                smoothedDirection_ = glm::vec3(
+                    normSmoothed.x * cosA - normSmoothed.z * sinA,
+                    0.0f,
+                    normSmoothed.x * sinA + normSmoothed.z * cosA
+                );
+            }
+        }
+    }
+    // When not moving, keep the last direction but let magnitude decay
+
+    // Combine smoothed direction and magnitude for the final smoothedInput_
+    smoothedInput_ = smoothedDirection_ * smoothedMagnitude_;
 
     // Calculate target velocity
     glm::vec3 targetVelocity = smoothedInput_ * config_.maxSpeed;
@@ -227,6 +266,8 @@ void TrajectoryPredictor::reset() {
     history_.clear();
     currentVelocity_ = glm::vec3(0.0f);
     smoothedInput_ = glm::vec3(0.0f);
+    smoothedDirection_ = glm::vec3(0.0f, 0.0f, 1.0f);
+    smoothedMagnitude_ = 0.0f;
     currentTime_ = 0.0f;
 }
 

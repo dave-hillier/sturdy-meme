@@ -85,6 +85,8 @@ private:
     glm::vec3 currentVelocity_{0.0f};
     glm::vec3 currentFacing_{0.0f, 0.0f, 1.0f};
     glm::vec3 smoothedInput_{0.0f};
+    glm::vec3 smoothedDirection_{0.0f, 0.0f, 1.0f};  // Smoothed direction (unit vector)
+    float smoothedMagnitude_ = 0.0f;                  // Smoothed magnitude (0-1)
     float currentTime_ = 0.0f;
 
     // Strafe mode state
