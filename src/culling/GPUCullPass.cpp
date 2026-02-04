@@ -159,13 +159,20 @@ void GPUCullPass::updateUniforms(uint32_t frameIndex,
                                   const glm::mat4& view,
                                   const glm::mat4& proj,
                                   const glm::vec3& cameraPos,
-                                  uint32_t objectCount) {
+                                  uint32_t objectCount,
+                                  VkExtent2D screenExtent) {
     GPUCullUniforms uniforms{};
     uniforms.viewMatrix = view;
     uniforms.projMatrix = proj;
     uniforms.viewProjMatrix = proj * view;
     uniforms.cameraPosition = glm::vec4(cameraPos, 1.0f);
-    uniforms.screenParams = glm::vec4(1920.0f, 1080.0f, 1.0f / 1920.0f, 1.0f / 1080.0f);  // Default, update with actual screen size
+    const float width = static_cast<float>(screenExtent.width);
+    const float height = static_cast<float>(screenExtent.height);
+    if (width > 0.0f && height > 0.0f) {
+        uniforms.screenParams = glm::vec4(width, height, 1.0f / width, 1.0f / height);
+    } else {
+        uniforms.screenParams = glm::vec4(0.0f);
+    }
     uniforms.objectCount = objectCount;
     uniforms.enableHiZ = hiZEnabled_ ? 1 : 0;
     uniforms.maxDrawCommands = MAX_OBJECTS;
@@ -176,6 +183,7 @@ void GPUCullPass::updateUniforms(uint32_t frameIndex,
 
     // Copy to GPU
     memcpy(uniformBuffers_.mappedPointers[frameIndex], &uniforms, sizeof(GPUCullUniforms));
+    vmaFlushAllocation(allocator_, uniformBuffers_.allocations[frameIndex], 0, sizeof(GPUCullUniforms));
 }
 
 void GPUCullPass::bindSceneBuffer(GPUSceneBuffer* sceneBuffer, uint32_t frameIndex) {

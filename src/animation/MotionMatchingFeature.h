@@ -379,7 +379,7 @@ struct FeatureConfig {
     float trajectoryVelocityWeight = 0.5f;
     float trajectoryFacingWeight = 0.3f;
     float rootVelocityWeight = 0.5f;
-    float angularVelocityWeight = 0.3f;
+    float angularVelocityWeight = 1.5f;  // Increased from 0.3f to better match turn animations
     float phaseWeight = 0.2f;
 
     // Heading/Strafe configuration (Unreal-style)

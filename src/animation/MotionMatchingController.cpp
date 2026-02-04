@@ -346,6 +346,11 @@ void MotionMatchingController::extractQueryFeatures() {
 
     // Update root velocity from trajectory predictor
     queryPose_.rootVelocity = trajectoryPredictor_.getCurrentVelocity();
+
+    // Update angular velocity from trajectory predictor
+    // This is critical for matching turn animations - the query needs to reflect
+    // the player's actual turning rate, not just what the current animation shows
+    queryPose_.rootAngularVelocity = trajectoryPredictor_.getCurrentAngularVelocity();
 }
 
 void MotionMatchingController::applyToSkeleton(Skeleton& skeleton) const {

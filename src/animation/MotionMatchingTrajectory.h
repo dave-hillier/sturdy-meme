@@ -65,6 +65,10 @@ public:
     // Get current facing direction (returns strafe facing when in strafe mode)
     glm::vec3 getCurrentFacing() const { return strafeMode_ ? strafeFacing_ : currentFacing_; }
 
+    // Get current angular velocity (yaw rotation rate in radians/second)
+    // Positive = turning left (counter-clockwise), Negative = turning right (clockwise)
+    float getCurrentAngularVelocity() const { return currentAngularVelocity_; }
+
     // Get smoothed input direction
     glm::vec3 getSmoothedInput() const { return smoothedInput_; }
 
@@ -84,6 +88,8 @@ private:
     glm::vec3 currentPosition_{0.0f};
     glm::vec3 currentVelocity_{0.0f};
     glm::vec3 currentFacing_{0.0f, 0.0f, 1.0f};
+    glm::vec3 previousFacing_{0.0f, 0.0f, 1.0f};     // Previous frame's facing for angular velocity
+    float currentAngularVelocity_ = 0.0f;             // Current yaw rotation rate (rad/s)
     glm::vec3 smoothedInput_{0.0f};
     glm::vec3 smoothedDirection_{0.0f, 0.0f, 1.0f};  // Smoothed direction (unit vector)
     float smoothedMagnitude_ = 0.0f;                  // Smoothed magnitude (0-1)

@@ -160,14 +160,18 @@ void GPUSceneBuffer::finalize() {
     // Upload instance data to current frame's buffer
     void* mapped = instanceBuffers_.mappedPointers[currentFrame_];
     if (mapped) {
-        memcpy(mapped, instances_.data(), instances_.size() * sizeof(GPUSceneInstanceData));
+        VkDeviceSize bytes = instances_.size() * sizeof(GPUSceneInstanceData);
+        memcpy(mapped, instances_.data(), bytes);
+        vmaFlushAllocation(allocator_, instanceBuffers_.allocations[currentFrame_], 0, bytes);
     }
 
     // Upload cull data (only if changed)
     if (cullDataDirty_) {
         void* cullMapped = cullObjectBuffer_.map();
         if (cullMapped) {
-            memcpy(cullMapped, cullObjects_.data(), cullObjects_.size() * sizeof(GPUCullObjectData));
+            VkDeviceSize bytes = cullObjects_.size() * sizeof(GPUCullObjectData);
+            memcpy(cullMapped, cullObjects_.data(), bytes);
+            vmaFlushAllocation(allocator_, cullObjectBuffer_.getAllocation(), 0, bytes);
             cullObjectBuffer_.unmap();
         }
         cullDataDirty_ = false;

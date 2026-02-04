@@ -252,16 +252,14 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& con
 
                 systems.profiler().beginGpuZone(cmd, "GPUCull");
 
-                // Reset draw count to zero before culling
-                sceneBuffer.resetDrawCount(vk::CommandBuffer(cmd));
-
                 // Update culling uniforms
                 cullPass.updateUniforms(
                     frameIndex,
                     renderCtx->frame.view,
                     renderCtx->frame.projection,
                     renderCtx->frame.cameraPosition,
-                    sceneBuffer.getObjectCount()
+                    sceneBuffer.getObjectCount(),
+                    renderCtx->resources.hdrExtent
                 );
 
                 // Bind scene buffer
@@ -269,16 +267,6 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& con
 
                 // Record the culling compute dispatch
                 cullPass.recordCulling(cmd, frameIndex);
-
-                // Memory barrier: compute write -> indirect read
-                auto memoryBarrier = vk::MemoryBarrier{}
-                    .setSrcAccessMask(vk::AccessFlagBits::eShaderWrite)
-                    .setDstAccessMask(vk::AccessFlagBits::eIndirectCommandRead);
-                vk::CommandBuffer(cmd).pipelineBarrier(
-                    vk::PipelineStageFlagBits::eComputeShader,
-                    vk::PipelineStageFlagBits::eDrawIndirect,
-                    vk::DependencyFlags{},
-                    memoryBarrier, {}, {});
 
                 systems.profiler().endGpuZone(cmd, "GPUCull");
             },

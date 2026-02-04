@@ -77,7 +77,8 @@ public:
                         const glm::mat4& view,
                         const glm::mat4& proj,
                         const glm::vec3& cameraPos,
-                        uint32_t objectCount);
+                        uint32_t objectCount,
+                        VkExtent2D screenExtent);
 
     // Bind scene buffer for culling
     void bindSceneBuffer(GPUSceneBuffer* sceneBuffer, uint32_t frameIndex);

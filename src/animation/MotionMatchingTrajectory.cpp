@@ -19,6 +19,25 @@ void TrajectoryPredictor::update(const glm::vec3& position,
         currentFacing_ = glm::normalize(glm::vec3(facing.x, 0.0f, facing.z));
     }
 
+    // Compute angular velocity from facing direction change
+    if (deltaTime > 0.001f && glm::length(previousFacing_) > 0.01f && glm::length(currentFacing_) > 0.01f) {
+        // Compute signed angle between previous and current facing
+        float dot = glm::clamp(glm::dot(previousFacing_, currentFacing_), -1.0f, 1.0f);
+        float angle = std::acos(dot);
+
+        // Determine sign using cross product (Y component)
+        // Positive cross = turning left (counter-clockwise), negative = turning right
+        float cross = previousFacing_.x * currentFacing_.z - previousFacing_.z * currentFacing_.x;
+        if (cross < 0.0f) {
+            angle = -angle;
+        }
+
+        currentAngularVelocity_ = angle / deltaTime;
+    } else {
+        currentAngularVelocity_ = 0.0f;
+    }
+    previousFacing_ = currentFacing_;
+
     // Smooth direction and magnitude separately to avoid idle animation during direction changes
     // When changing direction (e.g. forward to backward), linear interpolation of vectors
     // causes the magnitude to drop momentarily, which incorrectly triggers idle animations.
@@ -269,6 +288,8 @@ void TrajectoryPredictor::reset() {
     smoothedDirection_ = glm::vec3(0.0f, 0.0f, 1.0f);
     smoothedMagnitude_ = 0.0f;
     currentTime_ = 0.0f;
+    currentAngularVelocity_ = 0.0f;
+    previousFacing_ = currentFacing_;
 }
 
 // InertialBlender implementation
