@@ -58,6 +58,12 @@ public:
     PlayerSettings& getPlayerSettings() { return playerSettings; }
     const PlayerSettings& getPlayerSettings() const { return playerSettings; }
 
+    // Get scene editor state for external systems
+    SceneEditorState& getSceneEditorState() { return sceneEditorState; }
+    const SceneEditorState& getSceneEditorState() const { return sceneEditorState; }
+
+    // Check if gizmo is being used (for input blocking)
+    bool isGizmoActive() const;
 
 private:
     bool initInternal(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice,

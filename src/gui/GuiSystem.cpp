@@ -35,6 +35,7 @@
 #include "GuiGrassTab.h"
 #include "GuiSceneGraphTab.h"
 #include "GuiSceneEditor.h"
+#include "GuiGizmo.h"
 
 #include "terrain/TerrainSystem.h"
 #include "terrain/TerrainTileCache.h"
@@ -347,6 +348,8 @@ void GuiSystem::render(GuiInterfaces& ui, const Camera& camera, float deltaTime,
     }
     if (windowStates.showSceneEditor) {
         renderSceneEditorWindow(ui);
+        // Render 3D transform gizmo over the viewport
+        GuiGizmo::render(camera, ui.scene, sceneEditorState);
     }
 
     // Skeleton/IK debug overlay
@@ -1018,4 +1021,9 @@ void GuiSystem::renderSceneGraphWindow(GuiInterfaces& ui) {
 
 void GuiSystem::renderSceneEditorWindow(GuiInterfaces& ui) {
     GuiSceneEditor::render(ui.scene, sceneEditorState, &windowStates.showSceneEditor);
+}
+
+bool GuiSystem::isGizmoActive() const {
+    if (!windowStates.showSceneEditor) return false;
+    return GuiGizmo::isUsing() || GuiGizmo::isOver();
 }

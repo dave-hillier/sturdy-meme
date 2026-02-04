@@ -48,6 +48,7 @@
     "libarchive",
     "doctest",
     "meshoptimizer",
-    "entt"
+    "entt",
+    "imguizmo"
   ]
 }

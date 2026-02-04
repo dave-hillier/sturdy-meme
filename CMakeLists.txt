@@ -228,6 +228,7 @@ set(SOURCES
     src/gui/GuiHierarchyPanel.cpp
     src/gui/GuiInspectorPanel.cpp
     src/gui/GuiSceneEditor.cpp
+    src/gui/GuiGizmo.cpp
     # Subdivision
     src/subdivision/CatmullClarkCBT.cpp
     src/subdivision/CatmullClarkMesh.cpp
