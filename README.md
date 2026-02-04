@@ -74,14 +74,16 @@ open build/release/vulkan-game.app
 
 ## Controls
 
-The game supports two camera modes: **Free Camera** and **Third Person**. Press **Tab** (keyboard) or **Left Stick Click** (gamepad) to toggle between them.
+The game supports two camera modes: **Free Camera** and **Third Person**. Press **Tab** (keyboard) or **Right Stick Click** (gamepad) to toggle between them.
 
 ### Keyboard - Global Controls
 
 | Key | Action |
 |-----|--------|
 | Escape | Quit |
+| F1 | Toggle GUI visibility |
 | Tab | Toggle camera mode (Free Cam ↔ Third Person) |
+| M | Toggle mouse look |
 | 1 | Set time to sunrise |
 | 2 | Set time to noon |
 | 3 | Set time to sunset |
@@ -90,11 +92,21 @@ The game supports two camera modes: **Free Camera** and **Third Person**. Press 
 | - | Slow down time (0.5x) |
 | R | Reset to real-time |
 | 6 | Toggle cascade debug visualization |
+| 7 | Toggle snow depth debug visualization |
+| 8 | Toggle Hi-Z occlusion culling |
+| 9 | Terrain height diagnostic |
 | Z | Decrease weather intensity |
 | X | Increase weather intensity |
 | C | Cycle weather (Clear → Rain → Snow) |
 | F | Spawn confetti at player location |
 | V | Toggle cloud style (Procedural ↔ Paraboloid LUT) |
+| [ | Decrease fog density |
+| ] | Increase fog density |
+| \ | Toggle fog on/off |
+| , | Decrease snow amount |
+| . | Increase snow amount |
+| / | Toggle snow (0.0 ↔ 1.0) |
+| T | Toggle terrain wireframe |
 
 ### Keyboard - Free Camera Mode
 
@@ -110,6 +122,7 @@ The game supports two camera modes: **Free Camera** and **Third Person**. Press 
 | Arrow Right | Look right (yaw) |
 | Space | Move up (fly) |
 | Left Ctrl / Q | Move down (fly) |
+| Left Shift | Sprint (5x speed) |
 
 ### Keyboard - Third Person Mode
 
@@ -120,18 +133,30 @@ The game supports two camera modes: **Free Camera** and **Third Person**. Press 
 | A | Move player left (relative to camera) |
 | D | Move player right (relative to camera) |
 | Space | Jump |
+| Left Shift | Sprint |
 | Arrow Up | Orbit camera up |
 | Arrow Down | Orbit camera down |
 | Arrow Left | Orbit camera left |
 | Arrow Right | Orbit camera right |
 | Q | Zoom camera in |
 | E | Zoom camera out |
+| Caps Lock | Toggle orientation lock |
+| Middle Mouse | Hold orientation lock |
+
+### Mouse Controls
+
+| Input | Action |
+|-------|--------|
+| M key | Toggle mouse look mode |
+| Mouse motion | Camera look (when mouse look enabled) |
+| Mouse wheel | Camera zoom |
 
 ### Gamepad (SDL3) - Global Controls
 
 | Input | Action |
 |-------|--------|
-| Left Stick Click | Toggle camera mode (Free Cam ↔ Third Person) |
+| Right Stick Click | Toggle camera mode (Free Cam ↔ Third Person) |
+| Left Stick Click | Toggle sprint |
 | A / Cross | Set time to sunrise |
 | B / Circle | Set time to noon |
 | X / Square | Set time to sunset |
@@ -157,6 +182,8 @@ The game supports two camera modes: **Free Camera** and **Third Person**. Press 
 | Left Stick | Player movement (relative to camera) |
 | Right Stick | Orbit camera around player |
 | A / Cross | Jump |
+| B / Circle | Toggle orientation lock |
+| Left Trigger | Hold orientation lock |
 | Right Bumper (RB/R1) | Zoom camera out |
 | Left Bumper (LB/L1) | Zoom camera in |
 
