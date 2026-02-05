@@ -355,6 +355,12 @@ void InertialBlender::startSkeletalBlend(const SkeletonPose& currentPose,
         // q_offset = q_current * inverse(q_target)
         glm::quat rotDiff = currentPose[i].rotation * glm::inverse(targetPose[i].rotation);
 
+        // Ensure shortest-path rotation (q and -q represent the same rotation,
+        // but the spring-damper would take the long path if angle > 180 degrees)
+        if (rotDiff.w < 0.0f) {
+            rotDiff = glm::quat(-rotDiff.w, -rotDiff.x, -rotDiff.y, -rotDiff.z);
+        }
+
         // Convert quaternion to axis-angle
         float angle = 2.0f * std::acos(std::clamp(rotDiff.w, -1.0f, 1.0f));
         glm::vec3 axis(0.0f, 1.0f, 0.0f);

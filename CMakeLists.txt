@@ -1264,8 +1264,15 @@ if(BUILD_TESTS)
         tests/test_kd_tree.cpp
         tests/test_flamegraph.cpp
         tests/test_player_state.cpp
+        tests/test_motion_matching.cpp
         # Source files needed by tests
         src/atmosphere/CelestialCalculator.cpp
+        src/animation/Animation.cpp
+        src/animation/AnimationBlend.cpp
+        src/animation/MotionMatchingFeature.cpp
+        src/animation/MotionMatchingKDTree.cpp
+        src/animation/MotionMatchingTrajectory.cpp
+        src/animation/MotionDatabase.cpp
         src/ik/IKUtils.cpp
         src/terrain/ErosionDataLoader.cpp
         src/terrain/RoadNetworkLoader.cpp
