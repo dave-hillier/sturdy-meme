@@ -49,7 +49,7 @@ set(SOURCES
     src/core/CrashHandler.cpp
     src/core/Renderer.cpp
     src/core/SelectionOutlineRenderer.cpp
-    src/core/RendererCore.cpp
+    src/core/FrameExecutor.cpp
     src/core/RendererInitPhases.cpp
     src/core/CoreResources.cpp
     src/core/SystemWiring.cpp

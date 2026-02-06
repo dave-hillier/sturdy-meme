@@ -343,8 +343,8 @@ void Renderer::cleanup() {
         // Shutdown multi-threading infrastructure via RenderingInfrastructure
         renderingInfra_.shutdown();
 
-        // Destroy RendererCore before its dependencies
-        rendererCore_.destroy();
+        // Destroy FrameExecutor before its dependencies
+        frameExecutor_.destroy();
 
         // RAII handles cleanup of sync objects via TripleBuffering
         frameSync_.destroy();
@@ -435,7 +435,7 @@ bool Renderer::render(const Camera& camera) {
     if (framebufferResized) {
         handleResize();
         framebufferResized = false;
-        rendererCore_.clearResizeFlag();
+        frameExecutor_.clearResizeFlag();
         frameSync_.waitForAllFrames();
         frameSync_.resetForResize();
     }
@@ -448,23 +448,49 @@ bool Renderer::render(const Camera& camera) {
     qsDiag.reset();
     qsDiag.validationLayersEnabled = vulkanContext_->hasValidationLayers();
 
-    // === Phase 1: Frame synchronization and swapchain acquire ===
-    auto beginResult = rendererCore_.beginFrame(qsDiag, systems_->profiler());
-    if (!beginResult.success) {
-        if (beginResult.error == FrameResult::SwapchainOutOfDate ||
-            beginResult.error == FrameResult::SurfaceLost ||
-            beginResult.error == FrameResult::DeviceLost) {
+    // Execute frame: sync → acquire → build → submit → present
+    FrameResult result = frameExecutor_.execute(
+        [&](const FrameBuildContext& ctx) -> std::optional<FrameBuildResult> {
+            return buildFrame(camera, ctx, qsDiag);
+        },
+        &qsDiag, &systems_->profiler());
+
+    if (result != FrameResult::Success) {
+        if (result == FrameResult::SwapchainOutOfDate ||
+            result == FrameResult::SurfaceLost ||
+            result == FrameResult::DeviceLost) {
             framebufferResized = true;
         }
         systems_->profiler().endCpuFrame();
         return false;
     }
-    uint32_t imageIndex = beginResult.imageIndex;
+
+    // Post-frame housekeeping
+    systems_->grass().advanceBufferSet();
+    systems_->weather().advanceBufferSet();
+    systems_->leaf().advanceBufferSet();
+
+    if (systems_->hasWaterTileCull()) {
+        systems_->waterTileCull().endFrame(frameSync_.currentIndex());
+    }
+
+    frameExecutor_.advance();
+
+    systems_->profiler().endCpuFrame();
+    systems_->profiler().advanceFrame();
+
+    return true;
+}
+
+std::optional<FrameBuildResult> Renderer::buildFrame(const Camera& camera, const FrameBuildContext& ctx,
+                                                     QueueSubmitDiagnostics& qsDiag) {
+    uint32_t imageIndex = ctx.imageIndex;
+    uint32_t frameIndex = ctx.frameIndex;
 
     // Process completed async transfers after fence wait
     renderingInfra_.processPendingTransfers();
 
-    // === Phase 2: Per-frame data updates ===
+    // === Per-frame data updates ===
     TimingData timing = systems_->time().update();
 
     // UBO updates
@@ -483,7 +509,7 @@ bool Renderer::render(const Camera& camera) {
         uboConfig.lightCullRadius = lightCullRadius;
         uboConfig.ecsWorld = ecsWorld_;
         uboConfig.deltaTime = timing.deltaTime;
-        auto uboResult = UBOUpdater::update(*systems_, frameSync_.currentIndex(), camera, uboConfig);
+        auto uboResult = UBOUpdater::update(*systems_, frameIndex, camera, uboConfig);
         lastSunIntensity = uboResult.sunIntensity;
         bandwidthCounter.recordUboUpdate(sizeof(UniformBufferObject) * 2);
         bandwidthCounter.recordUboUpdate(sizeof(SnowUBO));
@@ -497,7 +523,7 @@ bool Renderer::render(const Camera& camera) {
         SceneBuilder& sceneBuilder = systems_->scene().getSceneBuilder();
         AnimatedCharacter* character = sceneBuilder.hasCharacter() ? &sceneBuilder.getAnimatedCharacter() : nullptr;
         constexpr uint32_t PLAYER_BONE_SLOT = 0;
-        systems_->skinnedMesh().updateBoneMatrices(frameSync_.currentIndex(), PLAYER_BONE_SLOT, character);
+        systems_->skinnedMesh().updateBoneMatrices(frameIndex, PLAYER_BONE_SLOT, character);
         bandwidthCounter.recordSsboUpdate(128 * sizeof(glm::mat4));
         systems_->profiler().endCpuZone("UniformUpdates:Bones");
     }
@@ -506,11 +532,11 @@ bool Renderer::render(const Camera& camera) {
 
     // Build per-frame shared state
     FrameData frame = FrameDataBuilder::buildFrameData(
-        camera, *systems_, frameSync_.currentIndex(), timing.deltaTime, timing.elapsedTime);
+        camera, *systems_, frameIndex, timing.deltaTime, timing.elapsedTime);
     lastViewProj = frame.viewProj;
 
-    // === Phase 3: Subsystem updates ===
-    FrameUpdater::updateDebugLines(*systems_, frameSync_.currentIndex());
+    // === Subsystem updates ===
+    FrameUpdater::updateDebugLines(*systems_, frameIndex);
 
     VkExtent2D extent = vulkanContext_->getVkSwapchainExtent();
     FrameUpdater::SnowConfig snowConfig;
@@ -520,7 +546,7 @@ bool Renderer::render(const Camera& camera) {
 
     FrameUpdater::populateGPUSceneBuffer(*systems_, frame);
 
-    // === Phase 4: Command buffer recording ===
+    // === Command buffer recording ===
     systems_->profiler().beginCpuZone("CmdBufferRecord");
     auto recordStart = std::chrono::high_resolution_clock::now();
 
@@ -540,12 +566,12 @@ bool Renderer::render(const Camera& camera) {
         vulkanContext_->getRenderPass(), {vulkanContext_->getWidth(), vulkanContext_->getHeight()},
         descriptorInfra_.getGraphicsPipeline(), descriptorInfra_.getPipelineLayout(),
         descriptorInfra_.getDescriptorSetLayout());
-    RenderContext ctx(cmd, frame.frameIndex, frame, resources, &qsDiag);
+    RenderContext renderCtx(cmd, frame.frameIndex, frame, resources, &qsDiag);
 
     FrameGraph::RenderContext fgCtx(vkCmd, frame.frameIndex, frame);
     fgCtx.imageIndex = imageIndex;
     fgCtx.deltaTime = frame.deltaTime;
-    fgCtx.withUserData(&ctx)
+    fgCtx.withUserData(&renderCtx)
         .withThreading(&renderingInfra_.threadedCommandPool(),
                        vk::RenderPass(systems_->postProcess().getHDRRenderPass()),
                        vk::Framebuffer(systems_->postProcess().getHDRFramebuffer()))
@@ -561,37 +587,7 @@ bool Renderer::render(const Camera& camera) {
     qsDiag.commandRecordTimeMs = std::chrono::duration<float, std::milli>(recordEnd - recordStart).count();
     systems_->profiler().endCpuZone("CmdBufferRecord");
 
-    // === Phase 5: Submit and present via RendererCore ===
-    FrameExecutionParams execParams;
-    execParams.commandBuffer = cmd;
-    execParams.swapchainImageIndex = imageIndex;
-    execParams.diagnostics = &qsDiag;
-
-    systems_->profiler().beginCpuZone("QueueSubmit");
-    FrameResult submitResult = rendererCore_.submitAndPresent(execParams);
-    systems_->profiler().endCpuZone("QueueSubmit");
-
-    if (submitResult != FrameResult::Success) {
-        framebufferResized = true;
-        systems_->profiler().endCpuFrame();
-        return false;
-    }
-
-    // === Phase 6: Post-frame housekeeping ===
-    systems_->grass().advanceBufferSet();
-    systems_->weather().advanceBufferSet();
-    systems_->leaf().advanceBufferSet();
-
-    if (systems_->hasWaterTileCull()) {
-        systems_->waterTileCull().endFrame(frameSync_.currentIndex());
-    }
-
-    frameSync_.advance();
-
-    systems_->profiler().endCpuFrame();
-    systems_->profiler().advanceFrame();
-
-    return true;
+    return FrameBuildResult{cmd};
 }
 
 void Renderer::waitIdle() {
@@ -1626,14 +1622,13 @@ bool Renderer::initSubsystemsAsync() {
             // Sync objects
             if (!createSyncObjects()) return false;
 
-            // RendererCore
+            // FrameExecutor
             {
-                RendererCore::InitParams coreParams;
-                coreParams.vulkanContext = vulkanContext_.get();
-                coreParams.frameGraph = &renderingInfra_.frameGraph();
-                coreParams.frameSync = &frameSync_;
-                if (!rendererCore_.init(coreParams)) {
-                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize RendererCore");
+                FrameExecutor::InitParams execParams;
+                execParams.vulkanContext = vulkanContext_.get();
+                execParams.frameSync = &frameSync_;
+                if (!frameExecutor_.init(execParams)) {
+                    SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize FrameExecutor");
                     return false;
                 }
             }

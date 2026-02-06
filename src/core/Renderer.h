@@ -14,7 +14,7 @@
 #include "InitContext.h"
 #include "PerformanceToggles.h"
 #include "TripleBuffering.h"
-#include "RendererCore.h"
+#include "FrameExecutor.h"
 #include "RenderingInfrastructure.h"
 #include "DescriptorInfrastructure.h"
 
@@ -264,8 +264,8 @@ private:
     // Triple buffering: frame synchronization and indexing
     TripleBuffering frameSync_;
 
-    // Core frame execution (owns the frame loop mechanics)
-    RendererCore rendererCore_;
+    // Frame execution (owns sync, acquire, submit, present)
+    FrameExecutor frameExecutor_;
 
     // Pass recorders (encapsulate pass recording logic extracted from Renderer)
     std::unique_ptr<ShadowPassRecorder> shadowPassRecorder_;
@@ -311,6 +311,11 @@ private:
     InitContext asyncInitContext_;  // Stored for async task access
     bool asyncInitComplete_ = true;  // True when not using async, or when async is done
     bool asyncInitStarted_ = false;
+
+    // Frame building: updates UBOs, subsystems, and records command buffer.
+    // Called by the FrameExecutor callback during execute().
+    std::optional<FrameBuildResult> buildFrame(const Camera& camera, const FrameBuildContext& ctx,
+                                               QueueSubmitDiagnostics& diagnostics);
 
     // Skinned mesh rendering
     bool initSkinnedMeshRenderer();

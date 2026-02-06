@@ -96,7 +96,7 @@ private:
 
 ## Progress Tracking
 
-- [x] Step 0: Extract RendererCore class
+- [x] Step 0: Extract RendererCore class (now FrameExecutor with callback-based execute())
 - [x] Step 1: Extract render pass recorders (ShadowPassRecorder, HDRPassRecorder)
 - [x] Step 2: Move UBO updates to UBOUpdater (following existing updater pattern)
 - [x] Step 3: Move Vulkan infrastructure to VulkanContext

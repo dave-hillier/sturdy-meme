@@ -516,14 +516,13 @@ bool Renderer::initSubsystems(const InitContext& initCtx) {
 
     if (!createSyncObjects()) return false;
 
-    // Initialize RendererCore (core frame loop execution)
+    // Initialize FrameExecutor (frame sync, acquire, submit, present)
     {
-        RendererCore::InitParams coreParams;
-        coreParams.vulkanContext = vulkanContext_.get();
-        coreParams.frameGraph = &renderingInfra_.frameGraph();
-        coreParams.frameSync = &frameSync_;
-        if (!rendererCore_.init(coreParams)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize RendererCore");
+        FrameExecutor::InitParams execParams;
+        execParams.vulkanContext = vulkanContext_.get();
+        execParams.frameSync = &frameSync_;
+        if (!frameExecutor_.init(execParams)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize FrameExecutor");
             return false;
         }
     }
