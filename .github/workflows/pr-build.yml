@@ -21,12 +21,28 @@ jobs:
             echo "/usr/local/bin" >> $GITHUB_PATH
           fi
 
+      - name: Setup vcpkg
+        run: |
+          if [ -z "$VCPKG_ROOT" ]; then
+            # Detect vcpkg installed via Homebrew
+            VCPKG_PREFIX="$(brew --prefix vcpkg 2>/dev/null || true)"
+            if [ -n "$VCPKG_PREFIX" ] && [ -d "$VCPKG_PREFIX/share/vcpkg" ]; then
+              echo "VCPKG_ROOT=$VCPKG_PREFIX/share/vcpkg" >> $GITHUB_ENV
+            elif [ -d "$VCPKG_INSTALLATION_ROOT" ]; then
+              echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> $GITHUB_ENV
+            else
+              echo "::error::Could not find vcpkg installation. Set VCPKG_ROOT environment variable."
+              exit 1
+            fi
+          fi
+
       - name: Verify build tools
         run: |
           echo "CMake: $(which cmake)"
           cmake --version
           echo "Ninja: $(which ninja)"
           ninja --version
+          echo "VCPKG_ROOT: $VCPKG_ROOT"
 
       - name: Configure
         run: cmake --preset debug
