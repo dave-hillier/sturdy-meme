@@ -1249,6 +1249,7 @@ if(BUILD_TESTS)
         tests/test_celestial_calculator.cpp
         tests/test_terrain_height.cpp
         tests/test_animation.cpp
+        tests/test_animation_blend.cpp
         tests/test_ik_utils.cpp
         tests/test_terrain_loaders.cpp
         tests/test_virtual_texture_types.cpp
@@ -1256,6 +1257,13 @@ if(BUILD_TESTS)
         tests/test_tile_grid_logic.cpp
         tests/test_tile_composition.cpp
         tests/test_transform.cpp
+        tests/test_breadcrumb_tracker.cpp
+        tests/test_camera.cpp
+        tests/test_deterministic_random.cpp
+        tests/test_rotation_utils.cpp
+        tests/test_kd_tree.cpp
+        tests/test_flamegraph.cpp
+        tests/test_player_state.cpp
         # Source files needed by tests
         src/atmosphere/CelestialCalculator.cpp
         src/ik/IKUtils.cpp
@@ -1263,6 +1271,9 @@ if(BUILD_TESTS)
         src/terrain/RoadNetworkLoader.cpp
         src/terrain/virtual_texture/VirtualTextureTileLoader.cpp
         src/scene/Transform.cpp
+        src/scene/Camera.cpp
+        src/animation/AnimationBlend.cpp
+        src/animation/MotionMatchingKDTree.cpp
     )
 
     target_include_directories(vulkan_game_tests PRIVATE
@@ -1272,6 +1283,7 @@ if(BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain  # For TileGridLogic.h, ErosionDataLoader.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture  # For VirtualTextureTypes.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/water    # For WaterPlacementData.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/debug    # For Flamegraph.h
     )
 
     target_link_libraries(vulkan_game_tests PRIVATE
