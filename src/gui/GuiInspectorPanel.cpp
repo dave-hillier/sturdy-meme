@@ -7,7 +7,8 @@
 
 #include <imgui.h>
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_decompose.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/matrix_decompose.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <cmath>
 

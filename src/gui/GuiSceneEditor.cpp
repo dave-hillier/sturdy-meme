@@ -4,6 +4,7 @@
 #include "core/interfaces/ISceneControl.h"
 #include "ecs/World.h"
 #include "ecs/Components.h"
+#include "ecs/Systems.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>

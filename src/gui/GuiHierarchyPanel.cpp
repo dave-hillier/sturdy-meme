@@ -3,6 +3,7 @@
 #include "scene/SceneBuilder.h"
 #include "ecs/World.h"
 #include "ecs/Components.h"
+#include "ecs/Systems.h"
 
 #include <imgui.h>
 #include <algorithm>
