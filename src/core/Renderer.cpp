@@ -429,6 +429,7 @@ bool Renderer::render(const Camera& camera) {
     if (framebufferResized) {
         handleResize();
         framebufferResized = false;
+        rendererCore_.clearResizeFlag();
         frameSync_.waitForAllFrames();
         frameSync_.resetForResize();
     }
