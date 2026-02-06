@@ -123,6 +123,7 @@ RendererCore::FrameBeginResult RendererCore::beginFrame(QueueSubmitDiagnostics& 
     }
 
     frameSync_->resetCurrentFence();
+    resizeNeeded_ = false;
 
     currentImageIndex_ = imageIndex;
     result.success = true;
