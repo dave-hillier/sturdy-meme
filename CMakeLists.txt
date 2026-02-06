@@ -1311,10 +1311,60 @@ if(BUILD_TESTS)
     # Register tests with CTest
     add_test(NAME vulkan_game_tests COMMAND vulkan_game_tests)
 
+    # =========================================================================
+    # Integration tests: Motion matching with real FBX animation files
+    # Separate executable because it needs GLTFLoader.cpp (real Skeleton methods)
+    # which conflicts with the stubs in test_motion_matching.cpp
+    # =========================================================================
+    add_executable(motion_matching_integration_tests
+        tests/test_motion_matching_integration.cpp
+        # Loaders
+        src/loaders/FBXLoader.cpp
+        src/loaders/FBXPostProcess.cpp
+        src/loaders/GLTFLoader.cpp
+        # Animation
+        src/animation/Animation.cpp
+        src/animation/AnimationBlend.cpp
+        src/animation/MotionMatchingFeature.cpp
+        src/animation/MotionMatchingKDTree.cpp
+        src/animation/MotionMatchingTrajectory.cpp
+        src/animation/MotionDatabase.cpp
+        src/animation/MotionMatchingController.cpp
+        # Scene (for TransformHierarchy used by Skeleton)
+        src/scene/Transform.cpp
+    )
+
+    target_include_directories(motion_matching_integration_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/loaders
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/animation
+    )
+
+    target_link_libraries(motion_matching_integration_tests PRIVATE
+        doctest::doctest
+        glm::glm
+        Vulkan::Vulkan
+        GPUOpen::VulkanMemoryAllocator
+        SDL3::SDL3
+        fastgltf::fastgltf
+        unoffical::openfbx::openfbx
+    )
+
+    target_compile_features(motion_matching_integration_tests PRIVATE cxx_std_17)
+    target_compile_definitions(motion_matching_integration_tests PRIVATE GLM_ENABLE_EXPERIMENTAL)
+
+    # Integration tests must run from project root (for asset paths)
+    add_test(
+        NAME motion_matching_integration_tests
+        COMMAND motion_matching_integration_tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
     # Add a custom target to run tests
     add_custom_target(run_tests
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-        DEPENDS vulkan_game_tests
+        DEPENDS vulkan_game_tests motion_matching_integration_tests
         COMMENT "Running unit tests"
     )
 endif()
