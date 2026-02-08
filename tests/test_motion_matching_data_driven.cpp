@@ -398,7 +398,9 @@ TEST_CASE("run-speed trajectory selects run animation") {
 
     INFO("Selected: " << result.clip->name);
     AnimType type = classifyName(result.clip->name);
-    CHECK((type == AnimType::Run || type == AnimType::Walk));
+    // At 5.0 m/s (run speed), the system should clearly select a run animation
+    // since the trajectory velocity matches run clips far better than walk (1.4 m/s)
+    CHECK(type == AnimType::Run);
 }
 
 TEST_CASE("run-speed trajectory has lower cost for run clips than idle clips") {
@@ -487,16 +489,16 @@ TEST_CASE("parametric speed sweep: idle vs locomotion boundary") {
 
     struct SpeedTest {
         float speed;
-        bool expectLocomotion;  // true = walk/run/strafe, false = idle
+        AnimType minExpected; // Idle = expect idle, Walk = expect walk+, Run = expect run
     };
 
     std::vector<SpeedTest> tests = {
-        {0.0f,  false},  // stationary → idle
-        {0.2f,  false},  // very slow → idle (below walk threshold)
-        {1.0f,  true},   // near walk speed → locomotion
-        {WALK_SPEED, true},
-        {3.0f,  true},   // between walk and run
-        {RUN_SPEED, true},
+        {0.0f,  AnimType::Idle},   // stationary → idle
+        {0.2f,  AnimType::Idle},   // very slow → idle (below walk threshold)
+        {1.0f,  AnimType::Walk},   // near walk speed → walk or faster locomotion
+        {WALK_SPEED, AnimType::Walk},  // walk speed → walk
+        {3.0f,  AnimType::Walk},   // between walk and run → walk or run
+        {RUN_SPEED, AnimType::Run},    // run speed → run
     };
 
     for (const auto& test : tests) {
@@ -505,11 +507,15 @@ TEST_CASE("parametric speed sweep: idle vs locomotion boundary") {
 
         INFO("Speed: " << test.speed << " → " << selected << " (" << animTypeName(type) << ")");
 
-        if (test.expectLocomotion) {
+        if (test.minExpected == AnimType::Idle) {
+            CHECK(type == AnimType::Idle);
+        } else if (test.minExpected == AnimType::Run) {
+            // At run speed, should specifically select run (not walk/strafe)
+            CHECK(type == AnimType::Run);
+        } else {
+            // At walk-range speeds, any locomotion is acceptable
             CHECK((type == AnimType::Walk || type == AnimType::Run ||
                    type == AnimType::Strafe || type == AnimType::Turn));
-        } else {
-            CHECK(type == AnimType::Idle);
         }
 
         // Reset for next test by re-initializing controller state
@@ -568,7 +574,8 @@ TEST_CASE("forward input selects forward locomotion") {
     AnimType type = classifyName(selected);
 
     INFO("Forward → " << selected);
-    CHECK((type == AnimType::Walk || type == AnimType::Run || type == AnimType::Strafe));
+    // Forward input should select forward locomotion (walk or run), not strafe
+    CHECK((type == AnimType::Walk || type == AnimType::Run));
 }
 
 TEST_CASE("lateral input selects strafe or locomotion") {
@@ -581,9 +588,9 @@ TEST_CASE("lateral input selects strafe or locomotion") {
     AnimType type = classifyName(selected);
 
     INFO("Right lateral → " << selected);
-    // Should select strafe or some locomotion (not idle, not jump)
-    CHECK(type != AnimType::Idle);
-    CHECK(type != AnimType::Jump);
+    // Pure lateral movement should favor strafe animations (designed for sideways motion)
+    // Walk is also acceptable since it has similar speed (1.4 vs 1.8 m/s)
+    CHECK((type == AnimType::Strafe || type == AnimType::Walk));
 }
 
 TEST_CASE("left lateral input selects strafe or locomotion") {
@@ -594,8 +601,8 @@ TEST_CASE("left lateral input selects strafe or locomotion") {
     AnimType type = classifyName(selected);
 
     INFO("Left lateral → " << selected);
-    CHECK(type != AnimType::Idle);
-    CHECK(type != AnimType::Jump);
+    // Pure lateral movement should favor strafe animations
+    CHECK((type == AnimType::Strafe || type == AnimType::Walk));
 }
 
 TEST_CASE("diagonal forward-left selects locomotion") {
@@ -607,8 +614,8 @@ TEST_CASE("diagonal forward-left selects locomotion") {
     AnimType type = classifyName(selected);
 
     INFO("Diagonal forward-left → " << selected);
-    CHECK(type != AnimType::Idle);
-    CHECK(type != AnimType::Jump);
+    // Diagonal input should select locomotion — walk, run, or strafe
+    CHECK((type == AnimType::Walk || type == AnimType::Run || type == AnimType::Strafe));
 }
 
 TEST_CASE("no input after movement returns to idle") {
@@ -661,8 +668,10 @@ TEST_CASE("idle → walk → run ramp: acceleration profile") {
     INFO("Idle: " << clips[0] << ", Slow: " << clips[1] << ", Fast: " << clips[2]);
 
     CHECK(idleType == AnimType::Idle);
-    CHECK(slowType != AnimType::Idle);  // Moving, so not idle
-    CHECK(fastType != AnimType::Idle);  // Still moving
+    // Slow phase (magnitude 0.3 → 1.8 m/s) should select walk-range locomotion
+    CHECK((slowType == AnimType::Walk || slowType == AnimType::Strafe || slowType == AnimType::Run));
+    // Fast phase (magnitude 1.0 → 6.0 m/s) should select run animation
+    CHECK(fastType == AnimType::Run);
 }
 
 TEST_CASE("run → idle deceleration: sudden stop from full speed") {
@@ -714,6 +723,11 @@ TEST_CASE("direction reversal: forward then backward") {
     INFO("Forward: " << forwardClip << ", Reversed: " << reversedClip);
     CHECK(!forwardClip.empty());
     CHECK(!reversedClip.empty());
+    // Both phases have magnitude 0.7 input, so both should be in locomotion
+    AnimType fwdType = classifyName(forwardClip);
+    AnimType revType = classifyName(reversedClip);
+    CHECK(fwdType != AnimType::Idle);
+    CHECK(revType != AnimType::Idle);
 }
 
 TEST_CASE("circular path: constant turning input") {
@@ -744,11 +758,12 @@ TEST_CASE("circular path: constant turning input") {
     }
 
     CHECK(nanCount == 0);
-    // During circular movement, the system should be in locomotion most of the time
-    // Allow some idle frames during direction changes
+    // During circular movement, the system should be in locomotion most of the time.
+    // With continuous input at magnitude 0.6 (3.6 m/s), idle selection indicates
+    // the system is failing to match locomotion — only brief direction changes should idle.
     float idleFraction = static_cast<float>(idleCount) / static_cast<float>(totalFrames);
     INFO("Idle fraction during circular movement: " << idleFraction);
-    CHECK(idleFraction < 0.5f);
+    CHECK(idleFraction < 0.15f);
 }
 
 TEST_CASE("figure-eight pattern: alternating turns") {
@@ -763,6 +778,7 @@ TEST_CASE("figure-eight pattern: alternating turns") {
 
     int totalFrames = 240; // 8 seconds
     bool hadNaN = false;
+    int idleCount = 0;
 
     for (int i = 0; i < totalFrames; ++i) {
         // Figure-8: sin with different frequencies on x and z
@@ -773,10 +789,15 @@ TEST_CASE("figure-eight pattern: alternating turns") {
         f.controller.update(position, facing, dir, 0.5f, dt);
 
         if (std::isnan(f.controller.getStats().lastMatchCost)) hadNaN = true;
+        if (classifyName(f.currentClipName()) == AnimType::Idle) idleCount++;
     }
 
     CHECK_FALSE(hadNaN);
     CHECK(!f.currentClipName().empty());
+    // With continuous input at magnitude 0.5, should stay in locomotion
+    float idleFraction = static_cast<float>(idleCount) / static_cast<float>(totalFrames);
+    INFO("Idle fraction during figure-8: " << idleFraction);
+    CHECK(idleFraction < 0.15f);
 }
 
 TEST_CASE("rapid direction oscillation: stress test") {
@@ -790,17 +811,24 @@ TEST_CASE("rapid direction oscillation: stress test") {
     glm::vec3 facing(0.0f, 0.0f, 1.0f);
 
     int nanCount = 0;
-    for (int i = 0; i < 300; ++i) {
+    int idleCount = 0;
+    int totalFrames = 300;
+    for (int i = 0; i < totalFrames; ++i) {
         // Flip direction every 5 frames
         float sign = ((i / 5) % 2 == 0) ? 1.0f : -1.0f;
         glm::vec3 dir(0.0f, 0.0f, sign);
 
         f.controller.update(position, facing, dir, 0.8f, dt);
         if (std::isnan(f.controller.getStats().lastMatchCost)) nanCount++;
+        if (classifyName(f.currentClipName()) == AnimType::Idle) idleCount++;
     }
 
     CHECK(nanCount == 0);
     CHECK(!f.currentClipName().empty());
+    // With high magnitude input (0.8), should stay in locomotion despite direction flips
+    float idleFraction = static_cast<float>(idleCount) / static_cast<float>(totalFrames);
+    INFO("Idle fraction during oscillation: " << idleFraction);
+    CHECK(idleFraction < 0.2f);
 }
 
 } // TEST_SUITE("Dance Card Scenarios")
@@ -813,43 +841,62 @@ TEST_CASE("rapid direction oscillation: stress test") {
 
 TEST_SUITE("Cost Function Validation") {
 
-TEST_CASE("cost decomposition: trajectory + pose + bias sum to total") {
-    // Verify that the cost components (trajectory, pose, bias) reported in MatchResult
-    // sum approximately to the total cost.
+TEST_CASE("cost decomposition: components are valid and discriminative") {
+    // The total cost uses normalized features, while the component breakdown
+    // (trajectoryCost, poseCost) uses unnormalized features as diagnostics.
+    // We verify: (1) components are finite and non-negative, (2) trajectory cost
+    // discriminates between matching and non-matching animation types.
     MotionMatchingFixture f;
     REQUIRE(f.setup());
 
     MotionMatcher matcher;
     matcher.setDatabase(&f.controller.getDatabase());
 
-    Trajectory traj = f.buildTrajectory(glm::vec3(0.0f, 0.0f, WALK_SPEED),
-                                         glm::vec3(0.0f, 0.0f, 1.0f));
+    glm::vec3 walkVel(0.0f, 0.0f, WALK_SPEED);
+    Trajectory traj = f.buildTrajectory(walkVel, glm::vec3(0.0f, 0.0f, 1.0f));
     PoseFeatures queryPose;
-    queryPose.rootVelocity = glm::vec3(0.0f, 0.0f, WALK_SPEED);
+    queryPose.rootVelocity = walkVel;
 
     SearchOptions opts;
     opts.useKDTree = false;
     opts.excludedTags = {"jump"};
 
-    auto results = matcher.findTopMatches(traj, queryPose, 10, opts);
+    auto results = matcher.findTopMatches(traj, queryPose, 20, opts);
     REQUIRE(!results.empty());
 
+    // Track trajectory costs by animation type for discrimination check
+    float bestWalkTrajCost = std::numeric_limits<float>::max();
+    float bestIdleTrajCost = std::numeric_limits<float>::max();
+
     for (const auto& r : results) {
-        // Note: MatchResult.cost is computed with *normalized* features (mean-centered),
-        // while trajectoryCost/poseCost are recomputed with *unnormalized* features
-        // as a diagnostic breakdown. They don't directly sum to the total.
-        // We verify each component is finite and non-NaN.
-        INFO("Total: " << r.cost
+        INFO("Total: " << r.cost << " clip: " << r.clip->name
              << " (traj=" << r.trajectoryCost << " pose=" << r.poseCost
              << " heading=" << r.headingCost << " bias=" << r.biasCost << ")");
+
+        // All components must be finite
         CHECK_FALSE(std::isnan(r.cost));
         CHECK_FALSE(std::isinf(r.cost));
         CHECK_FALSE(std::isnan(r.trajectoryCost));
         CHECK_FALSE(std::isnan(r.poseCost));
-        CHECK_FALSE(std::isnan(r.headingCost));
-        // Unnormalized trajectory and pose costs should be non-negative (raw distances)
+
+        // Unnormalized trajectory and pose costs are squared distances: non-negative
         CHECK(r.trajectoryCost >= 0.0f);
         CHECK(r.poseCost >= 0.0f);
+
+        AnimType type = classifyName(r.clip->name);
+        if (type == AnimType::Walk && r.trajectoryCost < bestWalkTrajCost)
+            bestWalkTrajCost = r.trajectoryCost;
+        if (type == AnimType::Idle && r.trajectoryCost < bestIdleTrajCost)
+            bestIdleTrajCost = r.trajectoryCost;
+    }
+
+    // For a walk-speed query, the unnormalized trajectory cost should be lower
+    // for walk clips than for idle clips (trajectory velocity mismatch)
+    if (bestWalkTrajCost < std::numeric_limits<float>::max() &&
+        bestIdleTrajCost < std::numeric_limits<float>::max()) {
+        INFO("Best walk traj cost: " << bestWalkTrajCost
+             << ", Best idle traj cost: " << bestIdleTrajCost);
+        CHECK(bestWalkTrajCost < bestIdleTrajCost);
     }
 }
 
@@ -985,7 +1032,9 @@ TEST_CASE("idle query: KD-tree matches brute force") {
 
     INFO("BF cost: " << bfResult.cost << " clip: " << bfResult.clip->name);
     INFO("KD cost: " << kdResult.cost << " clip: " << kdResult.clip->name);
-    CHECK(kdResult.cost == doctest::Approx(bfResult.cost).epsilon(1.0f));
+    // KD-tree is an approximation (searches K nearest in feature space,
+    // then evaluates full cost), so allow a small tolerance
+    CHECK(kdResult.cost == doctest::Approx(bfResult.cost).epsilon(0.15f));
 }
 
 TEST_CASE("walk query: KD-tree matches brute force") {
@@ -1017,7 +1066,9 @@ TEST_CASE("walk query: KD-tree matches brute force") {
 
     INFO("BF cost: " << bfResult.cost << " clip: " << bfResult.clip->name);
     INFO("KD cost: " << kdResult.cost << " clip: " << kdResult.clip->name);
-    CHECK(kdResult.cost == doctest::Approx(bfResult.cost).epsilon(1.0f));
+    // KD-tree is an approximation (searches K nearest in feature space,
+    // then evaluates full cost), so allow a small tolerance
+    CHECK(kdResult.cost == doctest::Approx(bfResult.cost).epsilon(0.15f));
 }
 
 TEST_CASE("run query: KD-tree matches brute force") {
@@ -1049,7 +1100,9 @@ TEST_CASE("run query: KD-tree matches brute force") {
 
     INFO("BF cost: " << bfResult.cost << " clip: " << bfResult.clip->name);
     INFO("KD cost: " << kdResult.cost << " clip: " << kdResult.clip->name);
-    CHECK(kdResult.cost == doctest::Approx(bfResult.cost).epsilon(1.0f));
+    // KD-tree is an approximation (searches K nearest in feature space,
+    // then evaluates full cost), so allow a small tolerance
+    CHECK(kdResult.cost == doctest::Approx(bfResult.cost).epsilon(0.15f));
 }
 
 TEST_CASE("multiple queries: KD-tree and brute force select same animation type") {
@@ -1224,7 +1277,8 @@ TEST_CASE("idle → walk transition") {
 
     CHECK(classifyName(clips[0]) == AnimType::Idle);
     AnimType walkType = classifyName(clips[1]);
-    CHECK((walkType == AnimType::Walk || walkType == AnimType::Strafe || walkType == AnimType::Run));
+    // At magnitude 0.4 (→ 2.4 m/s), should select walk-range locomotion
+    CHECK((walkType == AnimType::Walk || walkType == AnimType::Strafe));
 }
 
 TEST_CASE("walk → run transition") {
@@ -1241,8 +1295,10 @@ TEST_CASE("walk → run transition") {
 
     AnimType walkType = classifyName(clips[0]);
     AnimType runType = classifyName(clips[1]);
-    CHECK(walkType != AnimType::Idle);
-    CHECK(runType != AnimType::Idle);
+    // Walk phase (magnitude 0.3 → 1.8 m/s) should select walk-range
+    CHECK((walkType == AnimType::Walk || walkType == AnimType::Strafe));
+    // Run phase (magnitude 1.0 → 6.0 m/s) should select run
+    CHECK(runType == AnimType::Run);
 }
 
 TEST_CASE("run → idle transition") {
@@ -1278,14 +1334,22 @@ TEST_CASE("full cycle: idle → walk → run → walk → idle") {
     INFO("Cycle: " << clips[0] << " → " << clips[1] << " → " << clips[2]
          << " → " << clips[3] << " → " << clips[4]);
 
-    // First and last should be idle
-    CHECK(classifyName(clips[0]) == AnimType::Idle);
-    CHECK(classifyName(clips[4]) == AnimType::Idle);
+    AnimType t0 = classifyName(clips[0]);
+    AnimType t1 = classifyName(clips[1]);
+    AnimType t2 = classifyName(clips[2]);
+    AnimType t3 = classifyName(clips[3]);
+    AnimType t4 = classifyName(clips[4]);
 
-    // Middle phases should be locomotion
-    CHECK(classifyName(clips[1]) != AnimType::Idle);
-    CHECK(classifyName(clips[2]) != AnimType::Idle);
-    CHECK(classifyName(clips[3]) != AnimType::Idle);
+    // First and last should be idle
+    CHECK(t0 == AnimType::Idle);
+    CHECK(t4 == AnimType::Idle);
+
+    // Walk phase (0.3 → 1.8 m/s) should select walk-range locomotion
+    CHECK((t1 == AnimType::Walk || t1 == AnimType::Strafe));
+    // Run phase (1.0 → 6.0 m/s) should select run
+    CHECK(t2 == AnimType::Run);
+    // Return to walk (0.3 → 1.8 m/s) should select walk-range again
+    CHECK((t3 == AnimType::Walk || t3 == AnimType::Strafe));
 }
 
 TEST_CASE("transition does not produce NaN during any phase") {
@@ -1400,9 +1464,12 @@ TEST_CASE("idle query cost is within expected range") {
     CHECK(result.cost < 100.0f);
 }
 
-TEST_CASE("walk query consistently selects walk-tagged animation") {
+TEST_CASE("walk query consistently selects walk animation without tag constraint") {
     // Run the same walk query multiple times (different fixture instances)
-    // to verify deterministic selection.
+    // to verify deterministic selection. Crucially, NO requiredTags filter is used —
+    // the system must naturally prefer walk clips based on feature matching alone.
+    std::string firstSelected;
+
     for (int trial = 0; trial < 3; ++trial) {
         MotionMatchingFixture f;
         REQUIRE(f.setup());
@@ -1419,13 +1486,22 @@ TEST_CASE("walk query consistently selects walk-tagged animation") {
         SearchOptions opts;
         opts.useKDTree = false;
         opts.excludedTags = {"jump"};
-        opts.requiredTags = {"walk"};
+        // No requiredTags — unconstrained search must naturally select walk
 
         auto result = matcher.findBestMatch(traj, queryPose, opts);
         REQUIRE(result.isValid());
 
+        AnimType type = classifyName(result.clip->name);
         INFO("Trial " << trial << ": " << result.clip->name << " cost=" << result.cost);
-        CHECK(result.pose->hasTag("walk"));
+        // Walk-speed query should select walk (or strafe, which has similar speed 1.8 m/s)
+        CHECK((type == AnimType::Walk || type == AnimType::Strafe));
+
+        // Verify determinism: same result every time
+        if (trial == 0) {
+            firstSelected = result.clip->name;
+        } else {
+            CHECK(result.clip->name == firstSelected);
+        }
     }
 }
 
