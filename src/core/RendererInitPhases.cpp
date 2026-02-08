@@ -95,6 +95,17 @@ bool Renderer::initDescriptorInfrastructure() {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize descriptor infrastructure");
         return false;
     }
+
+    // Initialize bindless rendering if descriptor indexing is supported
+    if (vulkanContext_->hasDescriptorIndexing()) {
+        if (bindlessManager_.init(*vulkanContext_, BindlessManager::DEFAULT_MAX_TEXTURES, MAX_FRAMES_IN_FLIGHT)) {
+            descriptorInfra_.setBindlessLayouts(
+                bindlessManager_.getTextureSetLayout(),
+                bindlessManager_.getMaterialSetLayout());
+            SDL_Log("Bindless rendering infrastructure initialized");
+        }
+    }
+
     return true;
 }
 
@@ -294,6 +305,27 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 return false;
             }
             systems_->setScene(std::move(sceneManager));
+
+            // Initialize bindless TextureRegistry with placeholder textures
+            if (bindlessManager_.isInitialized()) {
+                const auto& sceneBuilder = systems_->scene().getSceneBuilder();
+                const Texture* whiteTex = sceneBuilder.getWhiteTexture();
+                const Texture* blackTex = sceneBuilder.getDefaultEmissiveMap();
+
+                if (whiteTex && blackTex) {
+                    textureRegistry_.init(
+                        whiteTex->getImageView(), whiteTex->getSampler(),   // white placeholder
+                        blackTex->getImageView(), blackTex->getSampler(),   // black placeholder
+                        whiteTex->getImageView(), whiteTex->getSampler()); // normal placeholder (temporary)
+
+                    // Connect TextureRegistry to MaterialRegistry for auto-registration
+                    auto& materialRegistry = systems_->scene().getSceneBuilder().getMaterialRegistry();
+                    materialRegistry.setTextureRegistry(&textureRegistry_);
+                    materialRegistry.registerTexturesWithRegistry();
+
+                    SDL_Log("TextureRegistry initialized and connected to MaterialRegistry");
+                }
+            }
 
             // Create descriptor sets (needs scene + snow systems)
             if (!createDescriptorSets()) return false;

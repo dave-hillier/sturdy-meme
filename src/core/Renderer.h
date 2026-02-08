@@ -16,6 +16,8 @@
 #include "FrameExecutor.h"
 #include "RenderingInfrastructure.h"
 #include "DescriptorInfrastructure.h"
+#include "material/TextureRegistry.h"
+#include "material/BindlessManager.h"
 
 // Forward declarations
 class Camera;
@@ -262,6 +264,10 @@ private:
 
     // Descriptor and pipeline infrastructure (extracted from Renderer)
     DescriptorInfrastructure descriptorInfra_;
+
+    // Bindless rendering infrastructure
+    TextureRegistry textureRegistry_;
+    BindlessManager bindlessManager_;
 
     glm::mat4 lastViewProj{1.0f};  // Cached view-projection for debug rendering
     bool useVolumetricSnow = true;  // Use new volumetric system by default
