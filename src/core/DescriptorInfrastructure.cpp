@@ -78,8 +78,20 @@ bool DescriptorInfrastructure::createGraphicsPipeline(VulkanContext& context, Vk
     VkExtent2D swapchainExtent = context.getVkSwapchainExtent();
 
     // Create pipeline layout using PipelineLayoutBuilder
-    auto layoutOpt = PipelineLayoutBuilder(context.getRaiiDevice())
-        .addDescriptorSetLayout(**descriptorSetLayout_)
+    // Set 0: Main rendering (UBO, textures, lights, etc.)
+    // Set 1: Bindless texture array (optional, if bindless is available)
+    // Set 2: Material data SSBO (optional, if bindless is available)
+    auto builder = PipelineLayoutBuilder(context.getRaiiDevice())
+        .addDescriptorSetLayout(**descriptorSetLayout_);
+
+    if (bindlessTextureSetLayout_) {
+        builder.addDescriptorSetLayout(bindlessTextureSetLayout_);
+    }
+    if (bindlessMaterialSetLayout_) {
+        builder.addDescriptorSetLayout(bindlessMaterialSetLayout_);
+    }
+
+    auto layoutOpt = builder
         .addPushConstantRange<PushConstants>(
             vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
         .build();

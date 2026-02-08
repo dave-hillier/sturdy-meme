@@ -20,7 +20,7 @@ layout(push_constant) uniform PushConstants {
     uint pbrFlags;  // Bitmask indicating which PBR textures are bound
     float alphaTestThreshold;  // Alpha test threshold (0 = disabled, >0 = discard if alpha < threshold)
     float hueShift;  // Hue rotation in radians (0 = no shift, 2*PI = full rotation)
-    float _padding3;
+    uint materialIndex;  // Index into bindless MaterialData SSBO
 } material;
 
 #endif // PUSH_CONSTANTS_COMMON_GLSL

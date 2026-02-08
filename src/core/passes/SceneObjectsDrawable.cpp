@@ -70,6 +70,7 @@ void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t fram
         push.emissiveColor = glm::vec4(data.emissiveColor, 1.0f);
         push.pbrFlags = data.pbrFlags;
         push.alphaTestThreshold = data.alphaTestThreshold;
+        push.materialIndex = data.materialId;
 
         vkCmd.pushConstants<PushConstants>(
             *params.pipelineLayout,
@@ -98,6 +99,7 @@ void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t fram
         push.emissiveColor = glm::vec4(obj.emissiveColor, 1.0f);
         push.pbrFlags = obj.pbrFlags;
         push.alphaTestThreshold = obj.alphaTestThreshold;
+        push.materialIndex = obj.materialId;
 
         vkCmd.pushConstants<PushConstants>(
             *params.pipelineLayout,
