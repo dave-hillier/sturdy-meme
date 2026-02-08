@@ -11,14 +11,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup macOS environment
+      - name: Setup build environment
         run: |
-          # Add Homebrew to PATH for both Apple Silicon and Intel Macs
-          if [ -d "/opt/homebrew/bin" ]; then
-            echo "/opt/homebrew/bin" >> $GITHUB_PATH
-          fi
-          if [ -d "/usr/local/bin" ]; then
-            echo "/usr/local/bin" >> $GITHUB_PATH
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            # Add Homebrew to PATH for both Apple Silicon and Intel Macs
+            for dir in /opt/homebrew/bin /usr/local/bin; do
+              if [ -d "$dir" ]; then
+                echo "$dir" >> $GITHUB_PATH
+                export PATH="$dir:$PATH"
+              fi
+            done
+            # Ensure required build tools are available
+            command -v ninja &>/dev/null || brew install ninja
+            command -v cmake &>/dev/null || brew install cmake
+          else
+            # Linux
+            if ! command -v ninja &>/dev/null || ! command -v g++ &>/dev/null || ! command -v cmake &>/dev/null; then
+              sudo apt-get update
+              sudo apt-get install -y cmake ninja-build g++ curl zip unzip tar pkg-config
+            fi
           fi
 
       - name: Setup vcpkg
