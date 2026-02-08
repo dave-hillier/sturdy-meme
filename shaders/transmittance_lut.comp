@@ -14,7 +14,8 @@ layout(binding = BINDING_ATMO_TRANSMITTANCE) uniform AtmosphereUniforms {
     AtmosphereParams params;
     vec4 toSunDirection;
     vec4 cameraPosition;
-    float padding[2];
+    float atmoPadding0;
+    float atmoPadding1;
 } uAtmosphere;
 
 const int TRANSMITTANCE_STEPS = 40;

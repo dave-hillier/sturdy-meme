@@ -22,7 +22,12 @@ layout(std140, binding = BINDING_VT_PARAMS_UBO) uniform VTParamsUBO {
     vec4 physicalCacheSizeAndInverse;      // xy = size, zw = 1/size
     vec4 tileSizeAndBorder;                // x = tile size, y = border, z = tile with border, w = unused
     uint maxMipLevel;
-    uint vtPadding[3];
+    // Note: Use individual uints instead of uint[3] array because std140
+    // layout gives arrays a 16-byte stride per element, creating a size
+    // mismatch with the C++ struct where uints are packed contiguously.
+    uint vtPadding0;
+    uint vtPadding1;
+    uint vtPadding2;
 } vtParams;
 
 // Page table (indirection) - texture array with one layer per mip level

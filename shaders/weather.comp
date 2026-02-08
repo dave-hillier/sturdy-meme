@@ -52,7 +52,9 @@ layout(binding = BINDING_WEATHER_UNIFORMS) uniform WeatherUniforms {
     uint weatherType;               // 0 = rain, 1 = snow
     float intensity;
     float nearZoneRadius;
-    float padding[3];
+    float weatherPadding0;
+    float weatherPadding1;
+    float weatherPadding2;
 } uniforms;
 
 // Wind uniforms

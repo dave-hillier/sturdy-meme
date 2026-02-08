@@ -128,7 +128,12 @@ layout(std140, binding = BINDING_TERRAIN_LIQUID_UBO) uniform TerrainLiquidUnifor
 
     // Animation
     float liquidTime;
-    float liquidPadding2[3];
+    // Note: Use individual floats instead of float[3] array because std140
+    // layout gives arrays a 16-byte stride per element, creating a size
+    // mismatch with the C++ struct where floats are packed contiguously.
+    float liquidPadding2a;
+    float liquidPadding2b;
+    float liquidPadding2c;
 };
 
 // Far LOD grass parameters (where to start/end grass-to-terrain transition)

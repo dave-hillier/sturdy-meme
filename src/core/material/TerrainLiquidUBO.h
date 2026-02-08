@@ -43,7 +43,11 @@ struct TerrainLiquidUBO {
 
     // Animation
     float time;                 // Animation time (seconds)
-    float padding2[3];
+    // Note: Individual floats instead of float[3] array to match GLSL std140
+    // layout (arrays get 16-byte stride per element in std140, scalars don't)
+    float padding2a;
+    float padding2b;
+    float padding2c;
 
     // Default constructor
     TerrainLiquidUBO() :
@@ -69,7 +73,9 @@ struct TerrainLiquidUBO {
         waterLevel(0.0f),
         padding(0.0f),
         time(0.0f),
-        padding2{0.0f, 0.0f, 0.0f}
+        padding2a(0.0f),
+        padding2b(0.0f),
+        padding2c(0.0f)
     {}
 
     // Configure for rain

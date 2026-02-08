@@ -58,7 +58,12 @@ layout(std140, binding = COMPOSED_MATERIAL_UBO_BINDING) uniform ComposedMaterial
     float u_liquidFresnelPower;
     float u_liquidRefractionStrength;
     uint u_liquidFlags;
-    float u_liquidPadding[3];
+    // Note: Use individual floats instead of float[3] array because std140
+    // layout gives arrays a 16-byte stride per element, creating a size
+    // mismatch with the C++ struct where floats are packed contiguously.
+    float u_liquidPadding0;
+    float u_liquidPadding1;
+    float u_liquidPadding2;
 
     // Weathering component
     float u_snowCoverage;

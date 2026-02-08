@@ -26,7 +26,12 @@ struct LayerData {
 layout(std140, binding = MATERIAL_LAYER_UBO_BINDING) uniform MaterialLayerUBO {
     LayerData materialLayers[MAX_MATERIAL_LAYERS];
     int numMaterialLayers;
-    int layerPadding[3];
+    // Note: Use individual ints instead of int[3] array because std140
+    // layout gives arrays a 16-byte stride per element, creating a size
+    // mismatch with the C++ struct where ints are packed contiguously.
+    int layerPadding0;
+    int layerPadding1;
+    int layerPadding2;
 } materialLayerUbo;
 
 #endif // UBO_MATERIAL_LAYER_GLSL

@@ -31,7 +31,8 @@ layout(binding = BINDING_IRRADIANCE_UNIFORMS) uniform AtmosphereUniforms {
     AtmosphereParams params;
     vec4 toSunDirection;
     vec4 cameraPosition;
-    float padding[2];
+    float atmoPadding0;
+    float atmoPadding1;
 } uAtmosphere;
 
 // Integration settings

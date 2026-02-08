@@ -21,7 +21,9 @@ ComposedMaterialUBO::ComposedMaterialUBO()
     , liquidFresnelPower(5.0f)
     , liquidRefractionStrength(1.0f)
     , liquidFlags(0)
-    , liquidPadding{0.0f, 0.0f, 0.0f}
+    , liquidPadding0(0.0f)
+    , liquidPadding1(0.0f)
+    , liquidPadding2(0.0f)
     // Weathering defaults
     , snowCoverage(0.0f)
     , snowBlendSharpness(2.0f)

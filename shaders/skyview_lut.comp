@@ -16,7 +16,8 @@ layout(binding = BINDING_ATMO_UNIFORMS) uniform AtmosphereUniforms {
     AtmosphereParams params;
     vec4 toSunDirection;
     vec4 cameraPosition;  // w = camera altitude
-    float padding[2];
+    float atmoPadding0;
+    float atmoPadding1;
 } uAtmosphere;
 
 const int SKY_VIEW_STEPS = 30;

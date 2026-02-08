@@ -152,7 +152,11 @@ struct alignas(16) VTParamsUBO {
     glm::vec4 physicalCacheSizeAndInverse;      // xy = size, zw = 1/size
     glm::vec4 tileSizeAndBorder;                // x = tile size, y = border, z = tile with border, w = unused
     uint32_t maxMipLevel;
-    uint32_t padding[3];                        // Align to 16 bytes
+    // Note: Individual uints instead of uint32_t[3] array to match GLSL std140
+    // layout (arrays get 16-byte stride per element in std140, scalars don't)
+    uint32_t padding0;
+    uint32_t padding1;
+    uint32_t padding2;
 };
 
 } // namespace VirtualTexture

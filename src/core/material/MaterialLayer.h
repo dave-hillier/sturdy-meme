@@ -219,7 +219,11 @@ struct MaterialLayerUBO {
 
     LayerData layers[MAX_GPU_LAYERS];
     int numLayers = 0;
-    int padding[3];
+    // Note: Individual ints instead of int[3] array to match GLSL std140
+    // layout (arrays get 16-byte stride per element in std140, scalars don't)
+    int padding0 = 0;
+    int padding1 = 0;
+    int padding2 = 0;
 
     // Pack a MaterialLayerStack into the UBO
     void packFromStack(const MaterialLayerStack& stack) {

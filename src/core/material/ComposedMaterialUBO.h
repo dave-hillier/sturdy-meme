@@ -36,7 +36,11 @@ struct ComposedMaterialUBO {
     float liquidFresnelPower;
     float liquidRefractionStrength;
     uint32_t liquidFlags;
-    float liquidPadding[3];
+    // Note: Individual floats instead of float[3] array to match GLSL std140
+    // layout (arrays get 16-byte stride per element in std140, scalars don't)
+    float liquidPadding0;
+    float liquidPadding1;
+    float liquidPadding2;
 
     // Weathering component - 64 bytes
     float snowCoverage;

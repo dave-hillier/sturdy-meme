@@ -38,7 +38,8 @@ layout(std140, binding = BINDING_GRASS_COMPUTE_PARAMS) uniform GrassParams {
     vec4 displacementRegion;  // xy = world center, z = region size, w = texel size
     float terrainSize;
     float terrainHeightScale;
-    float padding[2];
+    float grassPadding0;
+    float grassPadding1;
 } grassParams;
 
 // Terrain heightmap for grass placement on terrain

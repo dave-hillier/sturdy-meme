@@ -51,7 +51,10 @@ struct AtmosphereUniforms {
     AtmosphereParams params;
     glm::vec4 toSunDirection;  // xyz = direction toward sun, w = unused
     glm::vec4 cameraPosition; // xyz = camera pos, w = camera altitude
-    float padding[2];
+    // Note: Individual floats instead of float[2] array to match GLSL std140
+    // layout (arrays get 16-byte stride per element in std140, scalars don't)
+    float atmoPadding0 = 0.0f;
+    float atmoPadding1 = 0.0f;
 };
 
 
