@@ -1,6 +1,7 @@
 #include "SceneObjectsDrawable.h"
 #include "UBOs.h"  // For PushConstants (generated from shaders)
 #include "../GPUSceneBuffer.h"
+#include "../material/BindlessManager.h"
 
 #include "SceneManager.h"
 #include "scene/SceneBuilder.h"
@@ -54,8 +55,32 @@ void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t fram
 
     vk::CommandBuffer vkCmd(cmd);
 
+    const bool useBindless = resources_.bindlessManager
+                          && resources_.bindlessManager->isInitialized();
+
     // Get MaterialRegistry for descriptor set lookup
     const auto& materialRegistry = resources_.scene->getSceneBuilder().getMaterialRegistry();
+
+    // When bindless is active, bind all descriptor sets once up front:
+    //   Set 0: global resources (from any material's descriptor set — all share the same globals)
+    //   Set 1: bindless texture array
+    //   Set 2: material SSBO
+    // Then only push constants change per draw.
+    if (useBindless) {
+        // Bind Sets 1+2 (bindless textures + material SSBO)
+        resources_.bindlessManager->bind(vkCmd, *params.pipelineLayout,
+                                         vk::PipelineBindPoint::eGraphics, frameIndex);
+
+        // Bind Set 0 once with the first valid material's descriptor set (for global resources)
+        for (uint32_t id = 0; id < materialRegistry.getMaterialCount(); id++) {
+            VkDescriptorSet globalSet = materialRegistry.getDescriptorSet(id, frameIndex);
+            if (globalSet != VK_NULL_HANDLE) {
+                vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                         *params.pipelineLayout, 0, vk::DescriptorSet(globalSet), {});
+                break;
+            }
+        }
+    }
 
     // Helper lambda to render an entity with RenderData
     auto renderWithRenderData = [&](const ecs::RenderData& data, VkDescriptorSet descSet) {
@@ -77,8 +102,11 @@ void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t fram
             vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
             0, push);
 
-        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                                 *params.pipelineLayout, 0, vk::DescriptorSet(descSet), {});
+        // Only rebind Set 0 per-material when not using bindless
+        if (!useBindless) {
+            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                     *params.pipelineLayout, 0, vk::DescriptorSet(descSet), {});
+        }
 
         vk::Buffer vertexBuffers[] = {data.mesh->getVertexBuffer()};
         vk::DeviceSize offsets[] = {0};
@@ -106,8 +134,11 @@ void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t fram
             vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
             0, push);
 
-        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                                 *params.pipelineLayout, 0, vk::DescriptorSet(descSet), {});
+        // Only rebind Set 0 per-material when not using bindless
+        if (!useBindless) {
+            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                     *params.pipelineLayout, 0, vk::DescriptorSet(descSet), {});
+        }
 
         vk::Buffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
         vk::DeviceSize offsets[] = {0};
@@ -117,7 +148,7 @@ void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t fram
         vkCmd.drawIndexed(obj.mesh->getIndexCount(), 1, 0, 0, 0);
     };
 
-    // Phase 6: Use ECS if available, otherwise fall back to legacy renderables
+    // Use ECS if available, otherwise fall back to legacy renderables
     if (resources_.ecsWorld) {
         ecs::World& world = *resources_.ecsWorld;
 
@@ -139,17 +170,19 @@ void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t fram
             }
         }
 
-        // Sort by materialId to minimize descriptor set switches
-        std::sort(renderList.begin(), renderList.end(), [](const ecs::RenderData& a, const ecs::RenderData& b) {
-            return a.materialId < b.materialId;
-        });
+        if (!useBindless) {
+            // Sort by materialId to minimize descriptor set switches (only matters without bindless)
+            std::sort(renderList.begin(), renderList.end(), [](const ecs::RenderData& a, const ecs::RenderData& b) {
+                return a.materialId < b.materialId;
+            });
+        }
 
         // Render sorted entities
         ecs::MaterialId lastMaterialId = ecs::InvalidMaterialId;
         VkDescriptorSet currentDescSet = VK_NULL_HANDLE;
 
         for (const auto& data : renderList) {
-            if (data.materialId != lastMaterialId) {
+            if (!useBindless && data.materialId != lastMaterialId) {
                 currentDescSet = materialRegistry.getDescriptorSet(data.materialId, frameIndex);
                 if (currentDescSet == VK_NULL_HANDLE) {
                     SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
@@ -169,9 +202,11 @@ void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t fram
         // Build sorted indices by materialId to minimize descriptor set switches
         std::vector<size_t> sortedIndices(sceneObjects.size());
         std::iota(sortedIndices.begin(), sortedIndices.end(), 0);
-        std::sort(sortedIndices.begin(), sortedIndices.end(), [&](size_t a, size_t b) {
-            return sceneObjects[a].materialId < sceneObjects[b].materialId;
-        });
+        if (!useBindless) {
+            std::sort(sortedIndices.begin(), sortedIndices.end(), [&](size_t a, size_t b) {
+                return sceneObjects[a].materialId < sceneObjects[b].materialId;
+            });
+        }
 
         MaterialId lastMaterialId = INVALID_MATERIAL_ID;
         VkDescriptorSet currentDescSet = VK_NULL_HANDLE;
@@ -202,8 +237,8 @@ void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t fram
 
             const auto& obj = sceneObjects[i];
 
-            // Only update descriptor set when material changes
-            if (obj.materialId != lastMaterialId) {
+            // Only update descriptor set when material changes (legacy path)
+            if (!useBindless && obj.materialId != lastMaterialId) {
                 currentDescSet = materialRegistry.getDescriptorSet(obj.materialId, frameIndex);
                 if (currentDescSet == VK_NULL_HANDLE) {
                     // Skip objects with invalid materialId

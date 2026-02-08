@@ -620,6 +620,7 @@ void Renderer::createHDRPassRecorder() {
         sceneRes.treeRenderer = systems_->treeRenderer();
         sceneRes.treeLOD = systems_->treeLOD();
         sceneRes.impostorCull = systems_->impostorCull();
+        sceneRes.bindlessManager = bindlessManager_.isInitialized() ? &bindlessManager_ : nullptr;
 
         hdrPassRecorder_->registerDrawable(
             std::make_unique<SceneObjectsDrawable>(sceneRes),
