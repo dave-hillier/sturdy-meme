@@ -320,6 +320,7 @@ private:
     std::unique_ptr<Loading::AsyncSystemLoader> asyncLoader_;
     InitContext asyncInitContext_;  // Stored for async task access
     bool asyncInitComplete_ = true;  // True when not using async, or when async is done
+    bool asyncInitFailed_ = false;   // True if async init encountered an error
     bool asyncInitStarted_ = false;
 
     // Skinned mesh rendering

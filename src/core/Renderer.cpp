@@ -920,7 +920,7 @@ bool Renderer::initInternalAsync(const InitInfo& info) {
 
 bool Renderer::pollAsyncInit() {
     if (asyncInitComplete_) {
-        return true;  // Already complete
+        return !asyncInitFailed_;  // Return false if init failed
     }
 
     if (!asyncLoader_) {
@@ -945,7 +945,8 @@ bool Renderer::pollAsyncInit() {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                         "Async init failed: %s", asyncLoader_->getErrorMessage().c_str());
             asyncInitComplete_ = true;
-            return false;  // Indicate failure
+            asyncInitFailed_ = true;
+            return false;  // Indicate failure consistently
         }
 
         // Finalize initialization (quick synchronous steps)

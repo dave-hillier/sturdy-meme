@@ -167,6 +167,7 @@ public:
     void setShadow(std::unique_ptr<ShadowSystem> system);
     TerrainSystem& terrain() { return *terrainSystem_; }
     const TerrainSystem& terrain() const { return *terrainSystem_; }
+    bool hasTerrain() const { return terrainSystem_ != nullptr; }
     void setTerrain(std::unique_ptr<TerrainSystem> system);
 
     // Sky and atmosphere
