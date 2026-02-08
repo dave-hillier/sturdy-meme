@@ -7,6 +7,14 @@
 #define BINDINGS_H
 
 // =============================================================================
+// Bindless Rendering Descriptor Sets
+// =============================================================================
+#define BINDLESS_TEXTURE_SET            1   // Set 1: sampler2D textures[] (bindless array)
+#define BINDLESS_TEXTURE_BINDING        0   // Binding 0 in set 1
+#define BINDLESS_MATERIAL_SET           2   // Set 2: MaterialData materials[] (SSBO)
+#define BINDLESS_MATERIAL_BINDING       0   // Binding 0 in set 2
+
+// =============================================================================
 // Main Rendering Descriptor Set (Set 0)
 // =============================================================================
 
@@ -493,6 +501,12 @@
 #include <cstdint>
 
 namespace Bindings {
+
+// Bindless Rendering
+constexpr uint32_t BINDLESS_TEXTURE_SET_INDEX   = BINDLESS_TEXTURE_SET;
+constexpr uint32_t BINDLESS_TEXTURE_BINDING_IDX = BINDLESS_TEXTURE_BINDING;
+constexpr uint32_t BINDLESS_MATERIAL_SET_INDEX  = BINDLESS_MATERIAL_SET;
+constexpr uint32_t BINDLESS_MATERIAL_BINDING_IDX = BINDLESS_MATERIAL_BINDING;
 
 // Main Rendering Descriptor Set
 constexpr uint32_t UBO                    = BINDING_UBO;
