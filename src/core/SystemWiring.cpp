@@ -12,6 +12,7 @@
 #include "FroxelSystem.h"
 #include "PostProcessSystem.h"
 #include "WindSystem.h"
+#include "ScreenSpaceShadowSystem.h"
 #include "ScatterSystem.h"
 #include "SkinnedMeshRenderer.h"
 #include "SceneManager.h"
@@ -39,6 +40,13 @@ void SystemWiring::wireTerrainDescriptors(RendererSystems& systems) {
     auto& terrain = systems.terrain();
     auto& globalBuffers = systems.globalBuffers();
     auto& shadow = systems.shadow();
+
+    // Wire screen-space shadow buffer before descriptor update
+    if (systems.hasScreenSpaceShadow()) {
+        terrain.setScreenShadowBuffer(
+            vk::ImageView(systems.screenSpaceShadow()->getShadowBufferView()),
+            vk::Sampler(systems.screenSpaceShadow()->getShadowBufferSampler()));
+    }
 
     terrain.updateDescriptorSets(
         vk::Device(device_),
@@ -75,6 +83,13 @@ void SystemWiring::wireGrassDescriptors(RendererSystems& systems) {
         &globalBuffers.dynamicRendererUBO,
         vk::ImageView(terrain.getHoleMaskArrayView()),
         vk::Sampler(terrain.getHoleMaskSampler()));
+
+    // Wire screen-space shadow buffer if available
+    if (systems.hasScreenSpaceShadow()) {
+        grass.setScreenShadowBuffer(
+            vk::ImageView(systems.screenSpaceShadow()->getShadowBufferView()),
+            vk::Sampler(systems.screenSpaceShadow()->getShadowBufferSampler()));
+    }
 }
 
 void SystemWiring::wireLeafDescriptors(RendererSystems& systems) {

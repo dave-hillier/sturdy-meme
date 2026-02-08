@@ -35,6 +35,9 @@ layout(binding = BINDING_METALLIC_MAP) uniform sampler2D metallicMap;
 layout(binding = BINDING_AO_MAP) uniform sampler2D aoMap;
 layout(binding = BINDING_HEIGHT_MAP) uniform sampler2D heightMap;
 
+// Screen-space pre-computed shadow buffer
+layout(binding = BINDING_SCREEN_SHADOW) uniform sampler2D screenShadowBuffer;
+
 // GPULight struct and light buffer are defined in dynamic_lights_common.glsl
 
 layout(location = 0) in vec3 fragNormal;
@@ -168,11 +171,9 @@ void main() {
     vec3 sunL = normalize(ubo.toSunDirection.xyz);
     float terrainShadow = 1.0;
     if (ubo.shadowsEnabled > 0.5) {
-        terrainShadow = calculateCascadedShadow(
-            fragWorldPos, N, sunL,
-            ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
-            ubo.shadowMapSize, shadowMapArray
-        );
+        // Sample pre-computed screen-space shadow buffer (resolved in compute pass)
+        vec2 screenUV = gl_FragCoord.xy / vec2(textureSize(screenShadowBuffer, 0));
+        terrainShadow = texture(screenShadowBuffer, screenUV).r;
     }
 
     // Cloud shadows - sample from cloud shadow map

@@ -49,6 +49,7 @@
 #include "npc/NPCSimulation.h"
 #include "DebugLineSystem.h"
 #include "HiZSystem.h"
+#include "ScreenSpaceShadowSystem.h"
 #include "GPUSceneBuffer.h"
 #include "culling/GPUCullPass.h"
 #include "interfaces/IDebugControl.h"
@@ -390,6 +391,10 @@ bool Renderer::createDescriptorSets() {
         // Placeholder texture for unused PBR bindings (13-16)
         common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture()->getImageView();
         common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture()->getSampler();
+        if (systems_->hasScreenSpaceShadow()) {
+            common.screenShadowView = systems_->screenSpaceShadow()->getShadowBufferView();
+            common.screenShadowSampler = systems_->screenSpaceShadow()->getShadowBufferSampler();
+        }
         return common;
     };
 

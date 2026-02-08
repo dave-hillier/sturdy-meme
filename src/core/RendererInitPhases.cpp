@@ -62,6 +62,7 @@
 #include "WindSystem.h"
 #include "SystemWiring.h"
 #include "CoreResources.h"
+#include "ScreenSpaceShadowSystem.h"
 #include "TerrainFactory.h"
 #include "threading/TaskScheduler.h"
 #include <SDL3/SDL.h>
@@ -527,6 +528,10 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 common.snowMaskSampler = systems_->snowMask().getSnowMaskSampler();
                 common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture()->getImageView();
                 common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture()->getSampler();
+                if (systems_->hasScreenSpaceShadow()) {
+                    common.screenShadowView = systems_->screenSpaceShadow()->getShadowBufferView();
+                    common.screenShadowSampler = systems_->screenSpaceShadow()->getShadowBufferSampler();
+                }
                 return common;
             };
 
@@ -578,6 +583,19 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 systems_->hiZ().setDepthBuffer(core.hdr.depthView, vulkanContext_->getDepthSampler());
                 systems_->hiZ().gatherObjects(systems_->scene().getRenderables(),
                                               systems_->rocks().getSceneObjects());
+            }
+
+            // Screen-space shadow resolve (pre-compute shadows into buffer)
+            {
+                auto screenShadow = ScreenSpaceShadowSystem::create(*ctxPtr);
+                if (screenShadow) {
+                    screenShadow->setDepthSource(core.hdr.depthView, vulkanContext_->getDepthSampler());
+                    screenShadow->setShadowMapSource(
+                        static_cast<VkImageView>(systems_->shadow().getShadowImageView()),
+                        static_cast<VkSampler>(systems_->shadow().getShadowSampler()));
+                    systems_->setScreenSpaceShadow(std::move(screenShadow));
+                    SDL_Log("ScreenSpaceShadowSystem: Initialized for shadow buffer optimization");
+                }
             }
 
             // GPU scene buffer for GPU-driven rendering

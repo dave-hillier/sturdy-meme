@@ -29,6 +29,7 @@
 #include "DeferredTerrainObjects.h"
 #include "CloudShadowSystem.h"
 #include "HiZSystem.h"
+#include "ScreenSpaceShadowSystem.h"
 #include "GPUSceneBuffer.h"
 #include "culling/GPUCullPass.h"
 #include "WaterSystem.h"
@@ -177,6 +178,10 @@ void RendererSystems::setGPUSceneBuffer(std::unique_ptr<GPUSceneBuffer> buffer) 
 
 void RendererSystems::setGPUCullPass(std::unique_ptr<GPUCullPass> pass) {
     gpuCullPass_ = std::move(pass);
+}
+
+void RendererSystems::setScreenSpaceShadow(std::unique_ptr<ScreenSpaceShadowSystem> system) {
+    screenSpaceShadowSystem_ = std::move(system);
 }
 
 void RendererSystems::setSky(std::unique_ptr<SkySystem> system) {
@@ -349,6 +354,7 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     waterSystem_.reset();  // RAII cleanup via destructor
 
     profiler_.reset();
+    screenSpaceShadowSystem_.reset();  // RAII cleanup via destructor
     hiZSystem_.reset();  // RAII cleanup via destructor
 
     // Geometry/Vegetation

@@ -207,6 +207,12 @@ public:
     // Set cloud shadow map texture
     void setCloudShadowMap(vk::Device device, vk::ImageView cloudShadowView, vk::Sampler cloudShadowSampler);
 
+    // Set screen-space shadow buffer for pre-computed shadows
+    void setScreenShadowBuffer(vk::ImageView view, vk::Sampler sampler) {
+        screenShadowView_ = view;
+        screenShadowSampler_ = sampler;
+    }
+
     // Set caustics texture for underwater light projection
     void setCaustics(vk::Device device, vk::ImageView causticsView, vk::Sampler causticsSampler,
                      float waterLevel = 0.0f, bool enabled = true);
@@ -416,6 +422,10 @@ private:
     std::vector<vk::DescriptorSet> computeDescriptorSets;  // Per frame
     std::vector<vk::DescriptorSet> renderDescriptorSets;   // Per frame
     std::vector<vk::DescriptorSet> shadowDescriptorSets;   // Per frame
+
+    // Screen-space shadow buffer (optional, from ScreenSpaceShadowSystem)
+    vk::ImageView screenShadowView_;
+    vk::Sampler screenShadowSampler_;
 
     // Configuration
     TerrainConfig config;

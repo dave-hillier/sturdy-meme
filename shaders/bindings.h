@@ -486,6 +486,19 @@
 #define BINDING_WATER_ENV_CUBEMAP         22   // Environment cubemap for SSR fallback
 
 // =============================================================================
+// Screen-Space Shadow Resolve Descriptor Set (compute shader)
+// =============================================================================
+#define BINDING_SHADOW_RESOLVE_OUTPUT      0   // Output shadow buffer (r8 storage image)
+#define BINDING_SHADOW_RESOLVE_DEPTH       1   // Previous frame depth (sampler2D)
+#define BINDING_SHADOW_RESOLVE_SHADOW_MAP  2   // Cascade shadow maps (sampler2DArrayShadow)
+#define BINDING_SHADOW_RESOLVE_UNIFORMS    3   // ShadowResolveUBO
+
+// Screen-space shadow buffer bindings (per descriptor set, for HDR fragment shaders)
+#define BINDING_SCREEN_SHADOW             21   // Main set: screen-space shadow buffer
+#define BINDING_GRASS_SCREEN_SHADOW        7   // Grass set: screen-space shadow buffer
+#define BINDING_TERRAIN_SCREEN_SHADOW     31   // Terrain set: screen-space shadow buffer
+
+// =============================================================================
 // C++ Type-Safe Wrappers
 // =============================================================================
 #ifdef __cplusplus
@@ -863,6 +876,15 @@ constexpr uint32_t WATER_OCEAN_DISP_2     = BINDING_WATER_OCEAN_DISP_2;
 constexpr uint32_t WATER_OCEAN_NORMAL_2   = BINDING_WATER_OCEAN_NORMAL_2;
 constexpr uint32_t WATER_OCEAN_FOAM_2     = BINDING_WATER_OCEAN_FOAM_2;
 constexpr uint32_t WATER_ENV_CUBEMAP      = BINDING_WATER_ENV_CUBEMAP;
+
+// Screen-Space Shadow Resolve
+constexpr uint32_t SHADOW_RESOLVE_OUTPUT   = BINDING_SHADOW_RESOLVE_OUTPUT;
+constexpr uint32_t SHADOW_RESOLVE_DEPTH    = BINDING_SHADOW_RESOLVE_DEPTH;
+constexpr uint32_t SHADOW_RESOLVE_SHADOW_MAP = BINDING_SHADOW_RESOLVE_SHADOW_MAP;
+constexpr uint32_t SHADOW_RESOLVE_UNIFORMS = BINDING_SHADOW_RESOLVE_UNIFORMS;
+constexpr uint32_t SCREEN_SHADOW           = BINDING_SCREEN_SHADOW;
+constexpr uint32_t GRASS_SCREEN_SHADOW     = BINDING_GRASS_SCREEN_SHADOW;
+constexpr uint32_t TERRAIN_SCREEN_SHADOW   = BINDING_TERRAIN_SCREEN_SHADOW;
 
 } // namespace Bindings
 

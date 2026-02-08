@@ -1,0 +1,146 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+#include "constants_common.glsl"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Output: screen-space shadow buffer
+layout(binding = BINDING_SHADOW_RESOLVE_OUTPUT, r8) uniform writeonly image2D shadowBuffer;
+
+// Input: previous frame's depth buffer
+layout(binding = BINDING_SHADOW_RESOLVE_DEPTH) uniform sampler2D prevDepth;
+
+// Input: cascaded shadow map array
+layout(binding = BINDING_SHADOW_RESOLVE_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;
+
+// Uniforms for shadow resolve
+layout(binding = BINDING_SHADOW_RESOLVE_UNIFORMS) uniform ShadowResolveUBO {
+    mat4 prevInvViewProj;  // Previous frame's inverse view-projection
+    mat4 view;             // Current frame's view matrix (for cascade selection)
+    mat4 cascadeViewProj[NUM_CASCADES];
+    vec4 cascadeSplits;
+    vec4 lightDir;         // xyz = to-sun direction, w = shadow map size
+} ubo;
+
+// Select cascade based on view-space depth
+int selectCascade(float viewDepth) {
+    int cascade = 0;
+    for (int i = 0; i < NUM_CASCADES - 1; i++) {
+        if (viewDepth > ubo.cascadeSplits[i]) {
+            cascade = i + 1;
+        }
+    }
+    return cascade;
+}
+
+// Sample shadow for a specific cascade with PCF
+float sampleShadow(vec3 worldPos, vec3 normal, int cascade) {
+    float shadowMapSize = ubo.lightDir.w;
+    vec3 lightDir = normalize(ubo.lightDir.xyz);
+
+    // Transform to light space
+    vec4 lightSpacePos = ubo.cascadeViewProj[cascade] * vec4(worldPos, 1.0);
+    vec3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
+    projCoords.xy = projCoords.xy * 0.5 + 0.5;
+
+    // Out of bounds check
+    if (projCoords.x < 0.0 || projCoords.x > 1.0 ||
+        projCoords.y < 0.0 || projCoords.y > 1.0 ||
+        projCoords.z < 0.0 || projCoords.z > 1.0) {
+        return 1.0;
+    }
+
+    // Bias calculation
+    float cosTheta = max(dot(normal, lightDir), 0.0);
+    float baseBias = 0.0005;
+    float cascadeBias = baseBias * (1.0 + float(cascade) * 0.5);
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    float slopeBias = cascadeBias * sinTheta / max(cosTheta, 0.001);
+    float bias = clamp(slopeBias, 0.0, 0.01);
+
+    // PCF 3x3 sampling
+    float shadow = 0.0;
+    float texelSize = 1.0 / shadowMapSize;
+
+    for (int x = -1; x <= 1; x++) {
+        for (int y = -1; y <= 1; y++) {
+            vec2 offset = vec2(x, y) * texelSize;
+            shadow += texture(shadowMapArray, vec4(projCoords.xy + offset, float(cascade), projCoords.z - bias));
+        }
+    }
+    shadow /= 9.0;
+
+    return shadow;
+}
+
+// Reconstruct world position from screen UV and depth
+vec3 reconstructWorldPos(vec2 uv, float depth) {
+    vec2 ndc = uv * 2.0 - 1.0;
+    vec4 clipPos = vec4(ndc, depth, 1.0);
+    vec4 worldPos4 = ubo.prevInvViewProj * clipPos;
+    return worldPos4.xyz / worldPos4.w;
+}
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 texSize = imageSize(shadowBuffer);
+
+    if (texel.x >= texSize.x || texel.y >= texSize.y) return;
+
+    vec2 uv = (vec2(texel) + 0.5) / vec2(texSize);
+
+    // Read previous frame depth
+    float depth = textureLod(prevDepth, uv, 0).r;
+
+    // Sky pixels get no shadow (fully lit)
+    if (depth >= 0.9999) {
+        imageStore(shadowBuffer, texel, vec4(1.0));
+        return;
+    }
+
+    // Reconstruct world position from previous frame's depth
+    vec3 worldPos = reconstructWorldPos(uv, depth);
+
+    // Reconstruct normal from depth neighbors via finite differences
+    vec2 texelUV = 1.0 / vec2(texSize);
+    float depthR = textureLod(prevDepth, uv + vec2(texelUV.x, 0), 0).r;
+    float depthU = textureLod(prevDepth, uv + vec2(0, texelUV.y), 0).r;
+
+    vec3 worldR = reconstructWorldPos(uv + vec2(texelUV.x, 0), depthR);
+    vec3 worldU = reconstructWorldPos(uv + vec2(0, texelUV.y), depthU);
+
+    vec3 normal = normalize(cross(worldR - worldPos, worldU - worldPos));
+
+    // Handle depth discontinuities (edges) - use a simpler normal
+    float depthDiffR = abs(depth - depthR);
+    float depthDiffU = abs(depth - depthU);
+    if (depthDiffR > 0.01 || depthDiffU > 0.01) {
+        normal = vec3(0.0, 1.0, 0.0);  // Default up normal at edges
+    }
+
+    // Select cascade using current frame's view matrix
+    vec4 viewPos = ubo.view * vec4(worldPos, 1.0);
+    float viewDepth = -viewPos.z;
+    int cascade = selectCascade(viewDepth);
+
+    // Sample shadow from selected cascade
+    float shadow = sampleShadow(worldPos, normal, cascade);
+
+    // Cascade blending near boundaries
+    float blendDistance = 5.0;
+    if (cascade < NUM_CASCADES - 1) {
+        float splitDepth = ubo.cascadeSplits[cascade];
+        float distToSplit = splitDepth - viewDepth;
+
+        if (distToSplit < blendDistance && distToSplit > 0.0) {
+            float nextShadow = sampleShadow(worldPos, normal, cascade + 1);
+            float blendFactor = smoothstep(0.0, blendDistance, distToSplit);
+            shadow = mix(nextShadow, shadow, blendFactor);
+        }
+    }
+
+    imageStore(shadowBuffer, texel, vec4(shadow));
+}

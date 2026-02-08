@@ -63,6 +63,9 @@ layout(binding = BINDING_TERRAIN_SNOW_CASCADE_2) uniform sampler2D snowCascade2;
 // Cloud shadow map (R16F: 0=shadow, 1=no shadow)
 layout(binding = BINDING_TERRAIN_CLOUD_SHADOW) uniform sampler2D cloudShadowMap;
 
+// Screen-space pre-computed shadow buffer
+layout(binding = BINDING_TERRAIN_SCREEN_SHADOW) uniform sampler2D screenShadowBuffer;
+
 // Hole mask tile array for caves/wells (R8: 0=solid, 1=hole)
 layout(binding = BINDING_TERRAIN_HOLE_MASK) uniform sampler2DArray holeMaskTiles;
 
@@ -183,22 +186,14 @@ layout(location = 3) in float fragDepth;
 
 layout(location = 0) out vec4 outColor;
 
-// Shadow sampling - use common shadow functions
+// Shadow sampling - use pre-computed screen-space shadow buffer
 float getShadowFactor(vec3 worldPos) {
     if (ubo.shadowsEnabled < 0.5) {
         return 1.0;  // No shadow when disabled
     }
-    vec3 sunL = normalize(ubo.toSunDirection.xyz);
-    return calculateCascadedShadow(
-        worldPos,
-        normalize(fragNormal),
-        sunL,
-        ubo.view,
-        ubo.cascadeSplits,
-        ubo.cascadeViewProj,
-        ubo.shadowMapSize,
-        shadowMapArray
-    );
+    // Sample pre-computed screen-space shadow buffer (resolved in compute pass)
+    vec2 screenUV = gl_FragCoord.xy / vec2(textureSize(screenShadowBuffer, 0));
+    return texture(screenShadowBuffer, screenUV).r;
 }
 
 // =========================================================================

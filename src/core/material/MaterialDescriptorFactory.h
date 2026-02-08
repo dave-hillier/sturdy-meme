@@ -57,6 +57,10 @@ public:
         // Wind UBO for vegetation animation (binding 17)
         VkBuffer windBuffer = VK_NULL_HANDLE;
         VkDeviceSize windBufferSize = 0;
+
+        // Screen-space shadow buffer (binding 21, optional)
+        VkImageView screenShadowView = VK_NULL_HANDLE;
+        VkSampler screenShadowSampler = VK_NULL_HANDLE;
     };
 
     // Per-material texture bindings
