@@ -13,15 +13,15 @@
 #include "bindings.glsl"
 
 // Per-instance data for scene objects
-// Must match SceneInstanceData in SceneInstanceBuffer.h (std430 layout)
+// Must match GPUSceneInstanceData in GPUSceneBuffer.h (std430 layout)
 struct SceneInstance {
     mat4 model;              // Model transform matrix (64 bytes)
     vec4 materialParams;     // x=roughness, y=metallic, z=emissiveIntensity, w=opacity
     vec4 emissiveColor;      // rgb=emissive color, a=unused
     uint pbrFlags;           // PBR texture flags bitmask
     float alphaTestThreshold;
-    float _pad0;
-    float _pad1;
+    float hueShift;          // Hue shift for NPC tinting
+    uint materialIndex;      // Index into material SSBO for bindless rendering
 };
 
 // Instance buffer (readonly for vertex/fragment shaders)

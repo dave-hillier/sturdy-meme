@@ -38,6 +38,7 @@ layout(location = 1) in vec2 fragTexCoord;
 layout(location = 2) in vec3 fragWorldPos;
 layout(location = 3) in vec4 fragTangent;
 layout(location = 4) in vec4 fragColor;
+layout(location = 5) flat in uint fragMaterialIndex;
 
 layout(location = 0) out vec4 outColor;
 
@@ -108,7 +109,9 @@ vec3 calculatePBR(vec3 N, vec3 V, vec3 L, vec3 lightColor, float lightIntensity,
 
 void main() {
     // Fetch material data from the bindless SSBO
-    MaterialData mat = getBindlessMaterial(material.materialIndex);
+    // materialIndex comes via flat varying from vertex shader (works for both
+    // push constant path and instanced SSBO path)
+    MaterialData mat = getBindlessMaterial(fragMaterialIndex);
 
     // Sample albedo from bindless texture array
     vec4 texColor = sampleBindlessTexture(mat.albedoIndex, fragTexCoord);

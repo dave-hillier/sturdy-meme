@@ -25,6 +25,7 @@ layout(location = 1) out vec2 fragTexCoord;
 layout(location = 2) out vec3 fragWorldPos;
 layout(location = 3) out vec4 fragTangent;
 layout(location = 4) out vec4 fragColor;
+layout(location = 5) flat out uint fragMaterialIndex;
 
 void main() {
     vec4 worldPos = material.model * vec4(inPosition, 1.0);
@@ -91,4 +92,6 @@ void main() {
     // For vegetation, inColor.rgb contains pivot data, not color - output white
     // For non-vegetation, inColor.rgb is the actual vertex color
     fragColor = isVegetation ? vec4(1.0, 1.0, 1.0, 1.0) : inColor;
+    // Pass material index to fragment shader for bindless material lookup
+    fragMaterialIndex = material.materialIndex;
 }
