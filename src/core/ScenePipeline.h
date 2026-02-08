@@ -88,6 +88,14 @@ public:
     bool isInitialized() const { return initialized_; }
     bool hasPipeline() const { return graphicsPipeline_.has_value(); }
 
+    // Release GPU resources. Must be called while VkDevice is still valid.
+    void reset() {
+        graphicsPipeline_.reset();
+        pipelineLayout_.reset();
+        descriptorSetLayout_.reset();
+        initialized_ = false;
+    }
+
 private:
     bool createDescriptorSetLayout(VkDevice device, const vk::raii::Device& raiiDevice);
 

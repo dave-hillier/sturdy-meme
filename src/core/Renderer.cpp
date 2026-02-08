@@ -339,12 +339,14 @@ void Renderer::cleanup() {
             systems_.reset();
         }
 
+        // Clean up ScenePipeline (RAII objects must be reset while device is alive)
+        scenePipeline_.reset();
+
         // Clean up descriptor pool
         if (descriptorPool_.has_value()) {
             descriptorPool_->destroy();
             descriptorPool_.reset();
         }
-        // ScenePipeline (layout + graphics pipeline) cleaned up by RAII destructors
 
         // Note: command pool, render pass, depth resources, and framebuffers
         // are now owned by VulkanContext and cleaned up in its shutdown()
