@@ -15,6 +15,11 @@ MaterialRegistry::MaterialId MaterialRegistry::registerMaterial(const MaterialDe
     materials.push_back(def);
     nameToId[def.name] = id;
 
+    // Register textures with bindless registry if available
+    if (textureRegistry_ && textureRegistry_->isInitialized()) {
+        registerTexturesForMaterial(materials[id]);
+    }
+
     SDL_Log("MaterialRegistry: Registered material '%s' (id=%u)", def.name.c_str(), id);
     return id;
 }
@@ -124,4 +129,52 @@ void MaterialRegistry::updateCloudShadowBinding(VkDevice device, VkImageView vie
     }
 
     SDL_Log("MaterialRegistry: Updated cloud shadow binding for %zu materials", materials.size());
+}
+
+void MaterialRegistry::registerTexturesForMaterial(MaterialDef& def) {
+    if (!textureRegistry_ || !textureRegistry_->isInitialized()) return;
+
+    if (def.diffuse) {
+        def.diffuseHandle = textureRegistry_->registerTexture(
+            def.diffuse->getImageView(), def.diffuse->getSampler());
+    }
+    if (def.normal) {
+        def.normalHandle = textureRegistry_->registerTexture(
+            def.normal->getImageView(), def.normal->getSampler());
+    }
+    if (def.roughnessMap) {
+        def.roughnessHandle = textureRegistry_->registerTexture(
+            def.roughnessMap->getImageView(), def.roughnessMap->getSampler());
+    }
+    if (def.metallicMap) {
+        def.metallicHandle = textureRegistry_->registerTexture(
+            def.metallicMap->getImageView(), def.metallicMap->getSampler());
+    }
+    if (def.aoMap) {
+        def.aoHandle = textureRegistry_->registerTexture(
+            def.aoMap->getImageView(), def.aoMap->getSampler());
+    }
+    if (def.heightMap) {
+        def.heightHandle = textureRegistry_->registerTexture(
+            def.heightMap->getImageView(), def.heightMap->getSampler());
+    }
+}
+
+void MaterialRegistry::registerTexturesWithRegistry() {
+    if (!textureRegistry_ || !textureRegistry_->isInitialized()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+            "MaterialRegistry: Cannot register textures - TextureRegistry not available");
+        return;
+    }
+
+    uint32_t count = 0;
+    for (auto& mat : materials) {
+        if (!mat.diffuseHandle.isValid() && mat.diffuse) {
+            registerTexturesForMaterial(mat);
+            count++;
+        }
+    }
+
+    SDL_Log("MaterialRegistry: Registered textures for %u materials with TextureRegistry "
+            "(total bindless textures: %u)", count, textureRegistry_->getActiveCount());
 }

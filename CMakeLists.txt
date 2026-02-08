@@ -115,6 +115,7 @@ set(SOURCES
     src/core/material/DescriptorManager.cpp
     src/core/material/MaterialDescriptorFactory.cpp
     src/core/material/MaterialRegistry.cpp
+    src/core/material/TextureRegistry.cpp
     src/core/asset/AssetRegistry.cpp
     src/core/RenderableBuilder.cpp
     # Atmosphere
