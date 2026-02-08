@@ -17,9 +17,7 @@ public:
 
     // Called when window is resized - reallocate resources if needed
     // Default implementation does nothing (for extent-only systems)
-    virtual void onResize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent) {
-        (void)device;
-        (void)allocator;
+    virtual void onResize(VkExtent2D newExtent) {
         (void)newExtent;
     }
 
@@ -30,37 +28,13 @@ public:
     virtual const char* getResizableName() const = 0;
 };
 
-// Adapter to wrap existing systems with resize() method
+// Adapter for systems with resize(extent) method
 template<typename T>
 class ResizeAdapter : public IResizable {
 public:
     ResizeAdapter(T& system, const char* name) : system_(system), name_(name) {}
 
-    void onResize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent) override {
-        system_.resize(device, allocator, newExtent);
-    }
-
-    void onExtentChanged(VkExtent2D newExtent) override {
-        // Systems with resize() typically don't need separate extent update
-        (void)newExtent;
-    }
-
-    const char* getResizableName() const override { return name_; }
-
-private:
-    T& system_;
-    const char* name_;
-};
-
-// Adapter for systems with resize(extent) method (no device/allocator needed)
-template<typename T>
-class SimpleResizeAdapter : public IResizable {
-public:
-    SimpleResizeAdapter(T& system, const char* name) : system_(system), name_(name) {}
-
-    void onResize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent) override {
-        (void)device;
-        (void)allocator;
+    void onResize(VkExtent2D newExtent) override {
         system_.resize(newExtent);
     }
 
@@ -83,23 +57,6 @@ public:
 
     void onExtentChanged(VkExtent2D newExtent) override {
         system_.setExtent(newExtent);
-    }
-
-    const char* getResizableName() const override { return name_; }
-
-private:
-    T& system_;
-    const char* name_;
-};
-
-// Adapter for systems with updateExtent() method
-template<typename T>
-class UpdateExtentAdapter : public IResizable {
-public:
-    UpdateExtentAdapter(T& system, const char* name) : system_(system), name_(name) {}
-
-    void onExtentChanged(VkExtent2D newExtent) override {
-        system_.updateExtent(newExtent);
     }
 
     const char* getResizableName() const override { return name_; }
@@ -139,14 +96,15 @@ public:
     // Register a resizable component with given priority
     void registerResizable(IResizable* resizable, ResizePriority priority);
 
-    // Register using adapter (takes ownership of adapter)
+    // Register systems with resize(extent) method
     template<typename T>
-    void registerWithResize(T& system, const char* name, ResizePriority priority) {
+    void registerWithSimpleResize(T& system, const char* name, ResizePriority priority) {
         auto adapter = std::make_unique<ResizeAdapter<T>>(system, name);
         registerResizable(adapter.get(), priority);
         adapters_.push_back(std::move(adapter));
     }
 
+    // Register systems that only need setExtent(extent)
     template<typename T>
     void registerWithExtent(T& system, const char* name, ResizePriority priority = ResizePriority::Viewport) {
         auto adapter = std::make_unique<ExtentAdapter<T>>(system, name);
@@ -154,24 +112,8 @@ public:
         adapters_.push_back(std::move(adapter));
     }
 
-    // Register systems with resize(extent) signature (no device/allocator)
-    template<typename T>
-    void registerWithSimpleResize(T& system, const char* name, ResizePriority priority) {
-        auto adapter = std::make_unique<SimpleResizeAdapter<T>>(system, name);
-        registerResizable(adapter.get(), priority);
-        adapters_.push_back(std::move(adapter));
-    }
-
-    // Register systems with updateExtent(extent) method
-    template<typename T>
-    void registerWithUpdateExtent(T& system, const char* name, ResizePriority priority = ResizePriority::Viewport) {
-        auto adapter = std::make_unique<UpdateExtentAdapter<T>>(system, name);
-        registerResizable(adapter.get(), priority);
-        adapters_.push_back(std::move(adapter));
-    }
-
     // Register a custom resize callback for systems with non-standard interfaces
-    using ResizeCallback = std::function<void(VkDevice, VmaAllocator, VkExtent2D)>;
+    using ResizeCallback = std::function<void(VkExtent2D)>;
     using ExtentCallback = std::function<void(VkExtent2D)>;
     void registerCallback(const char* name, ResizeCallback resizeCb, ExtentCallback extentCb, ResizePriority priority);
 
@@ -197,8 +139,8 @@ private:
         CallbackResizable(const char* name, ResizeCallback resizeCb, ExtentCallback extentCb)
             : name_(name), resizeCb_(std::move(resizeCb)), extentCb_(std::move(extentCb)) {}
 
-        void onResize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent) override {
-            if (resizeCb_) resizeCb_(device, allocator, newExtent);
+        void onResize(VkExtent2D newExtent) override {
+            if (resizeCb_) resizeCb_(newExtent);
         }
 
         void onExtentChanged(VkExtent2D newExtent) override {

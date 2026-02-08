@@ -64,7 +64,7 @@ public:
     FroxelSystem& operator=(const FroxelSystem&) = delete;
     FroxelSystem(FroxelSystem&&) = delete;
     FroxelSystem& operator=(FroxelSystem&&) = delete;
-    void resize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent);
+    void resize(VkExtent2D newExtent);
 
     // Update froxel volume (call before scene rendering)
     void recordFroxelUpdate(VkCommandBuffer cmd, uint32_t frameIndex,

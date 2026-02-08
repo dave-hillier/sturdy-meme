@@ -83,7 +83,6 @@ class RoadRiverVisualization;
 class UBOBuilder;
 class Profiler;
 class DebugLineSystem;
-class ResizeCoordinator;
 class ShadowSystem;
 class SceneManager;
 class GlobalBufferManager;
@@ -311,8 +310,6 @@ public:
     const Profiler& profiler() const { return *profiler_; }
 
     // Coordination
-    ResizeCoordinator& resizeCoordinator() { return *resizeCoordinator_; }
-    const ResizeCoordinator& resizeCoordinator() const { return *resizeCoordinator_; }
     UBOBuilder& uboBuilder() { return *uboBuilder_; }
     const UBOBuilder& uboBuilder() const { return *uboBuilder_; }
 
@@ -562,7 +559,6 @@ private:
     std::unique_ptr<Profiler> profiler_;
 
     // Coordination
-    std::unique_ptr<ResizeCoordinator> resizeCoordinator_;
     std::unique_ptr<UBOBuilder> uboBuilder_;
 
     // Time and environment

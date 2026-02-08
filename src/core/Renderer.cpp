@@ -172,11 +172,11 @@ bool Renderer::initInternal(const InitInfo& info) {
         if (!initCoreVulkanResources()) return false;
     }
 
-    // Initialize asset registry via RenderingInfrastructure (after command pool is ready)
+    // Initialize asset registry (after command pool is ready)
     reportProgress(0.08f, "Initializing asset registry");
     {
         INIT_PROFILE_PHASE("AssetRegistry");
-        renderingInfra_.initAssetRegistry(
+        assetRegistry_.init(
             vulkanContext_->getVkDevice(),
             vulkanContext_->getVkPhysicalDevice(),
             vulkanContext_->getAllocator(),
@@ -194,7 +194,7 @@ bool Renderer::initInternal(const InitInfo& info) {
     // Build shared InitContext for subsystem initialization
     // Pass pool sizes hint so subsystems can create consistent pools if needed
     InitContext initCtx = InitContext::build(
-        *vulkanContext_, vulkanContext_->getCommandPool(), descriptorInfra_.getDescriptorPool(),
+        *vulkanContext_, vulkanContext_->getCommandPool(), getDescriptorPool(),
         resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes);
 
     // Phase 3: All subsystems (terrain, grass, weather, snow, water, etc.)
@@ -274,7 +274,7 @@ void Renderer::setupFrameGraph() {
     state.framebuffers = &vulkanContext_->getFramebuffers();
 
     // Use FrameGraphBuilder to configure all passes and dependencies
-    if (!FrameGraphBuilder::build(renderingInfra_.frameGraph(), *systems_, callbacks, state)) {
+    if (!FrameGraphBuilder::build(frameGraph_, *systems_, callbacks, state)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to build frame graph");
     }
 }
@@ -294,7 +294,7 @@ void Renderer::updatePhysicsDebug(PhysicsWorld& physics, const glm::vec3& camera
     // Create debug renderer on first use (after Jolt is initialized)
     if (!systems_->physicsDebugRenderer()) {
         InitContext initCtx = InitContext::build(
-            *vulkanContext_, vulkanContext_->getCommandPool(), descriptorInfra_.getDescriptorPool(),
+            *vulkanContext_, vulkanContext_->getCommandPool(), getDescriptorPool(),
             resourcePath, MAX_FRAMES_IN_FLIGHT);
         systems_->createPhysicsDebugRenderer(initCtx, systems_->postProcess().getHDRRenderPass());
     }
@@ -325,8 +325,10 @@ void Renderer::cleanup() {
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
 
-        // Shutdown multi-threading infrastructure via RenderingInfrastructure
-        renderingInfra_.shutdown();
+        // Shutdown multi-threading infrastructure in reverse init order
+        asyncTextureUploader_.shutdown();
+        asyncTransferManager_.shutdown();
+        threadedCommandPool_.shutdown();
 
         // Destroy FrameExecutor (owns TripleBuffering) before its dependencies
         frameExecutor_.destroy();
@@ -337,8 +339,12 @@ void Renderer::cleanup() {
             systems_.reset();
         }
 
-        // Clean up descriptor infrastructure (pool, layouts, pipeline)
-        descriptorInfra_.cleanup();
+        // Clean up descriptor pool
+        if (descriptorPool_.has_value()) {
+            descriptorPool_->destroy();
+            descriptorPool_.reset();
+        }
+        // ScenePipeline (layout + graphics pipeline) cleaned up by RAII destructors
 
         // Note: command pool, render pass, depth resources, and framebuffers
         // are now owned by VulkanContext and cleaned up in its shutdown()
@@ -387,8 +393,8 @@ bool Renderer::createDescriptorSets() {
 
     materialRegistry.createDescriptorSets(
         device,
-        *descriptorInfra_.getDescriptorPool(),
-        descriptorInfra_.getVkDescriptorSetLayout(),
+        *getDescriptorPool(),
+        scenePipeline_.getVkDescriptorSetLayout(),
         MAX_FRAMES_IN_FLIGHT,
         getCommonBindings);
 
@@ -425,7 +431,7 @@ bool Renderer::render(const Camera& camera) {
 }
 
 VkCommandBuffer Renderer::buildFrame(const Camera& camera, uint32_t imageIndex, uint32_t frameIndex) {
-    renderingInfra_.processPendingTransfers();
+    asyncTransferManager_.processPendingTransfers();
 
     // Per-frame data updates
     TimingData timing = systems_->time().update();
@@ -475,19 +481,19 @@ VkCommandBuffer Renderer::buildFrame(const Camera& camera, uint32_t imageIndex, 
     RenderResources resources = FrameDataBuilder::buildRenderResources(
         *systems_, imageIndex, vulkanContext_->getFramebuffers(),
         vulkanContext_->getRenderPass(), {vulkanContext_->getWidth(), vulkanContext_->getHeight()},
-        descriptorInfra_.getGraphicsPipeline(), descriptorInfra_.getPipelineLayout(),
-        descriptorInfra_.getDescriptorSetLayout());
+        scenePipeline_.getGraphicsPipeline(), scenePipeline_.getPipelineLayout(),
+        scenePipeline_.getDescriptorSetLayout());
     RenderContext renderCtx(cmd, frame.frameIndex, frame, resources, nullptr);
 
     FrameGraph::RenderContext fgCtx(vkCmd, frame.frameIndex, frame);
     fgCtx.imageIndex = imageIndex;
     fgCtx.deltaTime = frame.deltaTime;
     fgCtx.withUserData(&renderCtx)
-        .withThreading(&renderingInfra_.threadedCommandPool(),
+        .withThreading(&threadedCommandPool_,
                        vk::RenderPass(systems_->postProcess().getHDRRenderPass()),
                        vk::Framebuffer(systems_->postProcess().getHDRFramebuffer()));
 
-    renderingInfra_.frameGraph().execute(fgCtx, &TaskScheduler::instance());
+    frameGraph_.execute(fgCtx, &TaskScheduler::instance());
 
     systems_->profiler().endGpuFrame(cmd, frame.frameIndex);
     vkCmd.end();
@@ -514,7 +520,7 @@ void Renderer::waitForPreviousFrame() {
 
 bool Renderer::handleResize() {
     // Delegate all resize logic to the coordinator (pass {0,0} to trigger core handler)
-    bool success = systems_->resizeCoordinator().performResize(
+    bool success = resizeCoordinator_->performResize(
         vulkanContext_->getVkDevice(),
         vulkanContext_->getAllocator(),
         {0, 0}
@@ -641,8 +647,8 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     // Build params for stateless recording
     HDRPassRecorder::Params params;
     params.terrainEnabled = terrainEnabled;
-    params.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
-    params.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
+    params.sceneObjectsPipeline = scenePipeline_.getGraphicsPipelinePtr();
+    params.pipelineLayout = scenePipeline_.getPipelineLayoutPtr();
     params.viewProj = lastViewProj;
 
     // GPU-driven rendering params
@@ -651,8 +657,8 @@ void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float gra
     // The GPUCullPass runs to populate visibility data, but rendering uses the traditional path.
     if (systems_->hasGPUSceneBuffer() && systems_->hasGPUCullPass()) {
         params.gpuSceneBuffer = &systems_->gpuSceneBuffer();
-        params.instancedPipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
-        params.instancedPipeline = descriptorInfra_.getGraphicsPipelinePtr();
+        params.instancedPipelineLayout = scenePipeline_.getPipelineLayoutPtr();
+        params.instancedPipeline = scenePipeline_.getGraphicsPipelinePtr();
         // params.useIndirectDraw = true;  // TODO: Enable when indirect draw path is fully implemented
     }
 
@@ -665,8 +671,8 @@ void Renderer::recordHDRPassWithSecondaries(VkCommandBuffer cmd, uint32_t frameI
     // Build params for stateless recording
     HDRPassRecorder::Params params;
     params.terrainEnabled = terrainEnabled;
-    params.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
-    params.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
+    params.sceneObjectsPipeline = scenePipeline_.getGraphicsPipelinePtr();
+    params.pipelineLayout = scenePipeline_.getPipelineLayoutPtr();
     params.viewProj = lastViewProj;
 
     // GPU-driven rendering params
@@ -674,8 +680,8 @@ void Renderer::recordHDRPassWithSecondaries(VkCommandBuffer cmd, uint32_t frameI
     // requires mesh batching and proper indirect draw command generation.
     if (systems_->hasGPUSceneBuffer() && systems_->hasGPUCullPass()) {
         params.gpuSceneBuffer = &systems_->gpuSceneBuffer();
-        params.instancedPipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
-        params.instancedPipeline = descriptorInfra_.getGraphicsPipelinePtr();
+        params.instancedPipelineLayout = scenePipeline_.getPipelineLayoutPtr();
+        params.instancedPipeline = scenePipeline_.getGraphicsPipelinePtr();
         // params.useIndirectDraw = true;  // TODO: Enable when indirect draw path is fully implemented
     }
 
@@ -687,8 +693,8 @@ void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
     // Build params for stateless recording
     HDRPassRecorder::Params params;
     params.terrainEnabled = terrainEnabled;
-    params.sceneObjectsPipeline = descriptorInfra_.getGraphicsPipelinePtr();
-    params.pipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
+    params.sceneObjectsPipeline = scenePipeline_.getGraphicsPipelinePtr();
+    params.pipelineLayout = scenePipeline_.getPipelineLayoutPtr();
     params.viewProj = lastViewProj;
 
     // GPU-driven rendering params
@@ -696,8 +702,8 @@ void Renderer::recordHDRPassSecondarySlot(VkCommandBuffer cmd, uint32_t frameInd
     // requires mesh batching and proper indirect draw command generation.
     if (systems_->hasGPUSceneBuffer() && systems_->hasGPUCullPass()) {
         params.gpuSceneBuffer = &systems_->gpuSceneBuffer();
-        params.instancedPipelineLayout = descriptorInfra_.getPipelineLayoutPtr();
-        params.instancedPipeline = descriptorInfra_.getGraphicsPipelinePtr();
+        params.instancedPipelineLayout = scenePipeline_.getPipelineLayoutPtr();
+        params.instancedPipeline = scenePipeline_.getGraphicsPipelinePtr();
         // params.useIndirectDraw = true;  // TODO: Enable when indirect draw path is fully implemented
     }
 
@@ -713,13 +719,13 @@ bool Renderer::initSkinnedMeshRenderer() {
     info.physicalDevice = vulkanContext_->getVkPhysicalDevice();  // For dynamic UBO alignment
     info.raiiDevice = &vulkanContext_->getRaiiDevice();
     info.allocator = vulkanContext_->getAllocator();
-    info.descriptorPool = descriptorInfra_.getDescriptorPool();
+    info.descriptorPool = getDescriptorPool();
     info.renderPass = systems_->postProcess().getHDRRenderPass();
     info.extent = vulkanContext_->getVkSwapchainExtent();
     info.shaderPath = resourcePath + "/shaders";
     info.framesInFlight = MAX_FRAMES_IN_FLIGHT;
     info.addCommonBindings = [](DescriptorManager::LayoutBuilder& builder) {
-        DescriptorInfrastructure::addCommonDescriptorBindings(builder);
+        ScenePipeline::addCommonDescriptorBindings(builder);
     };
 
     auto skinnedMeshRenderer = SkinnedMeshRenderer::create(info);
@@ -803,7 +809,7 @@ bool Renderer::createSkinnedMeshRendererDescriptorSets() {
 }
 
 // Resource access
-DescriptorManager::Pool* Renderer::getDescriptorPool() { return descriptorInfra_.getDescriptorPool(); }
+DescriptorManager::Pool* Renderer::getDescriptorPool() { return descriptorPool_.has_value() ? &*descriptorPool_ : nullptr; }
 
 // ===== Async Initialization Implementation =====
 
@@ -857,7 +863,7 @@ bool Renderer::initInternalAsync(const InitInfo& info) {
     reportProgress(0.08f, "Initializing asset registry");
     {
         INIT_PROFILE_PHASE("AssetRegistry");
-        renderingInfra_.initAssetRegistry(
+        assetRegistry_.init(
             vulkanContext_->getVkDevice(),
             vulkanContext_->getVkPhysicalDevice(),
             vulkanContext_->getAllocator(),
@@ -874,7 +880,7 @@ bool Renderer::initInternalAsync(const InitInfo& info) {
 
     // Build InitContext for subsystem initialization and store for async access
     asyncInitContext_ = InitContext::build(
-        *vulkanContext_, vulkanContext_->getCommandPool(), descriptorInfra_.getDescriptorPool(),
+        *vulkanContext_, vulkanContext_->getCommandPool(), getDescriptorPool(),
         resourcePath, MAX_FRAMES_IN_FLIGHT, config_.descriptorPoolSizes);
 
     // Phase 3: Start async subsystem initialization

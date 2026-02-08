@@ -44,7 +44,6 @@
 #include "UBOBuilder.h"
 #include "Profiler.h"
 #include "DebugLineSystem.h"
-#include "ResizeCoordinator.h"
 #include "ShadowSystem.h"
 #include "SceneManager.h"
 #include "GlobalBufferManager.h"
@@ -119,7 +118,6 @@ RendererSystems::RendererSystems()
     // debugLineSystem_ created via factory in RendererInit
     // profiler_ created via Profiler::create() factory in RendererInitPhases
     // Coordination
-    , resizeCoordinator_(std::make_unique<ResizeCoordinator>())
     , uboBuilder_(std::make_unique<UBOBuilder>())
     // Time
     , timeSystem_(std::make_unique<TimeSystem>())

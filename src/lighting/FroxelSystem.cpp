@@ -81,9 +81,7 @@ void FroxelSystem::destroyVolumeResources() {
     integratedVolume_ = ManagedImage();
 }
 
-void FroxelSystem::resize(VkDevice device, VmaAllocator allocator, VkExtent2D newExtent) {
-    (void)device;
-    (void)allocator;
+void FroxelSystem::resize(VkExtent2D newExtent) {
     extent_ = newExtent;
     // Froxel grid size is fixed, no need to recreate volumes
     // But we do need to reset temporal history to avoid ghost frames after window restore

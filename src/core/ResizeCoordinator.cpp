@@ -45,7 +45,7 @@ bool ResizeCoordinator::performResize(VkDevice device, VmaAllocator allocator, V
 
     for (const auto& reg : registrations_) {
         SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION, "  Resizing: %s", reg.resizable->getResizableName());
-        reg.resizable->onResize(device, allocator, newExtent);
+        reg.resizable->onResize(newExtent);
     }
 
     // Also update extents

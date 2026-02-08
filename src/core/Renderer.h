@@ -14,14 +14,20 @@
 #include "InitContext.h"
 #include "PerformanceToggles.h"
 #include "FrameExecutor.h"
-#include "RenderingInfrastructure.h"
-#include "DescriptorInfrastructure.h"
+#include "vulkan/AsyncTransferManager.h"
+#include "vulkan/ThreadedCommandPool.h"
+#include "pipeline/FrameGraph.h"
+#include "loading/LoadJobFactory.h"
+#include "asset/AssetRegistry.h"
+#include "ScenePipeline.h"
+#include "material/DescriptorManager.h"
 
 // Forward declarations
 class Camera;
 class PhysicsWorld;
 class ShadowPassRecorder;
 class HDRPassRecorder;
+class ResizeCoordinator;
 
 namespace ecs {
 class World;
@@ -175,17 +181,6 @@ public:
     std::string getShaderPath() const { return resourcePath + "/shaders"; }
     const std::string& getResourcePath() const { return resourcePath; }
 
-    // Multi-threading infrastructure (delegated to RenderingInfrastructure)
-    AsyncTransferManager& getAsyncTransferManager() { return renderingInfra_.asyncTransferManager(); }
-    const AsyncTransferManager& getAsyncTransferManager() const { return renderingInfra_.asyncTransferManager(); }
-    ThreadedCommandPool& getThreadedCommandPool() { return renderingInfra_.threadedCommandPool(); }
-    const ThreadedCommandPool& getThreadedCommandPool() const { return renderingInfra_.threadedCommandPool(); }
-    FrameGraph& getFrameGraph() { return renderingInfra_.frameGraph(); }
-    const FrameGraph& getFrameGraph() const { return renderingInfra_.frameGraph(); }
-    Loading::AsyncTextureUploader& getAsyncTextureUploader() { return renderingInfra_.asyncTextureUploader(); }
-    const Loading::AsyncTextureUploader& getAsyncTextureUploader() const { return renderingInfra_.asyncTextureUploader(); }
-    AssetRegistry& getAssetRegistry() { return renderingInfra_.assetRegistry(); }
-    const AssetRegistry& getAssetRegistry() const { return renderingInfra_.assetRegistry(); }
 
     // Performance control
     PerformanceToggles& getPerformanceToggles() { return perfToggles; }
@@ -260,8 +255,14 @@ private:
     // All rendering subsystems - managed with automatic lifecycle
     std::unique_ptr<RendererSystems> systems_;
 
-    // Descriptor and pipeline infrastructure (extracted from Renderer)
-    DescriptorInfrastructure descriptorInfra_;
+    // Scene rendering pipeline (layout + graphics pipeline)
+    ScenePipeline scenePipeline_;
+
+    // Descriptor pool (shared resource allocator for all subsystems)
+    std::optional<DescriptorManager::Pool> descriptorPool_;
+
+    // Resize coordinator (orchestrates resize across subsystems)
+    std::unique_ptr<ResizeCoordinator> resizeCoordinator_;
 
     glm::mat4 lastViewProj{1.0f};  // Cached view-projection for debug rendering
     bool useVolumetricSnow = true;  // Use new volumetric system by default
@@ -276,8 +277,12 @@ private:
     std::unique_ptr<ShadowPassRecorder> shadowPassRecorder_;
     std::unique_ptr<HDRPassRecorder> hdrPassRecorder_;
 
-    // Multi-threading and asset infrastructure (extracted from Renderer)
-    RenderingInfrastructure renderingInfra_;
+    // Multi-threading and asset infrastructure
+    AsyncTransferManager asyncTransferManager_;
+    ThreadedCommandPool threadedCommandPool_;
+    FrameGraph frameGraph_;
+    Loading::AsyncTextureUploader asyncTextureUploader_;
+    AssetRegistry assetRegistry_;
 
     // Convenience accessor for frame count (matches TripleBuffering::DEFAULT_FRAME_COUNT)
     static constexpr int MAX_FRAMES_IN_FLIGHT = TripleBuffering::DEFAULT_FRAME_COUNT;

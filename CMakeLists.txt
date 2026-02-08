@@ -57,8 +57,7 @@ set(SOURCES
     src/core/UBOBuilder.cpp
     src/core/RendererSystems.cpp
     src/core/InitContext.cpp
-    src/core/RenderingInfrastructure.cpp
-    src/core/DescriptorInfrastructure.cpp
+    src/core/ScenePipeline.cpp
     # Control subsystems (coordinate multiple systems for GUI interfaces)
     # Note: Some systems implement their interfaces directly (CelestialCalculator -> ILocationControl,
     #       TerrainSystem -> ITerrainControl, Profiler -> IProfilerControl, WeatherSystem -> IWeatherState,

@@ -73,28 +73,47 @@ bool Renderer::initCoreVulkanResources() {
     // Create command pool and buffers
     if (!vulkanContext_->createCommandPoolAndBuffers(MAX_FRAMES_IN_FLIGHT)) return false;
 
-    // Initialize multi-threading infrastructure via RenderingInfrastructure
+    // Initialize multi-threading infrastructure
     {
         INIT_PROFILE_PHASE("ThreadingInfra");
 
-        // Use TaskScheduler thread count for parallel command recording
         uint32_t threadCount = TaskScheduler::instance().getThreadCount();
-        renderingInfra_.init(*vulkanContext_, threadCount);
+
+        if (!asyncTransferManager_.initialize(*vulkanContext_)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "AsyncTransferManager initialization failed - using synchronous transfers");
+        }
+
+        if (threadCount > 0) {
+            if (!threadedCommandPool_.initialize(*vulkanContext_, threadCount + 1)) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "ThreadedCommandPool initialization failed - using single-threaded recording");
+            }
+        }
+
+        if (!asyncTextureUploader_.initialize(
+                vulkanContext_->getVkDevice(),
+                vulkanContext_->getAllocator(),
+                &asyncTransferManager_)) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "AsyncTextureUploader initialization failed - using synchronous uploads");
+        }
     }
 
     return true;
 }
 
 bool Renderer::initDescriptorInfrastructure() {
-    // Initialize descriptor infrastructure (layout and pool)
-    DescriptorInfrastructure::Config descConfig;
-    descConfig.setsPerPool = config_.setsPerPool;
-    descConfig.poolSizes = config_.descriptorPoolSizes;
-
-    if (!descriptorInfra_.initDescriptors(*vulkanContext_, descConfig)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize descriptor infrastructure");
+    // Initialize scene pipeline (descriptor set layout)
+    if (!scenePipeline_.initLayout(*vulkanContext_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize scene pipeline layout");
         return false;
     }
+
+    // Create descriptor pool (shared resource allocator)
+    VkDevice device = vulkanContext_->getVkDevice();
+    descriptorPool_.emplace(device, config_.setsPerPool, config_.descriptorPoolSizes);
+
     return true;
 }
 
@@ -156,7 +175,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
             if (progressCallback_) progressCallback_(0.14f, "Graphics pipeline");
             {
                 INIT_PROFILE_PHASE("GraphicsPipeline");
-                if (!descriptorInfra_.createGraphicsPipeline(*vulkanContext_,
+                if (!scenePipeline_.createGraphicsPipeline(*vulkanContext_,
                         systems_->postProcess().getHDRRenderPass(), resourcePath)) {
                     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create graphics pipeline");
                     return false;
@@ -195,7 +214,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
             {
                 INIT_PROFILE_PHASE("ShadowSystem");
                 auto shadowSystem = ShadowSystem::create(*ctxPtr,
-                    descriptorInfra_.getVkDescriptorSetLayout(),
+                    scenePipeline_.getVkDescriptorSetLayout(),
                     systems_->skinnedMesh().getDescriptorSetLayout());
                 if (!shadowSystem) return false;
                 systems_->setShadow(std::move(shadowSystem));
@@ -281,7 +300,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
             sceneInfo.graphicsQueue = vulkanContext_->getVkGraphicsQueue();
             sceneInfo.physicalDevice = vulkanContext_->getVkPhysicalDevice();
             sceneInfo.resourcePath = resourcePath;
-            sceneInfo.assetRegistry = &renderingInfra_.assetRegistry();
+            sceneInfo.assetRegistry = &assetRegistry_;
             sceneInfo.getTerrainHeight = [this](float x, float z) {
                 return systems_->terrain().getHeightAt(x, z);
             };
@@ -479,8 +498,8 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 deferredConfig.commandPool = vulkanContext_->getCommandPool();
                 deferredConfig.graphicsQueue = vulkanContext_->getVkGraphicsQueue();
                 deferredConfig.physicalDevice = vulkanContext_->getVkPhysicalDevice();
-                deferredConfig.descriptorPool = descriptorInfra_.getDescriptorPool();
-                deferredConfig.descriptorSetLayout = descriptorInfra_.getVkDescriptorSetLayout();
+                deferredConfig.descriptorPool = getDescriptorPool();
+                deferredConfig.descriptorSetLayout = scenePipeline_.getVkDescriptorSetLayout();
                 deferredConfig.framesInFlight = MAX_FRAMES_IN_FLIGHT;
 
                 auto deferredObjects = DeferredTerrainObjects::create(deferredConfig);
@@ -513,8 +532,8 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
 
             // Rocks descriptor sets
             if (!systems_->rocks().createDescriptorSets(
-                    device, *descriptorInfra_.getDescriptorPool(),
-                    descriptorInfra_.getVkDescriptorSetLayout(),
+                    device, *getDescriptorPool(),
+                    scenePipeline_.getVkDescriptorSetLayout(),
                     MAX_FRAMES_IN_FLIGHT, getCommonBindings)) {
                 return false;
             }
@@ -578,7 +597,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 cullInfo.allocator = vulkanContext_->getAllocator();
                 cullInfo.shaderPath = resourcePath + "/shaders";
                 cullInfo.framesInFlight = MAX_FRAMES_IN_FLIGHT;
-                cullInfo.descriptorPool = descriptorInfra_.getDescriptorPool();
+                cullInfo.descriptorPool = getDescriptorPool();
 
                 auto gpuCullPass = GPUCullPass::create(cullInfo);
                 if (gpuCullPass) {
@@ -677,42 +696,44 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
 }
 
 void Renderer::initResizeCoordinator() {
+    resizeCoordinator_ = std::make_unique<ResizeCoordinator>();
+
     // Register systems with resize coordinator
     // Order matters: render targets first, then systems that depend on them, then viewport-only
 
-    // Render targets that need full resize (device/allocator/extent)
-    systems_->resizeCoordinator().registerWithSimpleResize(systems_->postProcess(), "PostProcessSystem", ResizePriority::RenderTarget);
-    systems_->resizeCoordinator().registerWithSimpleResize(systems_->bloom(), "BloomSystem", ResizePriority::RenderTarget);
-    systems_->resizeCoordinator().registerWithResize(systems_->froxel(), "FroxelSystem", ResizePriority::RenderTarget);
+    // Render targets that need resize (reallocate GPU resources)
+    resizeCoordinator_->registerWithSimpleResize(systems_->postProcess(), "PostProcessSystem", ResizePriority::RenderTarget);
+    resizeCoordinator_->registerWithSimpleResize(systems_->bloom(), "BloomSystem", ResizePriority::RenderTarget);
+    resizeCoordinator_->registerWithSimpleResize(systems_->froxel(), "FroxelSystem", ResizePriority::RenderTarget);
 
     // Culling systems with simple resize (extent only, but reallocates)
-    systems_->resizeCoordinator().registerWithSimpleResize(systems_->hiZ(), "HiZSystem", ResizePriority::Culling);
-    systems_->resizeCoordinator().registerWithSimpleResize(systems_->ssr(), "SSRSystem", ResizePriority::Culling);
-    systems_->resizeCoordinator().registerWithSimpleResize(systems_->waterTileCull(), "WaterTileCull", ResizePriority::Culling);
+    resizeCoordinator_->registerWithSimpleResize(systems_->hiZ(), "HiZSystem", ResizePriority::Culling);
+    resizeCoordinator_->registerWithSimpleResize(systems_->ssr(), "SSRSystem", ResizePriority::Culling);
+    resizeCoordinator_->registerWithSimpleResize(systems_->waterTileCull(), "WaterTileCull", ResizePriority::Culling);
 
     // G-buffer systems
-    systems_->resizeCoordinator().registerWithSimpleResize(systems_->waterGBuffer(), "WaterGBuffer", ResizePriority::GBuffer);
+    resizeCoordinator_->registerWithSimpleResize(systems_->waterGBuffer(), "WaterGBuffer", ResizePriority::GBuffer);
 
     // Viewport-only systems (setExtent)
-    systems_->resizeCoordinator().registerWithExtent(systems_->terrain(), "TerrainSystem");
-    systems_->resizeCoordinator().registerWithExtent(systems_->sky(), "SkySystem");
-    systems_->resizeCoordinator().registerWithExtent(systems_->water(), "WaterSystem");
-    systems_->resizeCoordinator().registerWithExtent(systems_->grass(), "GrassSystem");
-    systems_->resizeCoordinator().registerWithExtent(systems_->weather(), "WeatherSystem");
-    systems_->resizeCoordinator().registerWithExtent(systems_->leaf(), "LeafSystem");
-    systems_->resizeCoordinator().registerWithExtent(systems_->catmullClark(), "CatmullClarkSystem");
-    systems_->resizeCoordinator().registerWithExtent(systems_->skinnedMesh(), "SkinnedMeshRenderer");
+    resizeCoordinator_->registerWithExtent(systems_->terrain(), "TerrainSystem");
+    resizeCoordinator_->registerWithExtent(systems_->sky(), "SkySystem");
+    resizeCoordinator_->registerWithExtent(systems_->water(), "WaterSystem");
+    resizeCoordinator_->registerWithExtent(systems_->grass(), "GrassSystem");
+    resizeCoordinator_->registerWithExtent(systems_->weather(), "WeatherSystem");
+    resizeCoordinator_->registerWithExtent(systems_->leaf(), "LeafSystem");
+    resizeCoordinator_->registerWithExtent(systems_->catmullClark(), "CatmullClarkSystem");
+    resizeCoordinator_->registerWithExtent(systems_->skinnedMesh(), "SkinnedMeshRenderer");
 
     // Register callback for bloom texture rebinding (needed after bloom resize)
-    systems_->resizeCoordinator().registerCallback("BloomRebind",
-        [this](VkDevice, VmaAllocator, VkExtent2D) {
+    resizeCoordinator_->registerCallback("BloomRebind",
+        [this](VkExtent2D) {
             systems_->postProcess().setBloomTexture(systems_->bloom().getBloomOutput(), systems_->bloom().getBloomSampler());
         },
         nullptr,
         ResizePriority::RenderTarget);
 
     // Register core resize handler for swapchain, depth buffer, and framebuffers
-    systems_->resizeCoordinator().setCoreResizeHandler([this](VkDevice, VmaAllocator) -> VkExtent2D {
+    resizeCoordinator_->setCoreResizeHandler([this](VkDevice, VmaAllocator) -> VkExtent2D {
         // Recreate swapchain
         if (!vulkanContext_->recreateSwapchain()) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to recreate swapchain");
