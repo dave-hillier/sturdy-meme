@@ -29,6 +29,7 @@ class World;
 
 namespace Loading {
     class AsyncSystemLoader;
+    struct SystemInitTask;
 }
 
 // PBR texture flags - indicates which optional PBR textures are bound
@@ -225,8 +226,10 @@ private:
     // High-level initialization phases
     bool initCoreVulkanResources();       // swapchain resources, command pool, threading
     bool initDescriptorInfrastructure();  // layouts, pools, sets
-    bool initSubsystems(const InitContext& initCtx);  // terrain, grass, weather, snow, water, etc.
-    bool initSubsystemsAsync();  // Async version using AsyncSystemLoader (uses asyncInitContext_)
+    // Build the declarative list of initialization tasks (shared by sync and async paths)
+    std::vector<Loading::SystemInitTask> buildInitTasks(const InitContext& initCtx);
+    bool initSubsystems(const InitContext& initCtx);  // Runs buildInitTasks synchronously
+    bool initSubsystemsAsync();  // Feeds buildInitTasks to AsyncSystemLoader
     void initResizeCoordinator();         // resize registration
     void initTemporalSystems();           // temporal system registration (for ghost frame prevention)
 
