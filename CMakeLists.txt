@@ -71,6 +71,7 @@ set(SOURCES
     src/core/vulkan/VulkanContext.cpp
     src/core/vulkan/AsyncTransferManager.cpp
     src/core/vulkan/ThreadedCommandPool.cpp
+    $<IF:$<PLATFORM_ID:Darwin>,src/core/vulkan/MetalLayerFix.mm,src/core/vulkan/MetalLayerFix.cpp>
     src/core/threading/TaskScheduler.cpp
     src/core/pipeline/FrameGraph.cpp
     src/core/pipeline/FrameGraphBuilder.cpp

@@ -168,11 +168,27 @@ void PostProcessSystem::resize(VkExtent2D newExtent) {
     createHDRRenderTarget();
     createHDRFramebuffer();
 
-    // Update descriptor sets with new image view
+    // Update descriptor sets with new HDR color AND depth views.
+    // Both are destroyed/recreated above, so both bindings must be refreshed.
+    // NOTE: Binding 6 is written in a separate SetWriter call because SetWriter
+    // stores pImageInfo pointers into a vector that can reallocate on push_back,
+    // invalidating earlier pointers. Two writes per call is safe; three is not.
     for (size_t i = 0; i < framesInFlight; i++) {
         DescriptorManager::SetWriter(device, compositeDescriptorSets[i])
             .writeImage(0, hdrColorView, **hdrSampler_)
+            .writeImage(2, hdrDepthView, **hdrSampler_, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL)
             .update();
+
+        // Separate write for binding 6 (god rays placeholder) to avoid vector reallocation
+        if (godRaysView_ != VK_NULL_HANDLE && godRaysSampler_ != VK_NULL_HANDLE) {
+            DescriptorManager::SetWriter(device, compositeDescriptorSets[i])
+                .writeImage(6, godRaysView_, godRaysSampler_)
+                .update();
+        } else {
+            DescriptorManager::SetWriter(device, compositeDescriptorSets[i])
+                .writeImage(6, hdrColorView, **hdrSampler_)
+                .update();
+        }
     }
 }
 

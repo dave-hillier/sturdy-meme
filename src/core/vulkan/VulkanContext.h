@@ -87,6 +87,7 @@ public:
     bool hasDedicatedTransferQueue() const { return hasDedicatedTransfer_; }
     VmaAllocator getAllocator() const { return allocator; }
     VkPipelineCache getPipelineCache() const { return pipelineCache.getCache(); }
+    SDL_Window* getWindow() const { return window; }
 
     const std::vector<VkImageView>& getSwapchainImageViews() const { return swapchainImageViews; }
     uint32_t getSwapchainImageCount() const { return static_cast<uint32_t>(swapchainImages.size()); }
