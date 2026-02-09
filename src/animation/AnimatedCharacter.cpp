@@ -327,7 +327,9 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
 
     // Get current normalized animation time for phase tracking
     float normalizedTime = 0.0f;
-    if (useStateMachine) {
+    if (useMotionMatching) {
+        normalizedTime = motionMatchingController.getPlaybackState().normalizedTime;
+    } else if (useStateMachine) {
         const AnimationClip* currentClip = stateMachine.getCurrentClip();
         if (currentClip && currentClip->duration > 0.0f) {
             normalizedTime = stateMachine.getCurrentTime() / currentClip->duration;
@@ -360,6 +362,20 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
         footPhaseTracker.update(normalizedTime, deltaTime, leftFootWorldPos, rightFootWorldPos, worldTransform);
     }
 
+    // Detect rapid turning to reduce foot locking (prevents sliding during turns).
+    // When the character rotates quickly, world-space foot lock positions become invalid
+    // because the world transform rotates underneath the locked feet.
+    float turnRate = 0.0f;
+    if (useMotionMatching) {
+        turnRate = std::abs(motionMatchingController.getTrajectoryPredictor().getCurrentAngularVelocity());
+    }
+    // 1.5 rad/s (~86°/s) threshold: above this, start reducing foot lock
+    constexpr float TURN_LOCK_THRESHOLD = 1.5f;
+    constexpr float TURN_LOCK_FADEOUT = 3.0f;  // Fully disabled at 3.0 rad/s (~172°/s)
+    float turnLockScale = 1.0f - glm::clamp(
+        (turnRate - TURN_LOCK_THRESHOLD) / (TURN_LOCK_FADEOUT - TURN_LOCK_THRESHOLD),
+        0.0f, 1.0f);
+
     // Apply phase-aware IK weights and foot locking
     auto updateFootLock = [&](FootPlacementIK* foot, bool isLeftFoot) {
         if (!foot || !foot->enabled) return;
@@ -375,7 +391,7 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
             foot->phaseProgress = 0.0f;
         } else if (useFootPhaseTracking && footPhaseTracker.hasTimingData()) {
             // Use phase-aware values during locomotion
-            targetLockBlend = footPhaseTracker.getLockBlend(isLeftFoot);
+            targetLockBlend = footPhaseTracker.getLockBlend(isLeftFoot) * turnLockScale;
             targetWeight = footPhaseTracker.getIKWeight(isLeftFoot);
 
             // Pass phase data to foot for solver to use

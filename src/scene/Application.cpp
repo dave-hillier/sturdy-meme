@@ -563,7 +563,15 @@ void Application::run() {
                     // Normalize yaw difference
                     while (yawDiff > 180.0f) yawDiff -= 360.0f;
                     while (yawDiff < -180.0f) yawDiff += 360.0f;
-                    float smoothedYaw = currentYaw + yawDiff * 10.0f * deltaTime;  // Smooth rotation
+                    // Use slower rotation when motion matching is active so the trajectory
+                    // predictor has time to show direction changes to the matcher.
+                    // Fast rotation (10x) makes every query look like "moving forward" in
+                    // local space, causing idle selection during turns.
+                    auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
+                    float yawRate = (sceneBuilder.hasCharacter() &&
+                                     sceneBuilder.getAnimatedCharacter().isUsingMotionMatching())
+                                    ? 4.0f : 10.0f;
+                    float smoothedYaw = currentYaw + yawDiff * yawRate * deltaTime;
                     // Keep yaw in reasonable range
                     while (smoothedYaw > 360.0f) smoothedYaw -= 360.0f;
                     while (smoothedYaw < 0.0f) smoothedYaw += 360.0f;

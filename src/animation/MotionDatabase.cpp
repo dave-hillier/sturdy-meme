@@ -284,26 +284,19 @@ KDPoint MotionDatabase::poseToKDPoint(const Trajectory& trajectory,
     KDPoint point;
     size_t idx = 0;
 
-    // Trajectory features (normalized) - position and velocity magnitudes for each sample
-    // Use up to 6 trajectory samples
+    // Trajectory features (normalized per-component) - ground plane position (x,z) per sample
+    // Storing per-component instead of magnitude makes the KD-tree direction-aware
     for (size_t i = 0; i < std::min(trajectory.sampleCount, size_t(6)); ++i) {
         const auto& sample = trajectory.samples[i];
 
-        // Normalize position magnitude
-        float posMag = glm::length(sample.position);
-        if (normalization_.isComputed && normalization_.trajectoryPosition[i].stdDev > 0.001f) {
-            posMag = (posMag - normalization_.trajectoryPosition[i].mean) /
-                     normalization_.trajectoryPosition[i].stdDev;
+        float posX = sample.position.x;
+        float posZ = sample.position.z;
+        if (normalization_.isComputed) {
+            posX = normalization_.trajectoryPosition[i].x.normalize(posX);
+            posZ = normalization_.trajectoryPosition[i].z.normalize(posZ);
         }
-        point[idx++] = posMag;
-
-        // Normalize velocity magnitude
-        float velMag = glm::length(sample.velocity);
-        if (normalization_.isComputed && normalization_.trajectoryVelocity[i].stdDev > 0.001f) {
-            velMag = (velMag - normalization_.trajectoryVelocity[i].mean) /
-                     normalization_.trajectoryVelocity[i].stdDev;
-        }
-        point[idx++] = velMag;
+        point[idx++] = posX;
+        point[idx++] = posZ;
     }
 
     // Pad remaining trajectory slots with zeros
@@ -311,17 +304,10 @@ KDPoint MotionDatabase::poseToKDPoint(const Trajectory& trajectory,
         point[idx++] = 0.0f;
     }
 
-    // Root velocity (normalized) - 3 components
+    // Root velocity (normalized per-component)
     glm::vec3 rootVel = pose.rootVelocity;
-    if (normalization_.isComputed && normalization_.rootVelocity.stdDev > 0.001f) {
-        float rootVelMag = glm::length(rootVel);
-        float normalizedMag = (rootVelMag - normalization_.rootVelocity.mean) /
-                              normalization_.rootVelocity.stdDev;
-        if (rootVelMag > 0.001f) {
-            rootVel = glm::normalize(rootVel) * normalizedMag;
-        } else {
-            rootVel = glm::vec3(0.0f);
-        }
+    if (normalization_.isComputed) {
+        rootVel = normalization_.rootVelocity.normalize(rootVel);
     }
     point[idx++] = rootVel.x;
     point[idx++] = rootVel.y;
@@ -329,9 +315,8 @@ KDPoint MotionDatabase::poseToKDPoint(const Trajectory& trajectory,
 
     // Root angular velocity (normalized)
     float angVel = pose.rootAngularVelocity;
-    if (normalization_.isComputed && normalization_.rootAngularVelocity.stdDev > 0.001f) {
-        angVel = (angVel - normalization_.rootAngularVelocity.mean) /
-                 normalization_.rootAngularVelocity.stdDev;
+    if (normalization_.isComputed) {
+        angVel = normalization_.rootAngularVelocity.normalize(angVel);
     }
     point[idx++] = angVel;
 
@@ -396,32 +381,47 @@ void MotionDatabase::computeNormalization() {
         }
     };
 
-    // Accumulators for each feature type
-    std::array<Accumulator, MAX_TRAJECTORY_SAMPLES> trajPosAcc;
-    std::array<Accumulator, MAX_TRAJECTORY_SAMPLES> trajVelAcc;
-    std::array<Accumulator, MAX_FEATURE_BONES> bonePosAcc;
-    std::array<Accumulator, MAX_FEATURE_BONES> boneVelAcc;
-    Accumulator rootVelAcc;
-    Accumulator rootAngVelAcc;
+    // Per-component accumulator for vec3 features (preserves directional information)
+    struct Accumulator3D {
+        Accumulator x, y, z;
 
-    // First pass: collect all values
-    for (const auto& pose : poses_) {
-        // Trajectory features
-        for (size_t i = 0; i < pose.trajectory.sampleCount && i < MAX_TRAJECTORY_SAMPLES; ++i) {
-            const auto& sample = pose.trajectory.samples[i];
-            trajPosAcc[i].add(glm::length(sample.position));
-            trajVelAcc[i].add(glm::length(sample.velocity));
+        void add(const glm::vec3& v) {
+            x.add(v.x);
+            y.add(v.y);
+            z.add(v.z);
         }
 
-        // Bone features
+        FeatureStats3D finalize() const {
+            return {x.finalize(), y.finalize(), z.finalize()};
+        }
+    };
+
+    // Accumulators for each feature type (per-component for vectors)
+    std::array<Accumulator3D, MAX_TRAJECTORY_SAMPLES> trajPosAcc;
+    std::array<Accumulator3D, MAX_TRAJECTORY_SAMPLES> trajVelAcc;
+    std::array<Accumulator3D, MAX_FEATURE_BONES> bonePosAcc;
+    std::array<Accumulator3D, MAX_FEATURE_BONES> boneVelAcc;
+    Accumulator3D rootVelAcc;
+    Accumulator rootAngVelAcc;
+
+    // First pass: collect per-component values (not magnitudes)
+    for (const auto& pose : poses_) {
+        // Trajectory features (per-component preserves direction)
+        for (size_t i = 0; i < pose.trajectory.sampleCount && i < MAX_TRAJECTORY_SAMPLES; ++i) {
+            const auto& sample = pose.trajectory.samples[i];
+            trajPosAcc[i].add(sample.position);
+            trajVelAcc[i].add(sample.velocity);
+        }
+
+        // Bone features (per-component)
         for (size_t i = 0; i < pose.poseFeatures.boneCount && i < MAX_FEATURE_BONES; ++i) {
             const auto& bone = pose.poseFeatures.boneFeatures[i];
-            bonePosAcc[i].add(glm::length(bone.position));
-            boneVelAcc[i].add(glm::length(bone.velocity));
+            bonePosAcc[i].add(bone.position);
+            boneVelAcc[i].add(bone.velocity);
         }
 
         // Root features
-        rootVelAcc.add(glm::length(pose.poseFeatures.rootVelocity));
+        rootVelAcc.add(pose.poseFeatures.rootVelocity);
         rootAngVelAcc.add(std::abs(pose.poseFeatures.rootAngularVelocity));
     }
 
@@ -440,8 +440,10 @@ void MotionDatabase::computeNormalization() {
     normalization_.rootAngularVelocity = rootAngVelAcc.finalize();
     normalization_.isComputed = true;
 
-    SDL_Log("MotionDatabase: Computed normalization (rootVel mean=%.2f stdDev=%.2f)",
-            normalization_.rootVelocity.mean, normalization_.rootVelocity.stdDev);
+    SDL_Log("MotionDatabase: Computed normalization (rootVel stdDev x=%.2f y=%.2f z=%.2f)",
+            normalization_.rootVelocity.x.stdDev,
+            normalization_.rootVelocity.y.stdDev,
+            normalization_.rootVelocity.z.stdDev);
 }
 
 MotionDatabase::Stats MotionDatabase::getStats() const {
@@ -784,7 +786,7 @@ bool MotionMatcher::passesFilters(const DatabasePose& pose, const SearchOptions&
 namespace {
 
 constexpr uint32_t CACHE_MAGIC = 0x4D4D4442; // "MMDB"
-constexpr uint32_t CACHE_VERSION = 1;
+constexpr uint32_t CACHE_VERSION = 2;  // v2: per-component normalization
 
 // FNV-1a hash for fingerprint comparison
 uint64_t fnv1aHash(const std::string& str) {
@@ -966,21 +968,21 @@ bool MotionDatabase::saveCache(const std::filesystem::path& cachePath) const {
         }
     }
 
-    // Normalization
+    // Normalization (per-component for vector features)
+    auto writeStats3D = [&](const FeatureStats3D& s) {
+        writeVal(out, s.x.mean); writeVal(out, s.x.stdDev);
+        writeVal(out, s.y.mean); writeVal(out, s.y.stdDev);
+        writeVal(out, s.z.mean); writeVal(out, s.z.stdDev);
+    };
     for (size_t i = 0; i < MAX_TRAJECTORY_SAMPLES; ++i) {
-        writeVal(out, normalization_.trajectoryPosition[i].mean);
-        writeVal(out, normalization_.trajectoryPosition[i].stdDev);
-        writeVal(out, normalization_.trajectoryVelocity[i].mean);
-        writeVal(out, normalization_.trajectoryVelocity[i].stdDev);
+        writeStats3D(normalization_.trajectoryPosition[i]);
+        writeStats3D(normalization_.trajectoryVelocity[i]);
     }
     for (size_t i = 0; i < MAX_FEATURE_BONES; ++i) {
-        writeVal(out, normalization_.bonePosition[i].mean);
-        writeVal(out, normalization_.bonePosition[i].stdDev);
-        writeVal(out, normalization_.boneVelocity[i].mean);
-        writeVal(out, normalization_.boneVelocity[i].stdDev);
+        writeStats3D(normalization_.bonePosition[i]);
+        writeStats3D(normalization_.boneVelocity[i]);
     }
-    writeVal(out, normalization_.rootVelocity.mean);
-    writeVal(out, normalization_.rootVelocity.stdDev);
+    writeStats3D(normalization_.rootVelocity);
     writeVal(out, normalization_.rootAngularVelocity.mean);
     writeVal(out, normalization_.rootAngularVelocity.stdDev);
     writeVal(out, normalization_.isComputed);
@@ -1083,22 +1085,23 @@ bool MotionDatabase::loadCache(const std::filesystem::path& cachePath) {
         }
     }
 
-    // Read normalization
+    // Read normalization (per-component for vector features)
     FeatureNormalization norm;
+    auto readStats3D = [&](FeatureStats3D& s) -> bool {
+        if (!readVal(in, s.x.mean)) return false; if (!readVal(in, s.x.stdDev)) return false;
+        if (!readVal(in, s.y.mean)) return false; if (!readVal(in, s.y.stdDev)) return false;
+        if (!readVal(in, s.z.mean)) return false; if (!readVal(in, s.z.stdDev)) return false;
+        return true;
+    };
     for (size_t i = 0; i < MAX_TRAJECTORY_SAMPLES; ++i) {
-        if (!readVal(in, norm.trajectoryPosition[i].mean)) return false;
-        if (!readVal(in, norm.trajectoryPosition[i].stdDev)) return false;
-        if (!readVal(in, norm.trajectoryVelocity[i].mean)) return false;
-        if (!readVal(in, norm.trajectoryVelocity[i].stdDev)) return false;
+        if (!readStats3D(norm.trajectoryPosition[i])) return false;
+        if (!readStats3D(norm.trajectoryVelocity[i])) return false;
     }
     for (size_t i = 0; i < MAX_FEATURE_BONES; ++i) {
-        if (!readVal(in, norm.bonePosition[i].mean)) return false;
-        if (!readVal(in, norm.bonePosition[i].stdDev)) return false;
-        if (!readVal(in, norm.boneVelocity[i].mean)) return false;
-        if (!readVal(in, norm.boneVelocity[i].stdDev)) return false;
+        if (!readStats3D(norm.bonePosition[i])) return false;
+        if (!readStats3D(norm.boneVelocity[i])) return false;
     }
-    if (!readVal(in, norm.rootVelocity.mean)) return false;
-    if (!readVal(in, norm.rootVelocity.stdDev)) return false;
+    if (!readStats3D(norm.rootVelocity)) return false;
     if (!readVal(in, norm.rootAngularVelocity.mean)) return false;
     if (!readVal(in, norm.rootAngularVelocity.stdDev)) return false;
     if (!readVal(in, norm.isComputed)) return false;

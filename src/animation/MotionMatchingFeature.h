@@ -340,24 +340,47 @@ struct FeatureStats {
     float mean = 0.0f;
     float stdDev = 1.0f;  // Default to 1 to avoid division by zero
 
-    // Normalize a value using these statistics
+    // Normalize a feature value: (value - mean) / stdDev
+    // Use for normalizing individual feature values (e.g., for KD-tree point construction)
     float normalize(float value) const {
         return (value - mean) / stdDev;
+    }
+
+    // Normalize a distance/difference: value / stdDev
+    // Use for normalizing differences between two features in the cost function.
+    // Mean is NOT subtracted because it cancels out: (a-mean)/std - (b-mean)/std = (a-b)/std
+    float normalizeDistance(float distance) const {
+        return distance / stdDev;
+    }
+};
+
+// Per-component (x,y,z) normalization statistics for vector features
+struct FeatureStats3D {
+    FeatureStats x, y, z;
+
+    // Normalize a feature vector (for KD-tree point construction)
+    glm::vec3 normalize(const glm::vec3& v) const {
+        return glm::vec3(x.normalize(v.x), y.normalize(v.y), z.normalize(v.z));
+    }
+
+    // Normalize a difference vector (for cost function)
+    glm::vec3 normalizeDistance(const glm::vec3& diff) const {
+        return glm::vec3(x.normalizeDistance(diff.x), y.normalizeDistance(diff.y), z.normalizeDistance(diff.z));
     }
 };
 
 // Normalization data for all features
 struct FeatureNormalization {
-    // Trajectory normalization (per sample point)
-    std::array<FeatureStats, MAX_TRAJECTORY_SAMPLES> trajectoryPosition;  // magnitude
-    std::array<FeatureStats, MAX_TRAJECTORY_SAMPLES> trajectoryVelocity;  // magnitude
+    // Trajectory normalization (per sample point, per component)
+    std::array<FeatureStats3D, MAX_TRAJECTORY_SAMPLES> trajectoryPosition;
+    std::array<FeatureStats3D, MAX_TRAJECTORY_SAMPLES> trajectoryVelocity;
 
-    // Bone feature normalization (per bone)
-    std::array<FeatureStats, MAX_FEATURE_BONES> bonePosition;    // magnitude
-    std::array<FeatureStats, MAX_FEATURE_BONES> boneVelocity;    // magnitude
+    // Bone feature normalization (per bone, per component)
+    std::array<FeatureStats3D, MAX_FEATURE_BONES> bonePosition;
+    std::array<FeatureStats3D, MAX_FEATURE_BONES> boneVelocity;
 
-    // Root motion normalization
-    FeatureStats rootVelocity;       // magnitude
+    // Root motion normalization (per component for velocity, scalar for angular)
+    FeatureStats3D rootVelocity;
     FeatureStats rootAngularVelocity;
 
     bool isComputed = false;

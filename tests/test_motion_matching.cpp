@@ -1374,7 +1374,7 @@ TEST_SUITE("MotionMatcher") {
         const auto& norm = f.database.getNormalization();
         CHECK(norm.isComputed);
         // Root velocity stdDev should be > 0 since we have varying clip speeds
-        CHECK(norm.rootVelocity.stdDev > 0.0f);
+        CHECK(norm.rootVelocity.x.stdDev > 0.0f);
     }
 }
 

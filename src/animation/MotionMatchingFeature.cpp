@@ -92,18 +92,17 @@ float Trajectory::computeNormalizedCost(const Trajectory& other,
             const auto& s1 = samples[i];
             const auto& s2 = other.samples[bestMatch];
 
-            // Normalize position and velocity differences
-            float posDiff = glm::length(s1.position - s2.position);
-            float velDiff = glm::length(s1.velocity - s2.velocity);
+            // Per-component normalization preserves direction information
+            glm::vec3 posDiffVec = s1.position - s2.position;
+            glm::vec3 velDiffVec = s1.velocity - s2.velocity;
 
-            // Use normalization if available for this sample index
             if (norm.isComputed && i < MAX_TRAJECTORY_SAMPLES) {
-                posDiff = norm.trajectoryPosition[i].normalize(posDiff);
-                velDiff = norm.trajectoryVelocity[i].normalize(velDiff);
+                posDiffVec = norm.trajectoryPosition[i].normalizeDistance(posDiffVec);
+                velDiffVec = norm.trajectoryVelocity[i].normalizeDistance(velDiffVec);
             }
 
-            float posCost = posDiff * positionWeight;
-            float velCost = velDiff * velocityWeight;
+            float posCost = glm::length(posDiffVec) * positionWeight;
+            float velCost = glm::length(velDiffVec) * velocityWeight;
 
             // Facing cost (already normalized: 0 for same, 2 for opposite)
             float facingCost = 0.0f;
@@ -167,35 +166,36 @@ float PoseFeatures::computeNormalizedCost(const PoseFeatures& other,
                                            float phaseWeight) const {
     float totalCost = 0.0f;
 
-    // Bone feature costs (normalized)
+    // Bone feature costs (per-component normalization preserves direction)
     size_t minBones = std::min(boneCount, other.boneCount);
     for (size_t i = 0; i < minBones; ++i) {
-        float posDiff = glm::length(boneFeatures[i].position - other.boneFeatures[i].position);
-        float velDiff = glm::length(boneFeatures[i].velocity - other.boneFeatures[i].velocity);
+        glm::vec3 posDiffVec = boneFeatures[i].position - other.boneFeatures[i].position;
+        glm::vec3 velDiffVec = boneFeatures[i].velocity - other.boneFeatures[i].velocity;
 
-        // Apply normalization
         if (norm.isComputed && i < MAX_FEATURE_BONES) {
-            posDiff = norm.bonePosition[i].normalize(posDiff);
-            velDiff = norm.boneVelocity[i].normalize(velDiff);
+            posDiffVec = norm.bonePosition[i].normalizeDistance(posDiffVec);
+            velDiffVec = norm.boneVelocity[i].normalizeDistance(velDiffVec);
         }
 
+        float posDiff = glm::length(posDiffVec);
+        float velDiff = glm::length(velDiffVec);
         totalCost += (posDiff + velDiff * 0.5f) * boneWeight;
     }
     if (minBones > 0) {
         totalCost /= static_cast<float>(minBones);
     }
 
-    // Root velocity cost (normalized)
-    float rootVelDiff = glm::length(rootVelocity - other.rootVelocity);
+    // Root velocity cost (per-component normalization)
+    glm::vec3 rootVelDiffVec = rootVelocity - other.rootVelocity;
     if (norm.isComputed) {
-        rootVelDiff = norm.rootVelocity.normalize(rootVelDiff);
+        rootVelDiffVec = norm.rootVelocity.normalizeDistance(rootVelDiffVec);
     }
-    totalCost += rootVelDiff * rootVelWeight;
+    totalCost += glm::length(rootVelDiffVec) * rootVelWeight;
 
-    // Angular velocity cost (normalized)
+    // Angular velocity cost (scalar - only divide by stdDev for distances)
     float angVelDiff = std::abs(rootAngularVelocity - other.rootAngularVelocity);
     if (norm.isComputed) {
-        angVelDiff = norm.rootAngularVelocity.normalize(angVelDiff);
+        angVelDiff = norm.rootAngularVelocity.normalizeDistance(angVelDiff);
     }
     totalCost += angVelDiff * angularVelWeight;
 

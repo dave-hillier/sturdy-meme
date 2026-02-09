@@ -1,5 +1,6 @@
 #include "VulkanContext.h"
 #include "VulkanHelpers.h"
+#include "MetalLayerFix.h"
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
 #include <SDL3/SDL_vulkan.h>
@@ -328,6 +329,10 @@ bool VulkanContext::createSwapchain() {
         compositeAlpha == VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR ? "INHERIT" :
         compositeAlpha == VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR ? "PRE_MULTIPLIED" :
         "POST_MULTIPLIED");
+
+    // On macOS with INHERIT composite alpha, force the Metal layer to be opaque
+    // to prevent the compositor from blending through to stale cached content
+    ensureMetalLayerOpaque(window);
 
     return true;
 }

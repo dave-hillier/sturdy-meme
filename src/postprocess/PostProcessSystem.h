@@ -313,7 +313,7 @@ private:
     glm::vec2 sunScreenPos = glm::vec2(0.5f, 0.5f);  // Default to center
     float godRayIntensity = 0.25f;  // God ray strength (subtle)
     float godRayDecay = 0.92f;      // Falloff per sample (faster falloff = less extreme)
-    bool godRaysEnabled = true;     // Enable/disable god rays
+    bool godRaysEnabled = false;    // Disabled by default (GodRaysSystem not yet wired up)
     GodRayQuality godRayQuality = GodRayQuality::High;  // Sample count quality level
     bool froxelFilterHighQuality = true;  // Tricubic (true) vs trilinear (false)
 

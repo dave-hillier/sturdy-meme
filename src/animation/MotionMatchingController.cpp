@@ -128,15 +128,16 @@ void MotionMatchingController::performSearch() {
     // We need to rotate the query so the character's facing direction becomes Z+
     Trajectory localTrajectory = queryTrajectory_;
 
+    // Build rotation from world to local: rotate so facing -> Z+
     glm::vec3 facing = trajectoryPredictor_.getCurrentFacing();
+    float cosA = 1.0f, sinA = 0.0f;  // Identity rotation by default
     if (glm::length(facing) > 0.01f) {
         facing = glm::normalize(facing);
 
-        // Build rotation from world to local: rotate so facing -> Z+
         // facing.x = sin(angle), facing.z = cos(angle) where angle is rotation around Y
         float angle = std::atan2(facing.x, facing.z);
-        float cosA = std::cos(-angle);  // Negative to rotate TO local
-        float sinA = std::sin(-angle);
+        cosA = std::cos(-angle);  // Negative to rotate TO local
+        sinA = std::sin(-angle);
 
         for (size_t i = 0; i < localTrajectory.sampleCount; ++i) {
             TrajectorySample& s = localTrajectory.samples[i];
@@ -197,8 +198,18 @@ void MotionMatchingController::performSearch() {
         }
     }
 
-    // Perform search with local-space trajectory
-    MatchResult match = matcher_.findBestMatch(localTrajectory, queryPose_, options);
+    // Rotate query pose root velocity from world space to local space
+    // Database root velocities are in animation-local space (Z+ = forward),
+    // but the trajectory predictor produces world-space velocity
+    PoseFeatures localQueryPose = queryPose_;
+    if (glm::length(facing) > 0.01f) {
+        glm::vec3 vel = localQueryPose.rootVelocity;
+        localQueryPose.rootVelocity.x = vel.x * cosA + vel.z * sinA;
+        localQueryPose.rootVelocity.z = -vel.x * sinA + vel.z * cosA;
+    }
+
+    // Perform search with local-space trajectory and local-space query pose
+    MatchResult match = matcher_.findBestMatch(localTrajectory, localQueryPose, options);
 
     if (match.isValid()) {
         // Check if this is a different clip
@@ -295,7 +306,11 @@ void MotionMatchingController::advancePlayback(float deltaTime) {
             playback_.time -= clip.duration;
         }
     } else {
-        playback_.time = std::min(playback_.time, clip.duration);
+        if (playback_.time >= clip.duration) {
+            playback_.time = clip.duration;
+            // Force a search when non-looping clip ends to avoid frame-freezing
+            forceSearchNextUpdate_ = true;
+        }
     }
 
     // Update normalized time
@@ -327,6 +342,24 @@ void MotionMatchingController::updatePose() {
             tempSkeleton.joints[i].localTransform,
             tempSkeleton.joints[i].preRotation
         );
+    }
+
+    // Strip Y-axis rotation from root bone to prevent double-rotation.
+    // The character controller externally rotates the world transform toward the
+    // movement direction. If we also keep the animation's root Y-rotation,
+    // they compound — causing the character to overshoot and face backwards
+    // during turns. Walk/run root Y-rotation is near-zero so this is invisible
+    // for those clips; turn animations have large root Y-rotation causing the bug.
+    int32_t rootIdx = clip.clip->rootBoneIndex;
+    if (rootIdx >= 0 && static_cast<size_t>(rootIdx) < currentPose_.size()) {
+        glm::quat q = currentPose_[rootIdx].rotation;
+        // Decompose quaternion into Y-rotation and remainder: q = qY * qRemainder
+        // Extract yaw angle from quaternion
+        float yaw = std::atan2(2.0f * (q.w * q.y + q.x * q.z),
+                               1.0f - 2.0f * (q.y * q.y + q.z * q.z));
+        // Remove the Y-rotation component
+        glm::quat qY = glm::angleAxis(yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+        currentPose_[rootIdx].rotation = glm::inverse(qY) * q;
     }
 }
 

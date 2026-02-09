@@ -9,9 +9,9 @@
 namespace MotionMatching {
 
 // Feature dimension for KD-tree search
-// Uses trajectory samples (position + velocity magnitudes) and root velocity
-// This is a reduced feature set optimized for the most discriminative dimensions
-constexpr size_t KD_FEATURE_DIM = 16;  // 6 trajectory samples * 2 (pos+vel) + 3 root vel + 1 angular vel
+// Uses per-component trajectory positions (x,z ground plane) and root velocity
+// Direction-aware: stores vector components, not scalar magnitudes
+constexpr size_t KD_FEATURE_DIM = 16;  // 6 trajectory samples * 2 (pos_x+pos_z) + 3 root vel + 1 angular vel
 
 // A single point in the KD-tree
 struct KDPoint {
