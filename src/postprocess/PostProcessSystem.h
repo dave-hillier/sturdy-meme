@@ -21,6 +21,7 @@
 // Forward declarations
 class BloomSystem;
 class BilateralGridSystem;
+class GodRaysSystem;
 
 // Histogram reduce compute shader parameters
 struct HistogramReduceParams {
@@ -79,6 +80,7 @@ public:
         std::unique_ptr<PostProcessSystem> postProcess;
         std::unique_ptr<BloomSystem> bloom;
         std::unique_ptr<BilateralGridSystem> bilateralGrid;
+        std::unique_ptr<GodRaysSystem> godRays;
     };
 
     /**
@@ -313,7 +315,7 @@ private:
     glm::vec2 sunScreenPos = glm::vec2(0.5f, 0.5f);  // Default to center
     float godRayIntensity = 0.25f;  // God ray strength (subtle)
     float godRayDecay = 0.92f;      // Falloff per sample (faster falloff = less extreme)
-    bool godRaysEnabled = false;    // Disabled by default (GodRaysSystem not yet wired up)
+    bool godRaysEnabled = true;     // Enabled by default
     GodRayQuality godRayQuality = GodRayQuality::High;  // Sample count quality level
     bool froxelFilterHighQuality = true;  // Tricubic (true) vs trilinear (false)
 
