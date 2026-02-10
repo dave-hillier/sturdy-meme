@@ -194,7 +194,12 @@ bool Application::init(const std::string& title, int width, int height) {
         float cameraZ = settlementZ - halfTerrain;  // -5192
         float terrainY = 50.0f;  // Default height if terrain unavailable
         if (renderer_->getSystems().hasTerrain()) {
-            terrainY = renderer_->getSystems().terrain().getHeightAt(cameraX, cameraZ);
+            auto& terrain = renderer_->getSystems().terrain();
+            // Pre-load tiles before querying height (tiles only preloaded around origin by default)
+            if (auto* tileCachePtr = terrain.getTileCache()) {
+                tileCachePtr->preloadTilesAround(cameraX, cameraZ, 600.0f);
+            }
+            terrainY = terrain.getHeightAt(cameraX, cameraZ);
         }
         camera.setPosition(glm::vec3(cameraX, terrainY + 2.0f, cameraZ));  // Eye level above ground
         camera.setYaw(45.0f);    // Look roughly northeast
