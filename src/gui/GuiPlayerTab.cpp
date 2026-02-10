@@ -275,6 +275,15 @@ void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& setting
                           "instead of state machine");
     }
 
+    // Auto-initialize motion matching if enabled by default but not yet active
+    if (settings.motionMatchingEnabled && !character.isUsingMotionMatching()) {
+        if (!character.getMotionMatchingController().isDatabaseBuilt()) {
+            character.initializeMotionMatching();
+        } else {
+            character.setUseMotionMatching(true);
+        }
+    }
+
     // Sync the checkbox with actual state
     settings.motionMatchingEnabled = character.isUsingMotionMatching();
 

@@ -32,7 +32,7 @@ struct PlayerSettings {
     uint32_t forcedLOD = 0;       // Forced LOD level when override is enabled
 
     // Motion Matching debug
-    bool motionMatchingEnabled = false;  // Use motion matching instead of state machine
+    bool motionMatchingEnabled = true;   // Use motion matching instead of state machine
     bool showMotionMatchingTrajectory = false;  // Show predicted and matched trajectory
     bool showMotionMatchingFeatures = false;   // Show feature bone positions
     bool showMotionMatchingStats = false;      // Show match cost statistics
