@@ -85,6 +85,14 @@ public:
      */
     static void addCommonDescriptorBindings(DescriptorManager::LayoutBuilder& builder);
 
+    /**
+     * Set bindless descriptor set layouts for Sets 1 and 2.
+     * Must be called after BindlessManager::init() and before createGraphicsPipeline().
+     * These are included in the pipeline layout alongside Set 0.
+     */
+    void setBindlessLayouts(vk::DescriptorSetLayout textureSetLayout,
+                            vk::DescriptorSetLayout materialSetLayout);
+
     bool isInitialized() const { return initialized_; }
     bool hasPipeline() const { return graphicsPipeline_.has_value(); }
 
@@ -102,6 +110,10 @@ private:
     std::optional<vk::raii::DescriptorSetLayout> descriptorSetLayout_;
     std::optional<vk::raii::PipelineLayout> pipelineLayout_;
     std::optional<vk::raii::Pipeline> graphicsPipeline_;
+
+    // Bindless descriptor set layouts (owned by BindlessManager, stored here for pipeline layout)
+    vk::DescriptorSetLayout bindlessTextureSetLayout_;
+    vk::DescriptorSetLayout bindlessMaterialSetLayout_;
 
     bool initialized_ = false;
 };

@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <functional>
 #include "MaterialDescriptorFactory.h"
+#include "TextureRegistry.h"
 
 class IDescriptorAllocator;
 class Texture;
@@ -43,6 +44,14 @@ public:
         const Texture* metallicMap = nullptr;
         const Texture* aoMap = nullptr;
         const Texture* heightMap = nullptr;
+
+        // Bindless texture handles (populated when TextureRegistry is available)
+        TextureRegistry::Handle diffuseHandle;
+        TextureRegistry::Handle normalHandle;
+        TextureRegistry::Handle roughnessHandle;
+        TextureRegistry::Handle metallicHandle;
+        TextureRegistry::Handle aoHandle;
+        TextureRegistry::Handle heightHandle;
     };
 
     MaterialRegistry() = default;
@@ -80,11 +89,23 @@ public:
     // Check if registry has descriptor sets created
     bool hasDescriptorSets() const { return !descriptorSets.empty(); }
 
+    // Set the texture registry for bindless handle assignment.
+    // When set, registerMaterial() will automatically register textures.
+    void setTextureRegistry(TextureRegistry* registry) { textureRegistry_ = registry; }
+
+    // Retroactively register all existing material textures with the TextureRegistry.
+    // Call after setTextureRegistry() if materials were registered before the registry was available.
+    void registerTexturesWithRegistry();
+
 private:
+    void registerTexturesForMaterial(MaterialDef& def);
+
     std::vector<MaterialDef> materials;
     std::unordered_map<std::string, MaterialId> nameToId;
 
     // descriptorSets[materialId][frameIndex]
     std::vector<std::vector<VkDescriptorSet>> descriptorSets;
     uint32_t framesInFlight = 0;
+
+    TextureRegistry* textureRegistry_ = nullptr;
 };

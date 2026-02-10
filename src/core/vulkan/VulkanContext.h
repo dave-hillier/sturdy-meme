@@ -126,6 +126,12 @@ public:
     // Check if timeline semaphores are supported (always true for Vulkan 1.2+)
     bool hasTimelineSemaphores() const { return hasTimelineSemaphores_; }
 
+    // Check if descriptor indexing features are supported and enabled
+    bool hasDescriptorIndexing() const { return hasDescriptorIndexing_; }
+
+    // Query the max number of sampled images in an update-after-bind descriptor set
+    uint32_t getMaxBindlessTextures() const { return maxBindlessTextures_; }
+
 private:
     bool createInstance();
     bool createSurface();
@@ -157,6 +163,8 @@ private:
     uint32_t transferQueueFamily_ = 0;
     bool hasDedicatedTransfer_ = false;
     bool hasTimelineSemaphores_ = false;
+    bool hasDescriptorIndexing_ = false;
+    uint32_t maxBindlessTextures_ = 0;
 
     VmaAllocator allocator = VK_NULL_HANDLE;
 

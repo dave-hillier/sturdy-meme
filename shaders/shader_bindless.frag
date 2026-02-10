@@ -15,38 +15,32 @@
 #include "push_constants_common.glsl"
 #include "normal_mapping_common.glsl"
 #include "hue_shift_common.glsl"
+#include "bindless_material.glsl"
 
 // Enable shadow sampling for dynamic lights
 #define DYNAMIC_LIGHTS_ENABLE_SHADOWS
 #include "dynamic_lights_common.glsl"
 
-layout(binding = BINDING_DIFFUSE_TEX) uniform sampler2D texSampler;
+// Global scene resources (Set 0) — shared by all draws, updated once per frame
 layout(binding = BINDING_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;
-layout(binding = BINDING_NORMAL_MAP) uniform sampler2D normalMap;
-layout(binding = BINDING_EMISSIVE_MAP) uniform sampler2D emissiveMap;
 layout(binding = BINDING_POINT_SHADOW_MAP) uniform samplerCubeArrayShadow pointShadowMaps;
 layout(binding = BINDING_SPOT_SHADOW_MAP) uniform sampler2DArrayShadow spotShadowMaps;
 layout(binding = BINDING_SNOW_MASK) uniform sampler2D snowMaskTexture;
 layout(binding = BINDING_CLOUD_SHADOW_MAP) uniform sampler2D cloudShadowMap;
 
-// Optional PBR texture maps (for Substance/PBR materials)
-layout(binding = BINDING_ROUGHNESS_MAP) uniform sampler2D roughnessMap;
-layout(binding = BINDING_METALLIC_MAP) uniform sampler2D metallicMap;
-layout(binding = BINDING_AO_MAP) uniform sampler2D aoMap;
-layout(binding = BINDING_HEIGHT_MAP) uniform sampler2D heightMap;
-
-// GPULight struct and light buffer are defined in dynamic_lights_common.glsl
+// Per-material textures are accessed via bindless:
+//   Set 1: globalTextures[] (bindless texture array)
+//   Set 2: materialDataArray[] (material SSBO with texture indices + scalar params)
+// Material index is passed via push constant (material.materialIndex)
 
 layout(location = 0) in vec3 fragNormal;
 layout(location = 1) in vec2 fragTexCoord;
 layout(location = 2) in vec3 fragWorldPos;
 layout(location = 3) in vec4 fragTangent;
 layout(location = 4) in vec4 fragColor;
-layout(location = 5) flat in uint fragMaterialIndex;  // From vertex shader (unused in legacy path)
+layout(location = 5) flat in uint fragMaterialIndex;
 
 layout(location = 0) out vec4 outColor;
-
-// Note: perturbNormal is provided by normal_mapping_common.glsl
 
 // Helper function to create a look-at matrix
 mat4 lookAt(vec3 eye, vec3 center, vec3 up) {
@@ -114,9 +108,16 @@ vec3 calculatePBR(vec3 N, vec3 V, vec3 L, vec3 lightColor, float lightIntensity,
 // calculateAllDynamicLightsPBR is called with shadow map samplers
 
 void main() {
-    vec4 texColor = texture(texSampler, fragTexCoord);
+    // Fetch material data from the bindless SSBO
+    // materialIndex comes via flat varying from vertex shader (works for both
+    // push constant path and instanced SSBO path)
+    MaterialData mat = getBindlessMaterial(fragMaterialIndex);
+
+    // Sample albedo from bindless texture array
+    vec4 texColor = sampleBindlessTexture(mat.albedoIndex, fragTexCoord);
 
     // Alpha test for transparent textures (leaves, etc.)
+    // Use push constant threshold (set per-draw from Renderable data)
     if (material.alphaTestThreshold > 0.0 && texColor.a < material.alphaTestThreshold) {
         discard;
     }
@@ -124,8 +125,9 @@ void main() {
     vec3 geometricN = normalize(fragNormal);
     vec3 V = normalize(ubo.cameraPosition.xyz - fragWorldPos);
 
-    // Enable normal mapping for debugging
-    vec3 N = perturbNormal(geometricN, fragTangent, normalMap, fragTexCoord);
+    // Normal mapping from bindless texture
+    vec3 normalSample = sampleBindlessTexture(mat.normalIndex, fragTexCoord).rgb;
+    vec3 N = perturbNormalFromSample(geometricN, fragTangent, normalSample);
 
     // Multiply texture color with vertex color (for glTF material baseColorFactor)
     vec3 baseAlbedo = texColor.rgb * fragColor.rgb;
@@ -134,22 +136,20 @@ void main() {
     vec3 albedo = applyHueShift(baseAlbedo, material.hueShift);
 
     // === PBR MATERIAL PROPERTIES ===
-    // Sample optional PBR texture maps, falling back to push constant values
-    float roughness = material.roughness;
-    float metallic = material.metallic;
+    // Use material SSBO scalar values as defaults, override with texture samples
+    float roughness = mat.roughness;
+    float metallic = mat.metallic;
     float ao = 1.0;
 
     if ((material.pbrFlags & PBR_HAS_ROUGHNESS_MAP) != 0u) {
-        roughness = texture(roughnessMap, fragTexCoord).r;
+        roughness = sampleBindlessTexture(mat.roughnessIndex, fragTexCoord).r;
     }
     if ((material.pbrFlags & PBR_HAS_METALLIC_MAP) != 0u) {
-        metallic = texture(metallicMap, fragTexCoord).r;
+        metallic = sampleBindlessTexture(mat.metallicIndex, fragTexCoord).r;
     }
     if ((material.pbrFlags & PBR_HAS_AO_MAP) != 0u) {
-        ao = texture(aoMap, fragTexCoord).r;
+        ao = sampleBindlessTexture(mat.aoIndex, fragTexCoord).r;
     }
-    // Height map can be used for parallax mapping (not implemented yet)
-    // if ((material.pbrFlags & PBR_HAS_HEIGHT_MAP) != 0u) { ... }
 
     // === SNOW LAYER ===
     // Sample snow mask at world position
@@ -222,7 +222,7 @@ void main() {
     vec3 finalColor = ambient + sunLight + moonLight + dynamicLights;
 
     // Add emissive glow from emissive map + material emissive color
-    vec3 emissiveMapSample = texture(emissiveMap, fragTexCoord).rgb;
+    vec3 emissiveMapSample = sampleBindlessTexture(mat.emissiveIndex, fragTexCoord).rgb;
     float emissiveMapLum = dot(emissiveMapSample, vec3(0.299, 0.587, 0.114));
     // Use emissive map color if present, otherwise use material emissive color
     vec3 emissiveColor = emissiveMapLum > 0.01

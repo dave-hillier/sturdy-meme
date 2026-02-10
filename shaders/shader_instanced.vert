@@ -25,8 +25,8 @@ layout(location = 1) out vec2 fragTexCoord;
 layout(location = 2) out vec3 fragWorldPos;
 layout(location = 3) out vec4 fragTangent;
 layout(location = 4) out vec4 fragColor;
-// Pass instance index to fragment shader for material lookup
-layout(location = 5) flat out uint fragInstanceIndex;
+// Pass material index to fragment shader for bindless material lookup
+layout(location = 5) flat out uint fragMaterialIndex;
 
 void main() {
     // Get instance data from buffer
@@ -91,5 +91,5 @@ void main() {
     fragWorldPos = worldPos.xyz;
     fragTangent = vec4(mat3(model) * inTangent.xyz, inTangent.w);
     fragColor = isVegetation ? vec4(1.0, 1.0, 1.0, 1.0) : inColor;
-    fragInstanceIndex = gl_InstanceIndex;
+    fragMaterialIndex = inst.materialIndex;
 }

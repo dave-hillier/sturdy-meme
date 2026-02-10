@@ -21,6 +21,7 @@ class TreeRenderer;
 class TreeLODSystem;
 class ImpostorCullSystem;
 class GPUSceneBuffer;
+class BindlessManager;
 
 namespace ecs { class World; }
 
@@ -53,6 +54,9 @@ public:
         TreeRenderer* treeRenderer = nullptr;
         TreeLODSystem* treeLOD = nullptr;
         ImpostorCullSystem* impostorCull = nullptr;
+
+        // Bindless rendering (optional, nullptr if not supported)
+        BindlessManager* bindlessManager = nullptr;
     };
 
     explicit SceneObjectsDrawable(const Resources& resources);

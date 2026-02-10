@@ -339,6 +339,9 @@ void Renderer::cleanup() {
             systems_.reset();
         }
 
+        // Clean up bindless rendering infrastructure
+        bindlessManager_.cleanup();
+
         // Clean up ScenePipeline (RAII objects must be reset while device is alive)
         scenePipeline_.reset();
 
@@ -472,6 +475,19 @@ VkCommandBuffer Renderer::buildFrame(const Camera& camera, uint32_t imageIndex, 
 
     FrameUpdater::populateGPUSceneBuffer(*systems_, frame);
 
+    // Update bindless texture descriptors and material SSBO
+    if (bindlessManager_.isInitialized() && textureRegistry_.isInitialized()) {
+        vk::Device device(vulkanContext_->getVkDevice());
+
+        if (textureRegistry_.isDirty()) {
+            bindlessManager_.updateTextureDescriptors(device, textureRegistry_, frame.frameIndex);
+            textureRegistry_.clearDirty();
+        }
+
+        const auto& materialRegistry = systems_->scene().getSceneBuilder().getMaterialRegistry();
+        bindlessManager_.uploadMaterialData(device, materialRegistry, frame.frameIndex);
+    }
+
     // Command buffer recording
     VkCommandBuffer cmd = vulkanContext_->getCommandBuffer(frame.frameIndex);
     vk::CommandBuffer vkCmd(cmd);
@@ -604,6 +620,7 @@ void Renderer::createHDRPassRecorder() {
         sceneRes.treeRenderer = systems_->treeRenderer();
         sceneRes.treeLOD = systems_->treeLOD();
         sceneRes.impostorCull = systems_->impostorCull();
+        sceneRes.bindlessManager = bindlessManager_.isInitialized() ? &bindlessManager_ : nullptr;
 
         hdrPassRecorder_->registerDrawable(
             std::make_unique<SceneObjectsDrawable>(sceneRes),

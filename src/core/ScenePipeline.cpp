@@ -56,6 +56,13 @@ bool ScenePipeline::createDescriptorSetLayout(VkDevice device, const vk::raii::D
     return true;
 }
 
+void ScenePipeline::setBindlessLayouts(vk::DescriptorSetLayout textureSetLayout,
+                                        vk::DescriptorSetLayout materialSetLayout) {
+    bindlessTextureSetLayout_ = textureSetLayout;
+    bindlessMaterialSetLayout_ = materialSetLayout;
+    SDL_Log("ScenePipeline: Bindless layouts set (texture + material)");
+}
+
 bool ScenePipeline::createGraphicsPipeline(VulkanContext& context, VkRenderPass hdrRenderPass,
                                             const std::string& resourcePath) {
     if (!initialized_) {
@@ -67,8 +74,19 @@ bool ScenePipeline::createGraphicsPipeline(VulkanContext& context, VkRenderPass 
     VkExtent2D swapchainExtent = context.getVkSwapchainExtent();
 
     // Create pipeline layout using PipelineLayoutBuilder
-    auto layoutOpt = PipelineLayoutBuilder(context.getRaiiDevice())
-        .addDescriptorSetLayout(**descriptorSetLayout_)
+    // Set 0: per-frame global data, Set 1: bindless textures, Set 2: material SSBO
+    auto builder = PipelineLayoutBuilder(context.getRaiiDevice())
+        .addDescriptorSetLayout(**descriptorSetLayout_);
+
+    // Add bindless sets if available
+    if (bindlessTextureSetLayout_) {
+        builder.addDescriptorSetLayout(bindlessTextureSetLayout_);
+    }
+    if (bindlessMaterialSetLayout_) {
+        builder.addDescriptorSetLayout(bindlessMaterialSetLayout_);
+    }
+
+    auto layoutOpt = builder
         .addPushConstantRange<PushConstants>(
             vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment)
         .build();
@@ -83,12 +101,19 @@ bool ScenePipeline::createGraphicsPipeline(VulkanContext& context, VkRenderPass 
     auto bindingDescription = Vertex::getBindingDescription();
     auto attributeDescriptions = Vertex::getAttributeDescriptions();
 
+    // Select fragment shader variant: bindless (uses Sets 1+2) or legacy (fixed per-material bindings)
+    std::string fragShaderPath = bindlessTextureSetLayout_
+        ? resourcePath + "/shaders/shader_bindless.frag.spv"
+        : resourcePath + "/shaders/shader.frag.spv";
+    SDL_Log("ScenePipeline: Using %s fragment shader",
+            bindlessTextureSetLayout_ ? "bindless" : "legacy");
+
     VkPipeline rawPipeline = VK_NULL_HANDLE;
     GraphicsPipelineFactory factory(device);
     bool success = factory
         .applyPreset(GraphicsPipelineFactory::Preset::Default)
         .setShaders(resourcePath + "/shaders/shader.vert.spv",
-                    resourcePath + "/shaders/shader.frag.spv")
+                    fragShaderPath)
         .setVertexInput({bindingDescription},
                         {attributeDescriptions.begin(), attributeDescriptions.end()})
         .setRenderPass(hdrRenderPass)
