@@ -173,6 +173,8 @@ public:
     TerrainSystem& terrain() { return *terrainSystem_; }
     const TerrainSystem& terrain() const { return *terrainSystem_; }
     bool hasTerrain() const { return terrainSystem_ != nullptr; }
+    TerrainSystem* terrainPtr() { return terrainSystem_.get(); }
+    const TerrainSystem* terrainPtr() const { return terrainSystem_.get(); }
     void setTerrain(std::unique_ptr<TerrainSystem> system);
 
     // Sky and atmosphere
