@@ -187,18 +187,20 @@ bool Application::init(const std::string& title, int width, int height) {
     // Position camera at a settlement (Town 1: market town with coastal/agricultural features)
     // Settlement coords are 0-16384, world coords are centered (-8192 to +8192)
     {
-        auto& terrain = renderer_->getSystems().terrain();
         // Town 1 at settlement coords (9200, 3000) -> world coords (1008, -5192)
         const float settlementX = 9200.0f;
         const float settlementZ = 3000.0f;
         const float halfTerrain = 8192.0f;
         float cameraX = settlementX - halfTerrain;  // 1008
         float cameraZ = settlementZ - halfTerrain;  // -5192
-        // Pre-load tiles before querying height (tiles only preloaded around origin by default)
-        if (auto* tileCachePtr = terrain.getTileCache()) {
-            tileCachePtr->preloadTilesAround(cameraX, cameraZ, 600.0f);
+        float terrainY = 0.0f;
+        // Terrain may not be available yet (e.g. when terrain preprocessing was skipped)
+        if (auto* terrainPtr = renderer_->getSystems().terrainPtr()) {
+            if (auto* tileCachePtr = terrainPtr->getTileCache()) {
+                tileCachePtr->preloadTilesAround(cameraX, cameraZ, 600.0f);
+            }
+            terrainY = terrainPtr->getHeightAt(cameraX, cameraZ);
         }
-        float terrainY = terrain.getHeightAt(cameraX, cameraZ);
         camera.setPosition(glm::vec3(cameraX, terrainY + 2.0f, cameraZ));  // Eye level above ground
         camera.setYaw(45.0f);    // Look roughly northeast
         camera.setPitch(0.0f);   // Level view
