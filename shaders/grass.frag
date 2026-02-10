@@ -12,7 +12,6 @@
 
 #include "constants_common.glsl"
 #include "lighting_common.glsl"
-#include "shadow_common.glsl"
 #include "ubo_common.glsl"
 #include "atmosphere_common.glsl"
 #include "snow_common.glsl"
@@ -26,15 +25,13 @@
 // Grass system descriptor set layout:
 // binding 0: UBO (main rendering uniforms)
 // binding 1: instance buffer (SSBO) - vertex shader only
-// binding 2: shadow map (sampler)
 // binding 3: wind UBO - vertex shader only
 // binding 4: light buffer (SSBO)
 // binding 5: snow mask texture (sampler)
 // binding 6: cloud shadow map (sampler)
+// binding 7: screen-space shadow buffer
 // binding 10: snow UBO
 // binding 11: cloud shadow UBO
-
-layout(binding = BINDING_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;  // CSM shadow map
 
 // GPULight struct and light buffer are defined in dynamic_lights_common.glsl
 

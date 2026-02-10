@@ -10,7 +10,6 @@
 #include "../bindings.glsl"
 #include "../constants_common.glsl"
 #include "../lighting_common.glsl"
-#include "../shadow_common.glsl"
 #include "../snow_common.glsl"
 #include "../cloud_shadow_common.glsl"
 #include "../terrain_liquid_common.glsl"
@@ -51,7 +50,6 @@ layout(std140, binding = BINDING_TERRAIN_UBO) uniform TerrainUniforms {
 // Textures
 layout(binding = BINDING_TERRAIN_HEIGHT_MAP) uniform sampler2D heightMap;
 layout(binding = BINDING_TERRAIN_ALBEDO) uniform sampler2D terrainAlbedo;
-layout(binding = BINDING_TERRAIN_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;
 layout(binding = BINDING_TERRAIN_FAR_LOD_GRASS) uniform sampler2D grassFarLODTexture;  // Far LOD grass texture
 layout(binding = BINDING_TERRAIN_SNOW_MASK) uniform sampler2D snowMaskTexture;     // World-space snow coverage (legacy)
 

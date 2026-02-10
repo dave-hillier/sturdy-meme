@@ -21,7 +21,6 @@
 #include "dynamic_lights_common.glsl"
 
 layout(binding = BINDING_DIFFUSE_TEX) uniform sampler2D texSampler;
-layout(binding = BINDING_SHADOW_MAP) uniform sampler2DArrayShadow shadowMapArray;  // Changed to array for CSM
 layout(binding = BINDING_NORMAL_MAP) uniform sampler2D normalMap;
 layout(binding = BINDING_EMISSIVE_MAP) uniform sampler2D emissiveMap;
 layout(binding = BINDING_POINT_SHADOW_MAP) uniform samplerCubeArrayShadow pointShadowMaps;  // Point light cube shadow maps
