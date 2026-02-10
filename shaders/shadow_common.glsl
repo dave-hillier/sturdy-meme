@@ -52,7 +52,9 @@ float sampleShadowForCascade(
     float cosTheta = max(dot(normal, lightDir), 0.0);
     float baseBias = 0.0005;
     float cascadeBias = baseBias * (1.0 + float(cascade) * 0.5);
-    float slopeBias = cascadeBias * tan(acos(cosTheta));
+    // Algebraic equivalent of tan(acos(x)) = sqrt(1-x²)/x, avoids trig functions
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    float slopeBias = cascadeBias * sinTheta / max(cosTheta, 0.001);
     float bias = clamp(slopeBias, 0.0, 0.01);
 
     // PCF 3x3 sampling from array texture

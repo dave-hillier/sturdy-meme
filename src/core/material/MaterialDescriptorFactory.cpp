@@ -46,6 +46,13 @@ void MaterialDescriptorFactory::writeCommonBindings(
     if (common.windBuffer != VK_NULL_HANDLE) {
         writer.writeBuffer(17, common.windBuffer, 0, common.windBufferSize);
     }
+
+    // Binding 21: Screen-space shadow buffer (use placeholder if not available)
+    if (common.screenShadowView != VK_NULL_HANDLE) {
+        writer.writeImage(21, common.screenShadowView, common.screenShadowSampler);
+    } else if (common.placeholderTextureView != VK_NULL_HANDLE) {
+        writer.writeImage(21, common.placeholderTextureView, common.placeholderTextureSampler);
+    }
 }
 
 void MaterialDescriptorFactory::writeDescriptorSet(

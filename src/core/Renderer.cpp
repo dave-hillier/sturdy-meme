@@ -49,6 +49,7 @@
 #include "npc/NPCSimulation.h"
 #include "DebugLineSystem.h"
 #include "HiZSystem.h"
+#include "ScreenSpaceShadowSystem.h"
 #include "GPUSceneBuffer.h"
 #include "culling/GPUCullPass.h"
 #include "interfaces/IDebugControl.h"
@@ -390,6 +391,10 @@ bool Renderer::createDescriptorSets() {
         // Placeholder texture for unused PBR bindings (13-16)
         common.placeholderTextureView = systems_->scene().getSceneBuilder().getWhiteTexture()->getImageView();
         common.placeholderTextureSampler = systems_->scene().getSceneBuilder().getWhiteTexture()->getSampler();
+        if (systems_->hasScreenSpaceShadow()) {
+            common.screenShadowView = systems_->screenSpaceShadow()->getShadowBufferView();
+            common.screenShadowSampler = systems_->screenSpaceShadow()->getShadowBufferSampler();
+        }
         return common;
     };
 
@@ -915,7 +920,7 @@ bool Renderer::initInternalAsync(const InitInfo& info) {
 
 bool Renderer::pollAsyncInit() {
     if (asyncInitComplete_) {
-        return true;  // Already complete
+        return !asyncInitFailed_;  // Return false if init failed
     }
 
     if (!asyncLoader_) {
@@ -940,7 +945,8 @@ bool Renderer::pollAsyncInit() {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                         "Async init failed: %s", asyncLoader_->getErrorMessage().c_str());
             asyncInitComplete_ = true;
-            return false;  // Indicate failure
+            asyncInitFailed_ = true;
+            return false;  // Indicate failure consistently
         }
 
         // Finalize initialization (quick synchronous steps)

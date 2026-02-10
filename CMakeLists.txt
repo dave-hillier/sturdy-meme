@@ -171,6 +171,7 @@ set(SOURCES
     src/postprocess/BilateralGridSystem.cpp
     src/postprocess/SSRSystem.cpp
     src/postprocess/HiZSystem.cpp
+    src/postprocess/ScreenSpaceShadowSystem.cpp
     # GPU Culling
     src/core/GPUSceneBuffer.cpp
     src/culling/GPUCullPass.cpp
@@ -850,6 +851,7 @@ if(SHADER_COMPILE_CMD)
         froxel_update.comp froxel_integrate.comp
         weather.comp weather.vert weather.frag
         leaf.comp leaf.vert leaf.frag
+        shadow_resolve.comp
         snow_accumulation.comp
         bilateral_grid_build.comp bilateral_grid_blur.comp
         tree.vert tree.frag

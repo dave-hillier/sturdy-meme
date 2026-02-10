@@ -26,12 +26,12 @@ bool FrameGraphBuilder::build(
     computeConfig.terrainEnabled = state.terrainEnabled;
     auto computeIds = ComputePasses::addPasses(frameGraph, systems, computeConfig);
 
-    // Shadow pass
+    // Shadow passes (shadow map + screen-space resolve)
     ShadowPasses::Config shadowConfig;
     shadowConfig.lastSunIntensity = state.lastSunIntensity;
     shadowConfig.perfToggles = state.perfToggles;
     shadowConfig.recordShadowPass = callbacks.recordShadowPass;
-    auto shadow = ShadowPasses::addShadowPass(frameGraph, systems, shadowConfig);
+    auto shadowIds = ShadowPasses::addPasses(frameGraph, systems, shadowConfig);
 
     // Water passes (GBuffer, SSR, tile cull)
     WaterPasses::Config waterConfig;
@@ -56,7 +56,7 @@ bool FrameGraphBuilder::build(
 
     // ===== WIRE DEPENDENCIES =====
     // Shadow and Froxel depend on Compute
-    frameGraph.addDependency(computeIds.compute, shadow);
+    frameGraph.addDependency(computeIds.compute, shadowIds.shadow);
     frameGraph.addDependency(computeIds.compute, computeIds.froxel);
     frameGraph.addDependency(computeIds.compute, waterIds.waterGBuffer);
 
@@ -65,8 +65,17 @@ bool FrameGraphBuilder::build(
         frameGraph.addDependency(computeIds.compute, computeIds.gpuCull);
     }
 
-    // HDR depends on Shadow, Froxel, Water GBuffer, and GPU Cull
-    frameGraph.addDependency(shadow, hdr);
+    // Shadow resolve depends on shadow map pass
+    if (shadowIds.shadowResolve != FrameGraph::INVALID_PASS) {
+        frameGraph.addDependency(shadowIds.shadow, shadowIds.shadowResolve);
+    }
+
+    // HDR depends on Shadow (or ShadowResolve if available), Froxel, Water GBuffer, and GPU Cull
+    if (shadowIds.shadowResolve != FrameGraph::INVALID_PASS) {
+        frameGraph.addDependency(shadowIds.shadowResolve, hdr);
+    } else {
+        frameGraph.addDependency(shadowIds.shadow, hdr);
+    }
     frameGraph.addDependency(computeIds.froxel, hdr);
     frameGraph.addDependency(waterIds.waterGBuffer, hdr);
     if (computeIds.gpuCull != FrameGraph::INVALID_PASS) {

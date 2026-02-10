@@ -299,6 +299,7 @@ bool TerrainSystem::createRenderDescriptorSetLayout() {
         .addBinding(22, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)          // caustics UBO
         .addBinding(29, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)          // liquid UBO (composable materials)
         .addBinding(30, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT)          // material layer UBO (composable materials)
+        .addBinding(31, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT)  // screen-space shadow buffer
         .build();
 
     return renderDescriptorSetLayout != VK_NULL_HANDLE;
@@ -533,6 +534,14 @@ void TerrainSystem::updateDescriptorSets(vk::Device device,
         // Material Layer UBO (binding 30) - per-frame buffer for layer blending
         constexpr VkDeviceSize materialLayerUBOSize = 336;  // MaterialLayerUBO size
         writer.writeBuffer(30, buffers->getMaterialLayerUniformBuffer(i), 0, materialLayerUBOSize);
+
+        // Screen-space shadow buffer (binding 31) - use terrain albedo as placeholder if not available
+        if (screenShadowView_) {
+            writer.writeImage(31, screenShadowView_, screenShadowSampler_);
+        } else {
+            writer.writeImage(31, textures->getAlbedoView(), textures->getAlbedoSampler(),
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
 
         writer.update();
     }

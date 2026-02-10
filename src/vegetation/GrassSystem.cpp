@@ -323,9 +323,10 @@ bool GrassSystem::createGraphicsDescriptorSetLayout(SystemLifecycleHelper::Pipel
     // binding 4: light buffer (SSBO)
     // binding 5: snow mask texture (sampler)
     // binding 6: cloud shadow map (sampler)
+    // binding 7: screen-space shadow buffer (sampler)
     // binding 10: snow UBO
     // binding 11: cloud shadow UBO
-    const std::array<DescriptorBindingInfo, 9> bindings = {{
+    const std::array<DescriptorBindingInfo, 10> bindings = {{
         {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
          VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT},
         {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT},
@@ -334,6 +335,7 @@ bool GrassSystem::createGraphicsDescriptorSetLayout(SystemLifecycleHelper::Pipel
         {4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT},
         {5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT},
         {6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT},
+        {7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT},
         {10, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT},
         {11, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT}
     }};
@@ -701,6 +703,12 @@ void GrassSystem::updateDescriptorSets(vk::Device dev, const std::vector<vk::Buf
         graphicsWriter.writeBuffer(3, windBuffers[0], 0, 32);  // sizeof(WindUniforms)
         graphicsWriter.writeBuffer(4, lightBuffersParam[0], 0, VK_WHOLE_SIZE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
         graphicsWriter.writeImage(6, cloudShadowMapView, cloudShadowMapSampler);
+        // Screen shadow buffer (binding 7) - use cloud shadow map as fallback if not available
+        if (screenShadowView_) {
+            graphicsWriter.writeImage(7, screenShadowView_, screenShadowSampler_);
+        } else {
+            graphicsWriter.writeImage(7, cloudShadowMapView, cloudShadowMapSampler);
+        }
         graphicsWriter.writeBuffer(10, snowBuffersParam[0], 0, sizeof(SnowUBO));
         graphicsWriter.writeBuffer(11, cloudShadowBuffersParam[0], 0, sizeof(CloudShadowUBO));
         graphicsWriter.update();

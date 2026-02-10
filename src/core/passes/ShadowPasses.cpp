@@ -3,15 +3,18 @@
 #include "RenderContext.h"
 #include "Profiler.h"
 #include "PerformanceToggles.h"
+#include "ScreenSpaceShadowSystem.h"
 
 namespace ShadowPasses {
 
-FrameGraph::PassId addShadowPass(FrameGraph& graph, RendererSystems& systems, const Config& config) {
+PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& config) {
+    PassIds ids;
     float* lastSunIntensity = config.lastSunIntensity;
     PerformanceToggles* perfToggles = config.perfToggles;
     auto recordFn = config.recordShadowPass;
 
-    return graph.addPass({
+    // Shadow map rendering pass
+    ids.shadow = graph.addPass({
         .name = "Shadow",
         .execute = [&systems, lastSunIntensity, perfToggles, recordFn](FrameGraph::RenderContext& ctx) {
             RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
@@ -29,6 +32,25 @@ FrameGraph::PassId addShadowPass(FrameGraph& graph, RendererSystems& systems, co
         .mainThreadOnly = true,
         .priority = 50
     });
+
+    // Screen-space shadow resolve pass (compute)
+    if (systems.hasScreenSpaceShadow()) {
+        ids.shadowResolve = graph.addPass({
+            .name = "ShadowResolve",
+            .execute = [&systems, lastSunIntensity, perfToggles](FrameGraph::RenderContext& ctx) {
+                if (!systems.hasScreenSpaceShadow()) return;
+                if (*lastSunIntensity <= 0.001f || !perfToggles->shadowPass) return;
+                systems.profiler().beginGpuZone(ctx.commandBuffer, "ShadowResolve");
+                systems.screenSpaceShadow()->record(ctx.commandBuffer, ctx.frameIndex);
+                systems.profiler().endGpuZone(ctx.commandBuffer, "ShadowResolve");
+            },
+            .canUseSecondary = false,
+            .mainThreadOnly = true,
+            .priority = 45  // Between shadow (50) and HDR (30)
+        });
+    }
+
+    return ids;
 }
 
 } // namespace ShadowPasses

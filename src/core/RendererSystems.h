@@ -91,6 +91,7 @@ class NPCRenderer;
 class TimeSystem;
 class CelestialCalculator;
 class BilateralGridSystem;
+class ScreenSpaceShadowSystem;
 class DeferredTerrainObjects;
 struct EnvironmentSettings;
 struct TerrainConfig;
@@ -166,6 +167,7 @@ public:
     void setShadow(std::unique_ptr<ShadowSystem> system);
     TerrainSystem& terrain() { return *terrainSystem_; }
     const TerrainSystem& terrain() const { return *terrainSystem_; }
+    bool hasTerrain() const { return terrainSystem_ != nullptr; }
     void setTerrain(std::unique_ptr<TerrainSystem> system);
 
     // Sky and atmosphere
@@ -276,6 +278,12 @@ public:
     const GPUCullPass& gpuCullPass() const { return *gpuCullPass_; }
     bool hasGPUCullPass() const { return gpuCullPass_ != nullptr; }
     void setGPUCullPass(std::unique_ptr<GPUCullPass> pass);
+
+    // Screen-space shadow buffer
+    ScreenSpaceShadowSystem* screenSpaceShadow() { return screenSpaceShadowSystem_.get(); }
+    const ScreenSpaceShadowSystem* screenSpaceShadow() const { return screenSpaceShadowSystem_.get(); }
+    bool hasScreenSpaceShadow() const { return screenSpaceShadowSystem_ != nullptr; }
+    void setScreenSpaceShadow(std::unique_ptr<ScreenSpaceShadowSystem> system);
 
     // Scene and resources
     SceneManager& scene() { return *sceneManager_; }
@@ -544,6 +552,9 @@ private:
     std::unique_ptr<HiZSystem> hiZSystem_;
     std::unique_ptr<GPUSceneBuffer> gpuSceneBuffer_;
     std::unique_ptr<GPUCullPass> gpuCullPass_;
+
+    // Screen-space shadow buffer
+    std::unique_ptr<ScreenSpaceShadowSystem> screenSpaceShadowSystem_;
 
     // Infrastructure (needed throughout)
     std::unique_ptr<SceneManager> sceneManager_;

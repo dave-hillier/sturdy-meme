@@ -6,6 +6,7 @@
 #include "CelestialCalculator.h"  // Also provides DateTime
 #include "WaterSystem.h"
 #include "ShadowSystem.h"
+#include "ScreenSpaceShadowSystem.h"
 #include "WeatherSystem.h"
 #include "PostProcessSystem.h"
 #include "SceneManager.h"
@@ -37,6 +38,22 @@ UBOUpdater::Result UBOUpdater::update(
 
     // Update cascade matrices via shadow system
     systems.shadow().updateCascadeMatrices(lighting.sunDir, camera);
+
+    // Update screen-space shadow resolve uniforms
+    if (systems.hasScreenSpaceShadow()) {
+        const auto& cascadeMatrices = systems.shadow().getCascadeMatrices();
+        const auto& cascadeSplitDepths = systems.shadow().getCascadeSplitDepths();
+        glm::vec4 splits(cascadeSplitDepths[1], cascadeSplitDepths[2],
+                         cascadeSplitDepths[3], cascadeSplitDepths[4]);
+        systems.screenSpaceShadow()->updatePerFrame(
+            frameIndex,
+            camera.getViewMatrix(),
+            camera.getProjectionMatrix(),
+            cascadeMatrices.data(),
+            splits,
+            lighting.sunDir,
+            static_cast<float>(systems.shadow().getShadowMapSize()));
+    }
 
     // Build UBO data via UBOBuilder (pure calculation)
     // Get cloud parameters from EnvironmentControlSubsystem (authoritative source)

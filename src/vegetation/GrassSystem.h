@@ -155,6 +155,12 @@ public:
     // Set snow mask texture for snow on grass blades
     void setSnowMask(vk::Device device, vk::ImageView snowMaskView, vk::Sampler snowMaskSampler);
 
+    // Set screen-space shadow buffer for pre-computed shadows
+    void setScreenShadowBuffer(vk::ImageView view, vk::Sampler sampler) {
+        screenShadowView_ = view;
+        screenShadowSampler_ = sampler;
+    }
+
     // Tiled grass mode accessors
     bool isTiledModeEnabled() const { return tiledModeEnabled_; }
     void setTiledModeEnabled(bool enabled) { tiledModeEnabled_ = enabled; }
@@ -247,6 +253,10 @@ private:
     // Terrain heightmap for grass placement (stored for compute descriptor updates)
     vk::ImageView terrainHeightMapView_;
     vk::Sampler terrainHeightMapSampler_;
+
+    // Screen-space shadow buffer (optional, from ScreenSpaceShadowSystem)
+    vk::ImageView screenShadowView_;
+    vk::Sampler screenShadowSampler_;
 
     // Tile cache resources for high-res terrain sampling
     vk::ImageView tileArrayView_;

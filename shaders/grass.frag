@@ -44,6 +44,9 @@ layout(binding = BINDING_GRASS_SNOW_MASK) uniform sampler2D snowMaskTexture;
 // Cloud shadow map (R16F: 0=shadow, 1=no shadow)
 layout(binding = BINDING_GRASS_CLOUD_SHADOW) uniform sampler2D cloudShadowMap;
 
+// Screen-space pre-computed shadow buffer
+layout(binding = BINDING_GRASS_SCREEN_SHADOW) uniform sampler2D screenShadowBuffer;
+
 layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in float fragHeight;
@@ -104,11 +107,9 @@ void main() {
     vec3 sunL = normalize(ubo.toSunDirection.xyz);
     float terrainShadow = 1.0;
     if (ubo.shadowsEnabled > 0.5) {
-        terrainShadow = calculateCascadedShadow(
-            fragWorldPos, N, sunL,
-            ubo.view, ubo.cascadeSplits, ubo.cascadeViewProj,
-            ubo.shadowMapSize, shadowMapArray
-        );
+        // Sample pre-computed screen-space shadow buffer (resolved in compute pass)
+        vec2 screenUV = gl_FragCoord.xy / vec2(textureSize(screenShadowBuffer, 0));
+        terrainShadow = texture(screenShadowBuffer, screenUV).r;
     }
 
     // Cloud shadows - sample from cloud shadow map

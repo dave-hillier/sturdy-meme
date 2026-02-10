@@ -19,6 +19,11 @@ struct Config {
     ShadowRecordFn recordShadowPass;
 };
 
-FrameGraph::PassId addShadowPass(FrameGraph& graph, RendererSystems& systems, const Config& config);
+struct PassIds {
+    FrameGraph::PassId shadow = FrameGraph::INVALID_PASS;
+    FrameGraph::PassId shadowResolve = FrameGraph::INVALID_PASS;
+};
+
+PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& config);
 
 } // namespace ShadowPasses
