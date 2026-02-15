@@ -509,6 +509,7 @@
 #define BINDING_VISBUF_INSTANCE_BUFFER     5   // Instance data (SSBO)
 #define BINDING_VISBUF_MATERIAL_BUFFER     6   // Material data (SSBO)
 #define BINDING_VISBUF_UNIFORMS            7   // Resolve uniforms (UBO)
+#define BINDING_VISBUF_TEXTURE_ARRAY       8   // Material texture array (sampler2DArray)
 
 // Visibility Buffer Debug Visualization (fullscreen pass)
 #define BINDING_VISBUF_DEBUG_INPUT         0   // Visibility buffer input (usampler2D)

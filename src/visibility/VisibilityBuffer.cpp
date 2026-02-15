@@ -80,6 +80,11 @@ bool VisibilityBuffer::initInternal(const InitInfo& info) {
         return false;
     }
 
+    if (!createResolvePipeline()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "VisibilityBuffer: Failed to create resolve pipeline");
+        return false;
+    }
+
     SDL_Log("VisibilityBuffer: Initialized (%ux%u, %u frames)",
             extent_.width, extent_.height, framesInFlight_);
     return true;
@@ -618,11 +623,174 @@ void VisibilityBuffer::destroyDebugPipeline() {
 // ============================================================================
 
 bool VisibilityBuffer::createResolvePipeline() {
-    // Will be created when needed (Phase 2)
+    if (!raiiDevice_) return false;
+
+    // Create depth sampler for the resolve pass
+    auto depthSamplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eNearest)
+        .setMinFilter(vk::Filter::eNearest)
+        .setAddressModeU(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeV(vk::SamplerAddressMode::eClampToEdge)
+        .setAddressModeW(vk::SamplerAddressMode::eClampToEdge);
+
+    try {
+        depthSampler_.emplace(*raiiDevice_, depthSamplerInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VisibilityBuffer: Failed to create depth sampler: %s", e.what());
+        return false;
+    }
+
+    // Create texture sampler for material textures
+    auto texSamplerInfo = vk::SamplerCreateInfo{}
+        .setMagFilter(vk::Filter::eLinear)
+        .setMinFilter(vk::Filter::eLinear)
+        .setMipmapMode(vk::SamplerMipmapMode::eLinear)
+        .setAddressModeU(vk::SamplerAddressMode::eRepeat)
+        .setAddressModeV(vk::SamplerAddressMode::eRepeat)
+        .setAddressModeW(vk::SamplerAddressMode::eRepeat)
+        .setMaxAnisotropy(1.0f)
+        .setMaxLod(VK_LOD_CLAMP_NONE);
+
+    try {
+        textureSampler_.emplace(*raiiDevice_, texSamplerInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VisibilityBuffer: Failed to create texture sampler: %s", e.what());
+        return false;
+    }
+
+    // Descriptor set layout: 9 bindings matching visbuf_resolve.comp
+    std::array<vk::DescriptorSetLayoutBinding, 9> bindings;
+
+    // Binding 0: Visibility buffer (uimage2D, storage image)
+    bindings[0] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_VISBUF_VISIBILITY)
+        .setDescriptorType(vk::DescriptorType::eStorageImage)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
+
+    // Binding 1: Depth buffer (sampler2D)
+    bindings[1] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_VISBUF_DEPTH)
+        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
+
+    // Binding 2: HDR output (image2D, storage image)
+    bindings[2] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_VISBUF_HDR_OUTPUT)
+        .setDescriptorType(vk::DescriptorType::eStorageImage)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
+
+    // Binding 3: Vertex buffer (SSBO)
+    bindings[3] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_VISBUF_VERTEX_BUFFER)
+        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
+
+    // Binding 4: Index buffer (SSBO)
+    bindings[4] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_VISBUF_INDEX_BUFFER)
+        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
+
+    // Binding 5: Instance buffer (SSBO)
+    bindings[5] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_VISBUF_INSTANCE_BUFFER)
+        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
+
+    // Binding 6: Material buffer (SSBO)
+    bindings[6] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_VISBUF_MATERIAL_BUFFER)
+        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
+
+    // Binding 7: Resolve uniforms (UBO)
+    bindings[7] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_VISBUF_UNIFORMS)
+        .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
+
+    // Binding 8: Material texture array (sampler2DArray)
+    bindings[8] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_VISBUF_TEXTURE_ARRAY)
+        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
+
+    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}.setBindings(bindings);
+
+    try {
+        resolveDescSetLayout_.emplace(*raiiDevice_, layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VisibilityBuffer: Failed to create resolve desc set layout: %s", e.what());
+        return false;
+    }
+
+    // Pipeline layout (no push constants needed)
+    vk::DescriptorSetLayout vkResolveLayout(**resolveDescSetLayout_);
+    auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}
+        .setSetLayouts(vkResolveLayout);
+
+    vk::Device vkDevice(device_);
+    resolvePipelineLayout_ = static_cast<VkPipelineLayout>(
+        vkDevice.createPipelineLayout(pipelineLayoutInfo));
+
+    // Load compute shader
+    auto compModule = ShaderLoader::loadShaderModule(
+        vkDevice, shaderPath_ + "/visbuf_resolve.comp.spv");
+
+    if (!compModule) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VisibilityBuffer: Failed to load resolve compute shader");
+        return false;
+    }
+
+    auto stageInfo = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eCompute)
+        .setModule(*compModule)
+        .setPName("main");
+
+    auto pipelineInfo = vk::ComputePipelineCreateInfo{}
+        .setStage(stageInfo)
+        .setLayout(resolvePipelineLayout_);
+
+    auto result = vkDevice.createComputePipeline(nullptr, pipelineInfo);
+    if (result.result != vk::Result::eSuccess) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VisibilityBuffer: Failed to create resolve compute pipeline");
+        vkDevice.destroyShaderModule(*compModule);
+        return false;
+    }
+    resolvePipeline_ = static_cast<VkPipeline>(result.value);
+
+    vkDevice.destroyShaderModule(*compModule);
+
+    // Allocate descriptor sets (one per frame in flight)
+    VkDescriptorSetLayout rawResolveLayout = **resolveDescSetLayout_;
+    resolveDescSets_ = descriptorPool_->allocate(rawResolveLayout, framesInFlight_);
+    if (resolveDescSets_.size() != framesInFlight_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VisibilityBuffer: Failed to allocate resolve descriptor sets");
+        return false;
+    }
+
+    SDL_Log("VisibilityBuffer: Resolve pipeline created (9 bindings)");
     return true;
 }
 
 void VisibilityBuffer::destroyResolvePipeline() {
+    depthSampler_.reset();
+    textureSampler_.reset();
     if (resolvePipeline_ != VK_NULL_HANDLE) {
         vkDestroyPipeline(device_, resolvePipeline_, nullptr);
         resolvePipeline_ = VK_NULL_HANDLE;
@@ -632,6 +800,7 @@ void VisibilityBuffer::destroyResolvePipeline() {
         resolvePipelineLayout_ = VK_NULL_HANDLE;
     }
     resolveDescSetLayout_.reset();
+    resolveDescSets_.clear();
 }
 
 VkPipeline VisibilityBuffer::getResolvePipeline() const {
@@ -792,10 +961,16 @@ void VisibilityBuffer::recordClear(VkCommandBuffer cmd) {
                           &clearColor, 1, &range);
 }
 
+void VisibilityBuffer::setResolveBuffers(const ResolveBuffers& buffers) {
+    resolveBuffers_ = buffers;
+    resolveDescSetsDirty_ = true;
+}
+
 void VisibilityBuffer::updateResolveUniforms(uint32_t frameIndex,
                                               const glm::mat4& view, const glm::mat4& proj,
                                               const glm::vec3& cameraPos,
-                                              const glm::vec3& sunDir, float sunIntensity) {
+                                              const glm::vec3& sunDir, float sunIntensity,
+                                              uint32_t materialCount) {
     VisBufResolveUniforms uniforms{};
     uniforms.viewMatrix = view;
     uniforms.projMatrix = proj;
@@ -808,6 +983,7 @@ void VisibilityBuffer::updateResolveUniforms(uint32_t frameIndex,
         1.0f / static_cast<float>(extent_.height)
     );
     uniforms.lightDirection = glm::vec4(sunDir, sunIntensity);
+    uniforms.materialCount = materialCount > 0 ? materialCount : resolveBuffers_.materialCount;
 
     void* mapped = resolveUniformBuffers_.mappedPointers[frameIndex];
     if (mapped) {
@@ -819,10 +995,218 @@ void VisibilityBuffer::updateResolveUniforms(uint32_t frameIndex,
 
 void VisibilityBuffer::recordResolvePass(VkCommandBuffer cmd, uint32_t frameIndex,
                                           VkImageView hdrOutputView) {
-    // Phase 2 implementation - for now this is a no-op
-    (void)cmd;
-    (void)frameIndex;
-    (void)hdrOutputView;
+    if (resolvePipeline_ == VK_NULL_HANDLE) {
+        return; // Pipeline not yet created
+    }
+
+    if (resolveDescSets_.empty() || frameIndex >= resolveDescSets_.size()) {
+        return;
+    }
+
+    // Update descriptor set if buffers changed or HDR output changed
+    if (resolveDescSetsDirty_ || hdrOutputView != VK_NULL_HANDLE) {
+        VkDescriptorSet descSet = resolveDescSets_[frameIndex];
+
+        // Build all descriptor writes
+        std::vector<VkWriteDescriptorSet> writes;
+        writes.reserve(9);
+
+        // Binding 0: Visibility buffer (storage image)
+        VkDescriptorImageInfo visImageInfo{};
+        visImageInfo.imageView = visibilityView_;
+        visImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkWriteDescriptorSet visWrite{};
+        visWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        visWrite.dstSet = descSet;
+        visWrite.dstBinding = BINDING_VISBUF_VISIBILITY;
+        visWrite.descriptorCount = 1;
+        visWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        visWrite.pImageInfo = &visImageInfo;
+        writes.push_back(visWrite);
+
+        // Binding 1: Depth buffer (combined image sampler)
+        VkDescriptorImageInfo depthImageInfo{};
+        depthImageInfo.sampler = depthSampler_ ? **depthSampler_ : VK_NULL_HANDLE;
+        depthImageInfo.imageView = depthView_;
+        depthImageInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet depthWrite{};
+        depthWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        depthWrite.dstSet = descSet;
+        depthWrite.dstBinding = BINDING_VISBUF_DEPTH;
+        depthWrite.descriptorCount = 1;
+        depthWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        depthWrite.pImageInfo = &depthImageInfo;
+        writes.push_back(depthWrite);
+
+        // Binding 2: HDR output (storage image)
+        VkDescriptorImageInfo hdrImageInfo{};
+        hdrImageInfo.imageView = hdrOutputView;
+        hdrImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkWriteDescriptorSet hdrWrite{};
+        hdrWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        hdrWrite.dstSet = descSet;
+        hdrWrite.dstBinding = BINDING_VISBUF_HDR_OUTPUT;
+        hdrWrite.descriptorCount = 1;
+        hdrWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        hdrWrite.pImageInfo = &hdrImageInfo;
+        writes.push_back(hdrWrite);
+
+        // Binding 3: Vertex buffer (SSBO)
+        VkDescriptorBufferInfo vertexBufInfo{};
+        vertexBufInfo.buffer = resolveBuffers_.vertexBuffer;
+        vertexBufInfo.offset = 0;
+        vertexBufInfo.range = resolveBuffers_.vertexBufferSize;
+
+        if (resolveBuffers_.vertexBuffer != VK_NULL_HANDLE) {
+            VkWriteDescriptorSet vertWrite{};
+            vertWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            vertWrite.dstSet = descSet;
+            vertWrite.dstBinding = BINDING_VISBUF_VERTEX_BUFFER;
+            vertWrite.descriptorCount = 1;
+            vertWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            vertWrite.pBufferInfo = &vertexBufInfo;
+            writes.push_back(vertWrite);
+        }
+
+        // Binding 4: Index buffer (SSBO)
+        VkDescriptorBufferInfo indexBufInfo{};
+        indexBufInfo.buffer = resolveBuffers_.indexBuffer;
+        indexBufInfo.offset = 0;
+        indexBufInfo.range = resolveBuffers_.indexBufferSize;
+
+        if (resolveBuffers_.indexBuffer != VK_NULL_HANDLE) {
+            VkWriteDescriptorSet idxWrite{};
+            idxWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            idxWrite.dstSet = descSet;
+            idxWrite.dstBinding = BINDING_VISBUF_INDEX_BUFFER;
+            idxWrite.descriptorCount = 1;
+            idxWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            idxWrite.pBufferInfo = &indexBufInfo;
+            writes.push_back(idxWrite);
+        }
+
+        // Binding 5: Instance buffer (SSBO)
+        VkDescriptorBufferInfo instanceBufInfo{};
+        instanceBufInfo.buffer = resolveBuffers_.instanceBuffer;
+        instanceBufInfo.offset = 0;
+        instanceBufInfo.range = resolveBuffers_.instanceBufferSize;
+
+        if (resolveBuffers_.instanceBuffer != VK_NULL_HANDLE) {
+            VkWriteDescriptorSet instWrite{};
+            instWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            instWrite.dstSet = descSet;
+            instWrite.dstBinding = BINDING_VISBUF_INSTANCE_BUFFER;
+            instWrite.descriptorCount = 1;
+            instWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            instWrite.pBufferInfo = &instanceBufInfo;
+            writes.push_back(instWrite);
+        }
+
+        // Binding 6: Material buffer (SSBO)
+        VkDescriptorBufferInfo materialBufInfo{};
+        materialBufInfo.buffer = resolveBuffers_.materialBuffer;
+        materialBufInfo.offset = 0;
+        materialBufInfo.range = resolveBuffers_.materialBufferSize;
+
+        if (resolveBuffers_.materialBuffer != VK_NULL_HANDLE) {
+            VkWriteDescriptorSet matWrite{};
+            matWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            matWrite.dstSet = descSet;
+            matWrite.dstBinding = BINDING_VISBUF_MATERIAL_BUFFER;
+            matWrite.descriptorCount = 1;
+            matWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            matWrite.pBufferInfo = &materialBufInfo;
+            writes.push_back(matWrite);
+        }
+
+        // Binding 7: Resolve uniforms (UBO)
+        VkDescriptorBufferInfo uniformBufInfo{};
+        uniformBufInfo.buffer = resolveUniformBuffers_.buffers[frameIndex];
+        uniformBufInfo.offset = 0;
+        uniformBufInfo.range = sizeof(VisBufResolveUniforms);
+
+        VkWriteDescriptorSet uboWrite{};
+        uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        uboWrite.dstSet = descSet;
+        uboWrite.dstBinding = BINDING_VISBUF_UNIFORMS;
+        uboWrite.descriptorCount = 1;
+        uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uboWrite.pBufferInfo = &uniformBufInfo;
+        writes.push_back(uboWrite);
+
+        // Binding 8: Material texture array (combined image sampler)
+        VkDescriptorImageInfo texArrayInfo{};
+        if (resolveBuffers_.textureArraySampler != VK_NULL_HANDLE) {
+            texArrayInfo.sampler = resolveBuffers_.textureArraySampler;
+        } else if (textureSampler_) {
+            texArrayInfo.sampler = static_cast<VkSampler>(**textureSampler_);
+        }
+        texArrayInfo.imageView = resolveBuffers_.textureArrayView;
+        texArrayInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        if (resolveBuffers_.textureArrayView != VK_NULL_HANDLE) {
+            VkWriteDescriptorSet texWrite{};
+            texWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            texWrite.dstSet = descSet;
+            texWrite.dstBinding = BINDING_VISBUF_TEXTURE_ARRAY;
+            texWrite.descriptorCount = 1;
+            texWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            texWrite.pImageInfo = &texArrayInfo;
+            writes.push_back(texWrite);
+        }
+
+        if (!writes.empty()) {
+            vkUpdateDescriptorSets(device_,
+                                   static_cast<uint32_t>(writes.size()),
+                                   writes.data(), 0, nullptr);
+        }
+
+        resolveDescSetsDirty_ = false;
+    }
+
+    // Transition visibility buffer to GENERAL for storage image read
+    {
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.image = visibilityImage_.get();
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.layerCount = 1;
+
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+
+    // Bind pipeline and descriptor set
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, resolvePipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                             resolvePipelineLayout_, 0, 1,
+                             &resolveDescSets_[frameIndex], 0, nullptr);
+
+    // Dispatch: 8x8 workgroup size
+    uint32_t groupsX = (extent_.width + 7) / 8;
+    uint32_t groupsY = (extent_.height + 7) / 8;
+    vkCmdDispatch(cmd, groupsX, groupsY, 1);
+
+    // Barrier: resolve writes -> subsequent reads of HDR output
+    VkMemoryBarrier memBarrier{};
+    memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        0, 1, &memBarrier, 0, nullptr, 0, nullptr);
 }
 
 void VisibilityBuffer::recordDebugVisualization(VkCommandBuffer cmd, uint32_t debugMode) {

@@ -164,8 +164,7 @@ Separate system for non-clustered objects: per-object sphere+AABB frustum test, 
 **Gaps**:
 - **V-buffer width**: 32-bit vs Nanite's 64-bit. The 9-bit instance limit (512) and 23-bit triangle limit (~8M) are restrictive. Nanite uses 30 bits depth + 27 bits cluster + 7 bits triangle ID. The 64-bit format allows depth testing in the same atomic, enabling software rasterization.
 - **Software rasterizer**: Not implemented. This is Nanite's biggest performance win — a compute shader that does scan-line rasterization with 64-bit atomic compare-and-swap, ~3x faster than hardware for sub-pixel triangles (which are 90%+ of clusters in a Nanite scene). The engine uses hardware rasterization exclusively.
-- **Material sort/binning**: The resolve shader evaluates a single inline PBR model for all pixels. Nanite classifies pixels into 64x64 tiles by material, then dispatches a per-material full-screen pass that evaluates only relevant tiles. This enables full UE material graph evaluation without wasting work on non-matching pixels.
-- **Texture sampling**: The resolve shader uses a hardcoded `vec3(0.8)` base color. No texture atlas or bindless texture access for actual material evaluation.
+- **Material sort/binning**: The resolve shader evaluates materials per-pixel via a material SSBO lookup. Nanite classifies pixels into 64x64 tiles by material, then dispatches a per-material full-screen pass that evaluates only relevant tiles. This tile-based approach is more efficient for scenes with many diverse materials.
 
 ---
 
@@ -225,17 +224,17 @@ Separate system for non-clustered objects: per-object sphere+AABB frustum test, 
 | Hi-Z pyramid | **Implemented** | `HiZSystem.h`, `hiz_downsample.comp` |
 | Normal cone backface culling | **Implemented** | `cluster_cull.comp:170-178` |
 | Visibility buffer | **Implemented** (32-bit) | `VisibilityBuffer.h`, `visbuf.frag` |
-| Compute material resolve | **Implemented** (simplified PBR) | `visbuf_resolve.comp` |
+| Compute material resolve | **Implemented** (full PBR + material buffer) | `visbuf_resolve.comp` |
 | Subgroup-batched atomics | **Implemented** | All cull shaders |
 | Global vertex/index SSBOs | **Implemented** | `GPUClusterBuffer` |
 | METIS graph partitioning | **Not implemented** — spatial grouping instead | — |
 | Boundary-locked simplification | **Not implemented** — generic meshoptimizer | — |
 | Software rasterizer | **Not implemented** | — |
 | 64-bit visibility buffer | **Not implemented** — 32-bit | — |
-| Material tile classification | **Not implemented** — inline resolve | — |
+| Material tile classification | **Not implemented** — per-pixel material lookup | — |
 | Cluster streaming | **Not implemented** — fully resident | — |
 | Virtual shadow maps | **Not implemented** — CSM | — |
-| Persistent-thread DAG traversal | **Not implemented** — flat dispatch | — |
+| Top-down DAG traversal | **Implemented** — multi-pass ping-pong | `cluster_select.comp` |
 
 ---
 
@@ -253,8 +252,8 @@ Spatial grouping produces more boundary edges than graph partitioning, reducing 
 ### 4. Persistent-Thread DAG Traversal
 The current flat dispatch (one thread per cluster in the entire DAG) evaluates every cluster in the hierarchy regardless of whether it will be reached. Nanite uses a work-queue approach starting from root nodes, only descending into children when the parent error exceeds the threshold. For deep hierarchies this avoids significant wasted compute.
 
-### 5. Material System Integration
-The resolve shader currently evaluates a single hardcoded PBR model. A production system needs either bindless textures or a material tile classification pass (à la Nanite's 64x64 tile material IDs → per-material fullscreen dispatch) to support diverse materials efficiently.
+### 5. Material Tile Classification
+The resolve shader evaluates materials per-pixel via SSBO lookup with texture array sampling and Cook-Torrance PBR. This works correctly but Nanite's tile classification (64x64 pixel tiles binned by material → per-material fullscreen dispatch) would reduce divergence for scenes with many distinct materials.
 
 ### 6. 64-bit V-Buffer + Instance Scalability
 The 9-bit instance / 23-bit triangle packing limits the system to 512 instances. Nanite's 64-bit buffer (30-bit depth + 27-bit cluster + 7-bit triangle) supports much larger scenes and integrates depth testing into the atomic write, which is essential for software rasterization.

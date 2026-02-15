@@ -19,6 +19,19 @@
 class Mesh;
 struct Renderable;
 
+// GPU material data for the resolve shader (matches GPUMaterial in visbuf_resolve.comp)
+struct GPUMaterial {
+    glm::vec4 baseColor;            // RGB + alpha
+    float roughness;
+    float metallic;
+    float normalScale;
+    float aoStrength;
+    uint32_t albedoTexIndex;        // UINT32_MAX = no texture
+    uint32_t normalTexIndex;        // UINT32_MAX = no texture
+    uint32_t roughnessMetallicTexIndex; // UINT32_MAX = no texture
+    uint32_t flags;                 // reserved
+};
+
 // Resolve uniforms for the compute material resolve pass
 struct alignas(16) VisBufResolveUniforms {
     glm::mat4 invViewProj;
@@ -28,7 +41,8 @@ struct alignas(16) VisBufResolveUniforms {
     glm::vec4 screenParams;    // width, height, 1/width, 1/height
     glm::vec4 lightDirection;  // xyz = sun dir, w = intensity
     uint32_t instanceCount;
-    uint32_t _pad0, _pad1, _pad2;
+    uint32_t materialCount;
+    uint32_t _pad1, _pad2;
 };
 
 // Push constants for the V-buffer rasterization pass
@@ -122,13 +136,36 @@ public:
     // Record clear of the V-buffer (writes 0 to indicate no geometry)
     void recordClear(VkCommandBuffer cmd);
 
+    // External buffer references for resolve pass
+    struct ResolveBuffers {
+        VkBuffer vertexBuffer = VK_NULL_HANDLE;
+        VkBuffer indexBuffer = VK_NULL_HANDLE;
+        VkBuffer instanceBuffer = VK_NULL_HANDLE;
+        VkBuffer materialBuffer = VK_NULL_HANDLE;
+        VkDeviceSize vertexBufferSize = 0;
+        VkDeviceSize indexBufferSize = 0;
+        VkDeviceSize instanceBufferSize = 0;
+        VkDeviceSize materialBufferSize = 0;
+        uint32_t materialCount = 0;
+        VkImageView textureArrayView = VK_NULL_HANDLE; // sampler2DArray
+        VkSampler textureArraySampler = VK_NULL_HANDLE;
+    };
+
+    /**
+     * Set external buffer references for the resolve pass.
+     * Must be called before recordResolvePass(). Re-creates resolve
+     * descriptor sets whenever buffers change.
+     */
+    void setResolveBuffers(const ResolveBuffers& buffers);
+
     // Update resolve uniforms
     void updateResolveUniforms(uint32_t frameIndex,
                                 const glm::mat4& view, const glm::mat4& proj,
                                 const glm::vec3& cameraPos,
-                                const glm::vec3& sunDir, float sunIntensity);
+                                const glm::vec3& sunDir, float sunIntensity,
+                                uint32_t materialCount = 0);
 
-    // Record the compute resolve pass
+    // Record the compute resolve pass (dispatches visbuf_resolve.comp)
     void recordResolvePass(VkCommandBuffer cmd, uint32_t frameIndex,
                            VkImageView hdrOutputView);
 
@@ -216,6 +253,12 @@ private:
 
     // Resolve uniform buffers (per frame)
     BufferUtils::PerFrameBufferSet resolveUniformBuffers_;
+
+    // External buffer references for resolve
+    ResolveBuffers resolveBuffers_;
+    std::optional<vk::raii::Sampler> depthSampler_;
+    std::optional<vk::raii::Sampler> textureSampler_;
+    bool resolveDescSetsDirty_ = true;
 
     Stats stats_ = {};
 };
