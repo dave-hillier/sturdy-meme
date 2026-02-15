@@ -97,9 +97,20 @@ bool hizOcclusionTestAABB(vec3 aabbMin, vec3 aabbMax,
     float mipLevel = max(0.0, log2(maxDim) - 1.0);
     mipLevel = min(mipLevel, maxMipLevel);
 
-    // Sample Hi-Z at the center of the projected rectangle
-    vec2 centerUV = (screenRect.xy + screenRect.zw) * 0.5 * scrParams.zw;
-    float hiZDepth = textureLod(hiZPyr, centerUV, mipLevel).r;
+    // Sample Hi-Z at all 4 corners of the projected rectangle.
+    // A single center sample can miss occluders that don't cover the AABB center,
+    // leading to false culling. Sampling 4 corners and taking the min (farthest
+    // in reversed-Z) is conservative: we only cull if the entire region is occluded.
+    vec2 minUV = screenRect.xy * scrParams.zw;
+    vec2 maxUV = screenRect.zw * scrParams.zw;
+
+    float d0 = textureLod(hiZPyr, vec2(minUV.x, minUV.y), mipLevel).r;
+    float d1 = textureLod(hiZPyr, vec2(maxUV.x, minUV.y), mipLevel).r;
+    float d2 = textureLod(hiZPyr, vec2(minUV.x, maxUV.y), mipLevel).r;
+    float d3 = textureLod(hiZPyr, vec2(maxUV.x, maxUV.y), mipLevel).r;
+
+    // Reversed-Z: min = farthest depth = most conservative for occlusion
+    float hiZDepth = min(min(d0, d1), min(d2, d3));
 
     // Get closest depth of the AABB
     float objectDepth = hizGetClosestDepth(aabbMin, aabbMax, viewProjMat);

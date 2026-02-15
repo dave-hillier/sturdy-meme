@@ -146,13 +146,9 @@ void main() {
         return;
     }
 
-    // Transform AABB to world space for more precise tests
-    vec3 worldMin = (model * vec4(cluster.aabbMin, 1.0)).xyz;
-    vec3 worldMax = (model * vec4(cluster.aabbMax, 1.0)).xyz;
-
-    // AABB frustum test
-    vec3 aabbMin = min(worldMin, worldMax);
-    vec3 aabbMax = max(worldMin, worldMax);
+    // Transform AABB to world space (handles rotation/non-uniform scale correctly)
+    vec3 aabbMin, aabbMax;
+    transformAABB(model, cluster.aabbMin, cluster.aabbMax, aabbMin, aabbMax);
 
     if (!isAABBInFrustum(planes, aabbMin, aabbMax)) {
         return;
