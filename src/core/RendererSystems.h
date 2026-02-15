@@ -92,6 +92,7 @@ class TimeSystem;
 class CelestialCalculator;
 class BilateralGridSystem;
 class ScreenSpaceShadowSystem;
+class GodRaysSystem;
 class DeferredTerrainObjects;
 struct EnvironmentSettings;
 struct TerrainConfig;
@@ -162,12 +163,18 @@ public:
     BilateralGridSystem& bilateralGrid() { return *bilateralGridSystem_; }
     const BilateralGridSystem& bilateralGrid() const { return *bilateralGridSystem_; }
     void setBilateralGrid(std::unique_ptr<BilateralGridSystem> system);
+    GodRaysSystem& godRays() { return *godRaysSystem_; }
+    const GodRaysSystem& godRays() const { return *godRaysSystem_; }
+    bool hasGodRays() const { return godRaysSystem_ != nullptr; }
+    void setGodRays(std::unique_ptr<GodRaysSystem> system);
     ShadowSystem& shadow() { return *shadowSystem_; }
     const ShadowSystem& shadow() const { return *shadowSystem_; }
     void setShadow(std::unique_ptr<ShadowSystem> system);
     TerrainSystem& terrain() { return *terrainSystem_; }
     const TerrainSystem& terrain() const { return *terrainSystem_; }
     bool hasTerrain() const { return terrainSystem_ != nullptr; }
+    TerrainSystem* terrainPtr() { return terrainSystem_.get(); }
+    const TerrainSystem* terrainPtr() const { return terrainSystem_.get(); }
     void setTerrain(std::unique_ptr<TerrainSystem> system);
 
     // Sky and atmosphere
@@ -288,6 +295,8 @@ public:
     // Scene and resources
     SceneManager& scene() { return *sceneManager_; }
     const SceneManager& scene() const { return *sceneManager_; }
+    SceneManager* scenePtr() { return sceneManager_.get(); }
+    const SceneManager* scenePtr() const { return sceneManager_.get(); }
     void setScene(std::unique_ptr<SceneManager> system);
     GlobalBufferManager& globalBuffers() { return *globalBufferManager_; }
     const GlobalBufferManager& globalBuffers() const { return *globalBufferManager_; }
@@ -504,6 +513,7 @@ private:
     std::unique_ptr<PostProcessSystem> postProcessSystem_;
     std::unique_ptr<BloomSystem> bloomSystem_;
     std::unique_ptr<BilateralGridSystem> bilateralGridSystem_;
+    std::unique_ptr<GodRaysSystem> godRaysSystem_;
     std::unique_ptr<ShadowSystem> shadowSystem_;
     std::unique_ptr<TerrainSystem> terrainSystem_;
 

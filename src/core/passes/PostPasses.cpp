@@ -6,6 +6,7 @@
 #include "PostProcessSystem.h"
 #include "BloomSystem.h"
 #include "BilateralGridSystem.h"
+#include "GodRaysSystem.h"
 #include "HiZSystem.h"
 
 namespace PostPasses {
@@ -43,6 +44,29 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& con
             systems.bloom().setThreshold(systems.postProcess().getBloomThreshold());
             systems.bloom().recordBloomPass(ctx.commandBuffer, systems.postProcess().getHDRColorView());
             systems.profiler().endGpuZone(ctx.commandBuffer, "Bloom");
+        },
+        .canUseSecondary = false,
+        .mainThreadOnly = true,
+        .priority = 10
+    });
+
+    // God rays pass - quarter-resolution light shafts
+    ids.godRays = graph.addPass({
+        .name = "GodRays",
+        .execute = [&systems](FrameGraph::RenderContext& ctx) {
+            if (!systems.hasGodRays() || !systems.postProcess().isGodRaysEnabled()) return;
+            RenderContext* renderCtx = static_cast<RenderContext*>(ctx.userData);
+            if (!renderCtx) return;
+            systems.profiler().beginGpuZone(ctx.commandBuffer, "GodRays");
+            // Forward sun screen position and parameters to GodRaysSystem
+            auto& godRays = systems.godRays();
+            godRays.setSunScreenPos(systems.postProcess().getSunScreenPos());
+            godRays.setIntensity(systems.postProcess().getGodRayIntensity());
+            godRays.setDecay(systems.postProcess().getGodRayDecay());
+            godRays.recordGodRaysPass(ctx.commandBuffer,
+                systems.postProcess().getHDRColorView(),
+                systems.postProcess().getHDRDepthView());
+            systems.profiler().endGpuZone(ctx.commandBuffer, "GodRays");
         },
         .canUseSecondary = false,
         .mainThreadOnly = true,

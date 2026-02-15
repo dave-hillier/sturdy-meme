@@ -22,6 +22,7 @@ struct Config {
 struct PassIds {
     FrameGraph::PassId hiZ = FrameGraph::INVALID_PASS;
     FrameGraph::PassId bloom = FrameGraph::INVALID_PASS;
+    FrameGraph::PassId godRays = FrameGraph::INVALID_PASS;
     FrameGraph::PassId bilateralGrid = FrameGraph::INVALID_PASS;
     FrameGraph::PassId postProcess = FrameGraph::INVALID_PASS;
 };

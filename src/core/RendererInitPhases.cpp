@@ -9,6 +9,7 @@
 #include "PostProcessSystem.h"
 #include "BloomSystem.h"
 #include "BilateralGridSystem.h"
+#include "GodRaysSystem.h"
 #include "SkySystem.h"
 #include "GlobalBufferManager.h"
 #include "ShadowSystem.h"
@@ -170,6 +171,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 systems_->setPostProcess(std::move(bundle->postProcess));
                 systems_->setBloom(std::move(bundle->bloom));
                 systems_->setBilateralGrid(std::move(bundle->bilateralGrid));
+                systems_->setGodRays(std::move(bundle->godRays));
             }
 
             // Graphics pipeline
@@ -722,6 +724,9 @@ void Renderer::initResizeCoordinator() {
     // Render targets that need resize (reallocate GPU resources)
     resizeCoordinator_->registerWithSimpleResize(systems_->postProcess(), "PostProcessSystem", ResizePriority::RenderTarget);
     resizeCoordinator_->registerWithSimpleResize(systems_->bloom(), "BloomSystem", ResizePriority::RenderTarget);
+    if (systems_->hasGodRays()) {
+        resizeCoordinator_->registerWithSimpleResize(systems_->godRays(), "GodRaysSystem", ResizePriority::RenderTarget);
+    }
     resizeCoordinator_->registerWithSimpleResize(systems_->froxel(), "FroxelSystem", ResizePriority::RenderTarget);
 
     // Culling systems with simple resize (extent only, but reallocates)
@@ -749,6 +754,17 @@ void Renderer::initResizeCoordinator() {
         },
         nullptr,
         ResizePriority::RenderTarget);
+
+    // Register callback for god rays texture rebinding (needed after god rays resize)
+    if (systems_->hasGodRays()) {
+        resizeCoordinator_->registerCallback("GodRaysRebind",
+            [this](VkExtent2D) {
+                systems_->postProcess().setGodRaysTexture(
+                    systems_->godRays().getGodRaysOutput(), systems_->godRays().getSampler());
+            },
+            nullptr,
+            ResizePriority::RenderTarget);
+    }
 
     // Register core resize handler for swapchain, depth buffer, and framebuffers
     resizeCoordinator_->setCoreResizeHandler([this](VkDevice, VmaAllocator) -> VkExtent2D {

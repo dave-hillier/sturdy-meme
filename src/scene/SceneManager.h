@@ -54,6 +54,7 @@ public:
     size_t getPlayerObjectIndex() const { return sceneBuilder->getPlayerObjectIndex(); }
 
     // SceneBuilder access for texture descriptor sets
+    bool hasSceneBuilder() const { return sceneBuilder != nullptr; }
     SceneBuilder& getSceneBuilder() { return *sceneBuilder; }
     const SceneBuilder& getSceneBuilder() const { return *sceneBuilder; }
 

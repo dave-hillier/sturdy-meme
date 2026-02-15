@@ -1,6 +1,7 @@
 #include "PostProcessSystem.h"
 #include "BloomSystem.h"
 #include "BilateralGridSystem.h"
+#include "GodRaysSystem.h"
 #include "ShaderLoader.h"
 #include "DescriptorManager.h"
 #include "core/InitInfoBuilder.h"
@@ -56,16 +57,28 @@ std::optional<PostProcessSystem::Bundle> PostProcessSystem::createWithDependenci
         return std::nullopt;
     }
 
+    // Create god rays system (optional - gracefully degrade if shader missing)
+    auto godRaysSystem = GodRaysSystem::create(ctx);
+    if (!godRaysSystem) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "GodRaysSystem unavailable, god rays disabled");
+    }
+
     // Wire bloom texture to post-process system
     postProcessSystem->setBloomTexture(bloomSystem->getBloomOutput(), bloomSystem->getBloomSampler());
 
     // Wire bilateral grid to post-process system
     postProcessSystem->setBilateralGrid(bilateralGridSystem->getGridView(), bilateralGridSystem->getGridSampler());
 
+    // Wire god rays texture to post-process system (if available)
+    if (godRaysSystem) {
+        postProcessSystem->setGodRaysTexture(godRaysSystem->getGodRaysOutput(), godRaysSystem->getSampler());
+    }
+
     return Bundle{
         std::move(postProcessSystem),
         std::move(bloomSystem),
-        std::move(bilateralGridSystem)
+        std::move(bilateralGridSystem),
+        std::move(godRaysSystem)
     };
 }
 

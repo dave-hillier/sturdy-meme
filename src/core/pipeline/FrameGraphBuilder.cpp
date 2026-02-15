@@ -87,6 +87,7 @@ bool FrameGraphBuilder::build(
     frameGraph.addDependency(hdr, waterIds.waterTileCull);
     frameGraph.addDependency(hdr, postIds.hiZ);
     frameGraph.addDependency(hdr, postIds.bilateralGrid);
+    frameGraph.addDependency(hdr, postIds.godRays);
 
     // Bloom depends on HiZ
     frameGraph.addDependency(postIds.hiZ, postIds.bloom);
@@ -96,6 +97,7 @@ bool FrameGraphBuilder::build(
     frameGraph.addDependency(waterIds.waterTileCull, postIds.postProcess);
     frameGraph.addDependency(postIds.bloom, postIds.postProcess);
     frameGraph.addDependency(postIds.bilateralGrid, postIds.postProcess);
+    frameGraph.addDependency(postIds.godRays, postIds.postProcess);
 
     // Compile the graph
     if (!frameGraph.compile()) {

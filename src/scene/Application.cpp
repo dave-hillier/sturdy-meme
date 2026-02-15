@@ -193,8 +193,12 @@ bool Application::init(const std::string& title, int width, int height) {
         float cameraX = settlementX - halfTerrain;  // 1008
         float cameraZ = settlementZ - halfTerrain;  // -5192
         float terrainY = 50.0f;  // Default height if terrain unavailable
-        if (renderer_->getSystems().hasTerrain()) {
-            terrainY = renderer_->getSystems().terrain().getHeightAt(cameraX, cameraZ);
+        if (auto* terrainPtr = renderer_->getSystems().terrainPtr()) {
+            // Pre-load tiles before querying height (tiles only preloaded around origin by default)
+            if (auto* tileCachePtr = terrainPtr->getTileCache()) {
+                tileCachePtr->preloadTilesAround(cameraX, cameraZ, 600.0f);
+            }
+            terrainY = terrainPtr->getHeightAt(cameraX, cameraZ);
         }
         camera.setPosition(glm::vec3(cameraX, terrainY + 2.0f, cameraZ));  // Eye level above ground
         camera.setYaw(45.0f);    // Look roughly northeast
@@ -218,32 +222,33 @@ bool Application::init(const std::string& title, int width, int height) {
 
     // Create terrain hole at well entrance location
     // This must be done before terrain physics is initialized
-    {
-        auto& terrain = renderer_->getSystems().terrain();
-        const auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
-        float wellX = sceneBuilder.getWellEntranceX();
-        float wellZ = sceneBuilder.getWellEntranceZ();
-        terrain.addHoleCircle(wellX, wellZ, SceneBuilder::WELL_HOLE_RADIUS);
-        terrain.uploadHoleMaskToGPU();
-        SDL_Log("Created terrain hole at well entrance (%.1f, %.1f) radius %.1f",
-                wellX, wellZ, SceneBuilder::WELL_HOLE_RADIUS);
+    if (auto* terrainSys = renderer_->getSystems().terrainPtr()) {
+        if (renderer_->getSystems().scenePtr() && renderer_->getSystems().scene().hasSceneBuilder()) {
+            const auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
+            float wellX = sceneBuilder.getWellEntranceX();
+            float wellZ = sceneBuilder.getWellEntranceZ();
+            terrainSys->addHoleCircle(wellX, wellZ, SceneBuilder::WELL_HOLE_RADIUS);
+            terrainSys->uploadHoleMaskToGPU();
+            SDL_Log("Created terrain hole at well entrance (%.1f, %.1f) radius %.1f",
+                    wellX, wellZ, SceneBuilder::WELL_HOLE_RADIUS);
+        }
     }
 
-    // Get terrain reference for spawning objects
-    auto& terrain = renderer_->getSystems().terrain();
+    // Get terrain pointer for spawning objects (may be null if preprocessing was skipped)
+    auto* terrain = renderer_->getSystems().terrainPtr();
 
     // Initialize tiled physics terrain manager
     // Uses high-resolution terrain tiles (~1m spacing) within 1000m of player
     // instead of a single coarse heightfield (~32m spacing)
-    {
-        TerrainTileCache* tileCache = terrain.getTileCache();
+    if (terrain) {
+        TerrainTileCache* tileCache = terrain->getTileCache();
         if (tileCache) {
             PhysicsTerrainTileManager::Config config;
             config.loadRadius = 1000.0f;
             config.unloadRadius = 1200.0f;
             config.maxTilesPerFrame = 2;
-            config.terrainSize = terrain.getConfig().size;
-            config.heightScale = terrain.getConfig().heightScale;
+            config.terrainSize = terrain->getConfig().size;
+            config.heightScale = terrain->getConfig().heightScale;
 
             if (physicsTerrainManager_.init(physics(), *tileCache, config)) {
                 SDL_Log("Physics terrain tile manager initialized");
@@ -266,7 +271,9 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Initialize scene physics (dynamic objects)
-    renderer_->getSystems().scene().initPhysics(physics());
+    if (renderer_->getSystems().scenePtr()) {
+        renderer_->getSystems().scene().initPhysics(physics());
+    }
 
     // Create convex hull colliders for rocks using actual mesh geometry
     const auto& rockSystem = renderer_->getSystems().rocks();
@@ -379,23 +386,26 @@ bool Application::init(const std::string& title, int width, int height) {
 
     // Pre-load high-res tiles around spawn before querying height
     // This ensures we get LOD0 height data instead of low-res base LOD fallback
-    if (auto* tileCachePtr = terrain.getTileCache()) {
-        tileCachePtr->preloadTilesAround(playerSpawnX, playerSpawnZ, 600.0f);
-    }
+    float playerSpawnY = 0.1f;
+    if (terrain) {
+        if (auto* tileCachePtr = terrain->getTileCache()) {
+            tileCachePtr->preloadTilesAround(playerSpawnX, playerSpawnZ, 600.0f);
+        }
 
-    float playerSpawnY = terrain.getHeightAt(playerSpawnX, playerSpawnZ) + 0.1f;
+        playerSpawnY = terrain->getHeightAt(playerSpawnX, playerSpawnZ) + 0.1f;
 
-    // Debug: Sample terrain height at spawn position using different methods
-    float heightFromTerrainSystem = terrain.getHeightAt(playerSpawnX, playerSpawnZ);
-    float heightFromTileCache = 0.0f;
-    bool tileHasHeight = false;
-    if (auto* tileCachePtr = terrain.getTileCache()) {
-        tileHasHeight = tileCachePtr->getHeightAt(playerSpawnX, playerSpawnZ, heightFromTileCache);
+        // Debug: Sample terrain height at spawn position using different methods
+        float heightFromTerrainSystem = terrain->getHeightAt(playerSpawnX, playerSpawnZ);
+        float heightFromTileCache = 0.0f;
+        bool tileHasHeight = false;
+        if (auto* tileCachePtr = terrain->getTileCache()) {
+            tileHasHeight = tileCachePtr->getHeightAt(playerSpawnX, playerSpawnZ, heightFromTileCache);
+        }
+        SDL_Log("DEBUG Height at spawn (%.1f, %.1f):", playerSpawnX, playerSpawnZ);
+        SDL_Log("  TerrainSystem.getHeightAt(): %.2f", heightFromTerrainSystem);
+        SDL_Log("  TileCache.getHeightAt(): %.2f (found=%d)", heightFromTileCache, tileHasHeight ? 1 : 0);
+        SDL_Log("  Player spawn Y (height + 0.1): %.2f", playerSpawnY);
     }
-    SDL_Log("DEBUG Height at spawn (%.1f, %.1f):", playerSpawnX, playerSpawnZ);
-    SDL_Log("  TerrainSystem.getHeightAt(): %.2f", heightFromTerrainSystem);
-    SDL_Log("  TileCache.getHeightAt(): %.2f (found=%d)", heightFromTileCache, tileHasHeight ? 1 : 0);
-    SDL_Log("  Player spawn Y (height + 0.1): %.2f", playerSpawnY);
 
     // Initialize player state
     player_.transform = PlayerTransform::withYaw(glm::vec3(playerSpawnX, playerSpawnY, playerSpawnZ), 0.0f);

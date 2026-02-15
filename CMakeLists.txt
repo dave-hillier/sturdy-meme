@@ -763,6 +763,10 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch_shadow_cull.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch_shadow_instanced.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow_instanced.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_compute.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample_compute.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_spd.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/godrays_compute.comp.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -1184,6 +1188,10 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch_shadow_cull.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_branch_shadow_instanced.vert.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/shadow_instanced.vert.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_compute.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample_compute.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_spd.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/godrays_compute.comp.spv
     )
 
     # Source shaders used for UBO reflection (curated subset that defines complete UBO structures)
