@@ -148,9 +148,8 @@ void main() {
 
     uint packed = imageLoad(visibilityBuffer, pixelCoord).r;
 
-    // Background pixel - write transparent black
+    // Background pixel - no V-buffer data, preserve existing HDR content
     if (packed == 0u) {
-        imageStore(hdrOutput, pixelCoord, vec4(0.0));
         return;
     }
 
