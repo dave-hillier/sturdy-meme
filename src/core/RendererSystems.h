@@ -295,6 +295,8 @@ public:
     // Scene and resources
     SceneManager& scene() { return *sceneManager_; }
     const SceneManager& scene() const { return *sceneManager_; }
+    SceneManager* scenePtr() { return sceneManager_.get(); }
+    const SceneManager* scenePtr() const { return sceneManager_.get(); }
     void setScene(std::unique_ptr<SceneManager> system);
     GlobalBufferManager& globalBuffers() { return *globalBufferManager_; }
     const GlobalBufferManager& globalBuffers() const { return *globalBufferManager_; }

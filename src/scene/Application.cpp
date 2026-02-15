@@ -223,7 +223,7 @@ bool Application::init(const std::string& title, int width, int height) {
     // Create terrain hole at well entrance location
     // This must be done before terrain physics is initialized
     if (auto* terrainSys = renderer_->getSystems().terrainPtr()) {
-        if (renderer_->getSystems().scene().hasSceneBuilder()) {
+        if (renderer_->getSystems().scenePtr() && renderer_->getSystems().scene().hasSceneBuilder()) {
             const auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
             float wellX = sceneBuilder.getWellEntranceX();
             float wellZ = sceneBuilder.getWellEntranceZ();
@@ -271,7 +271,9 @@ bool Application::init(const std::string& title, int width, int height) {
     }
 
     // Initialize scene physics (dynamic objects)
-    renderer_->getSystems().scene().initPhysics(physics());
+    if (renderer_->getSystems().scenePtr()) {
+        renderer_->getSystems().scene().initPhysics(physics());
+    }
 
     // Create convex hull colliders for rocks using actual mesh geometry
     const auto& rockSystem = renderer_->getSystems().rocks();

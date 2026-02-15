@@ -57,11 +57,10 @@ std::optional<PostProcessSystem::Bundle> PostProcessSystem::createWithDependenci
         return std::nullopt;
     }
 
-    // Create god rays system
+    // Create god rays system (optional - gracefully degrade if shader missing)
     auto godRaysSystem = GodRaysSystem::create(ctx);
     if (!godRaysSystem) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to initialize GodRaysSystem");
-        return std::nullopt;
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "GodRaysSystem unavailable, god rays disabled");
     }
 
     // Wire bloom texture to post-process system
@@ -70,8 +69,10 @@ std::optional<PostProcessSystem::Bundle> PostProcessSystem::createWithDependenci
     // Wire bilateral grid to post-process system
     postProcessSystem->setBilateralGrid(bilateralGridSystem->getGridView(), bilateralGridSystem->getGridSampler());
 
-    // Wire god rays texture to post-process system
-    postProcessSystem->setGodRaysTexture(godRaysSystem->getGodRaysOutput(), godRaysSystem->getSampler());
+    // Wire god rays texture to post-process system (if available)
+    if (godRaysSystem) {
+        postProcessSystem->setGodRaysTexture(godRaysSystem->getGodRaysOutput(), godRaysSystem->getSampler());
+    }
 
     return Bundle{
         std::move(postProcessSystem),
