@@ -65,6 +65,8 @@
 #include "CoreResources.h"
 #include "ScreenSpaceShadowSystem.h"
 #include "TerrainFactory.h"
+#include "VisibilityBuffer.h"
+#include "GPUMaterialBuffer.h"
 #include "threading/TaskScheduler.h"
 #include <SDL3/SDL.h>
 
@@ -608,6 +610,49 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 if (gpuSceneBuffer->init(vulkanContext_->getAllocator(), MAX_FRAMES_IN_FLIGHT)) {
                     systems_->setGPUSceneBuffer(std::move(gpuSceneBuffer));
                     SDL_Log("GPUSceneBuffer: Initialized for GPU-driven rendering");
+                }
+            }
+
+            // Visibility buffer system
+            {
+                auto visBuf = VisibilityBuffer::create(*ctxPtr, vulkanContext_->getDepthFormat());
+                if (visBuf) {
+                    systems_->setVisibilityBuffer(std::move(visBuf));
+                    SDL_Log("VisibilityBuffer: Initialized for GPU-driven material resolve");
+                }
+            }
+
+            // GPU material buffer for visibility buffer resolve
+            {
+                GPUMaterialBuffer::InitInfo matBufInfo{};
+                matBufInfo.allocator = vulkanContext_->getAllocator();
+                matBufInfo.maxMaterials = 256;
+
+                auto gpuMatBuf = GPUMaterialBuffer::create(matBufInfo);
+                if (gpuMatBuf) {
+                    // Upload materials from the scene's material registry if available
+                    auto& sceneBuilder = systems_->scene().getSceneBuilder();
+                    const auto& registry = sceneBuilder.getMaterialRegistry();
+                    if (registry.getMaterialCount() > 0) {
+                        gpuMatBuf->uploadFromRegistry(registry);
+                        SDL_Log("GPUMaterialBuffer: Uploaded %zu materials from registry",
+                                registry.getMaterialCount());
+                    } else {
+                        // Upload a default material so the buffer is valid
+                        GPUMaterial defaultMat{};
+                        defaultMat.baseColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+                        defaultMat.roughness = 0.5f;
+                        defaultMat.metallic = 0.0f;
+                        defaultMat.normalScale = 1.0f;
+                        defaultMat.aoStrength = 1.0f;
+                        defaultMat.albedoTexIndex = ~0u;
+                        defaultMat.normalTexIndex = ~0u;
+                        defaultMat.roughnessMetallicTexIndex = ~0u;
+                        defaultMat.flags = 0;
+                        gpuMatBuf->uploadMaterials({defaultMat});
+                        SDL_Log("GPUMaterialBuffer: Uploaded default material");
+                    }
+                    systems_->setGPUMaterialBuffer(std::move(gpuMatBuf));
                 }
             }
 

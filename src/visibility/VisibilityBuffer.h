@@ -260,5 +260,13 @@ private:
     std::optional<vk::raii::Sampler> textureSampler_;
     bool resolveDescSetsDirty_ = true;
 
+    // Placeholder buffer for unbound SSBO descriptors (vertex/index/material when not yet wired)
+    VmaBuffer placeholderBuffer_;
+    static constexpr VkDeviceSize PLACEHOLDER_BUFFER_SIZE = 256;
+
+    // Placeholder 1x1 image for unbound texture array descriptor
+    ManagedImage placeholderTexImage_;
+    VkImageView placeholderTexView_ = VK_NULL_HANDLE;
+
     Stats stats_ = {};
 };

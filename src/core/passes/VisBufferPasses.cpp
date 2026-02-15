@@ -7,6 +7,8 @@
 #include "VisibilityBuffer.h"
 #include "GPUMaterialBuffer.h"
 
+#include <algorithm>
+
 namespace VisBufferPasses {
 
 PassIds addPasses(FrameGraph& graph, RendererSystems& systems) {
@@ -31,15 +33,20 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems) {
 
             systems.profiler().beginGpuZone(cmd, "VisBufferResolve");
 
-            // Bind external buffers to the resolve pass if GPUSceneBuffer is available
-            if (systems.hasGPUSceneBuffer()) {
-                auto& sceneBuffer = systems.gpuSceneBuffer();
-
+            // Bind external buffers to the resolve pass
+            {
                 VisibilityBuffer::ResolveBuffers resolveBuffers{};
-                resolveBuffers.instanceBuffer = sceneBuffer.getInstanceBuffer(frameIndex);
-                resolveBuffers.instanceBufferSize = sceneBuffer.getObjectCount() * sizeof(GPUSceneInstanceData);
 
-                // Material buffer if available
+                // Instance buffer from GPUSceneBuffer
+                if (systems.hasGPUSceneBuffer()) {
+                    auto& sceneBuffer = systems.gpuSceneBuffer();
+                    resolveBuffers.instanceBuffer = sceneBuffer.getInstanceBuffer(frameIndex);
+                    // Ensure minimum size of 1 element for valid descriptor range
+                    uint32_t count = std::max(sceneBuffer.getObjectCount(), 1u);
+                    resolveBuffers.instanceBufferSize = count * sizeof(GPUSceneInstanceData);
+                }
+
+                // Material buffer from GPUMaterialBuffer
                 if (systems.hasGPUMaterialBuffer()) {
                     auto* matBuf = systems.gpuMaterialBuffer();
                     resolveBuffers.materialBuffer = matBuf->getBuffer();

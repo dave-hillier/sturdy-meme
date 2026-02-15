@@ -2,6 +2,7 @@
 #include "ShaderLoader.h"
 #include "Mesh.h"
 #include "shaders/bindings.h"
+#include "vulkan/VmaBufferFactory.h"
 
 #include <SDL3/SDL_log.h>
 #include <array>
@@ -843,10 +844,42 @@ bool VisibilityBuffer::createResolveBuffers() {
         return false;
     }
 
+    // Create placeholder SSBO for unbound vertex/index/material descriptors.
+    // The resolve shader early-returns on background pixels (packed == 0),
+    // so these are never actually read, but Vulkan requires valid descriptors.
+    if (!VmaBufferFactory::createStorageBufferHostWritable(allocator_, PLACEHOLDER_BUFFER_SIZE, placeholderBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "VisibilityBuffer: Failed to create placeholder buffer");
+        return false;
+    }
+    // Zero-fill placeholder
+    VmaAllocationInfo placeholderAllocInfo{};
+    vmaGetAllocationInfo(allocator_, placeholderBuffer_.get_deleter().allocation, &placeholderAllocInfo);
+    if (placeholderAllocInfo.pMappedData) {
+        memset(placeholderAllocInfo.pMappedData, 0, PLACEHOLDER_BUFFER_SIZE);
+    }
+
+    // Create a 1x1 placeholder texture for the unbound texture array descriptor
+    ok = ImageBuilder(allocator_)
+        .setExtent(VkExtent2D{1, 1})
+        .setFormat(VK_FORMAT_R8G8B8A8_UNORM)
+        .setUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+        .build(device_, placeholderTexImage_, placeholderTexView_);
+
+    if (!ok) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "VisibilityBuffer: Failed to create placeholder texture");
+        return false;
+    }
+
     return true;
 }
 
 void VisibilityBuffer::destroyResolveBuffers() {
+    if (placeholderTexView_ != VK_NULL_HANDLE) {
+        vkDestroyImageView(device_, placeholderTexView_, nullptr);
+        placeholderTexView_ = VK_NULL_HANDLE;
+    }
+    placeholderTexImage_.reset();
+    placeholderBuffer_.reset();
     BufferUtils::destroyBuffers(allocator_, resolveUniformBuffers_);
 }
 
@@ -1006,121 +1039,105 @@ void VisibilityBuffer::recordResolvePass(VkCommandBuffer cmd, uint32_t frameInde
     // Update descriptor set if buffers changed or HDR output changed
     if (resolveDescSetsDirty_ || hdrOutputView != VK_NULL_HANDLE) {
         VkDescriptorSet descSet = resolveDescSets_[frameIndex];
+        VkBuffer placeholder = placeholderBuffer_.get();
 
-        // Build all descriptor writes
-        std::vector<VkWriteDescriptorSet> writes;
-        writes.reserve(9);
+        // Always bind all 9 descriptors. Use placeholder buffer/texture for
+        // unbound slots so Vulkan validation is satisfied. The resolve shader
+        // early-returns on background pixels (packed == 0) so placeholders
+        // are never actually read when the V-buffer is empty.
+
+        std::array<VkWriteDescriptorSet, 9> writes{};
+        for (auto& w : writes) w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 
         // Binding 0: Visibility buffer (storage image)
         VkDescriptorImageInfo visImageInfo{};
         visImageInfo.imageView = visibilityView_;
         visImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-        VkWriteDescriptorSet visWrite{};
-        visWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        visWrite.dstSet = descSet;
-        visWrite.dstBinding = BINDING_VISBUF_VISIBILITY;
-        visWrite.descriptorCount = 1;
-        visWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        visWrite.pImageInfo = &visImageInfo;
-        writes.push_back(visWrite);
+        writes[0].dstSet = descSet;
+        writes[0].dstBinding = BINDING_VISBUF_VISIBILITY;
+        writes[0].descriptorCount = 1;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[0].pImageInfo = &visImageInfo;
 
         // Binding 1: Depth buffer (combined image sampler)
         VkDescriptorImageInfo depthImageInfo{};
-        depthImageInfo.sampler = depthSampler_ ? **depthSampler_ : VK_NULL_HANDLE;
+        depthImageInfo.sampler = depthSampler_ ? static_cast<VkSampler>(**depthSampler_) : VK_NULL_HANDLE;
         depthImageInfo.imageView = depthView_;
         depthImageInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
-        VkWriteDescriptorSet depthWrite{};
-        depthWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        depthWrite.dstSet = descSet;
-        depthWrite.dstBinding = BINDING_VISBUF_DEPTH;
-        depthWrite.descriptorCount = 1;
-        depthWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        depthWrite.pImageInfo = &depthImageInfo;
-        writes.push_back(depthWrite);
+        writes[1].dstSet = descSet;
+        writes[1].dstBinding = BINDING_VISBUF_DEPTH;
+        writes[1].descriptorCount = 1;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[1].pImageInfo = &depthImageInfo;
 
         // Binding 2: HDR output (storage image)
         VkDescriptorImageInfo hdrImageInfo{};
         hdrImageInfo.imageView = hdrOutputView;
         hdrImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-        VkWriteDescriptorSet hdrWrite{};
-        hdrWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        hdrWrite.dstSet = descSet;
-        hdrWrite.dstBinding = BINDING_VISBUF_HDR_OUTPUT;
-        hdrWrite.descriptorCount = 1;
-        hdrWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        hdrWrite.pImageInfo = &hdrImageInfo;
-        writes.push_back(hdrWrite);
+        writes[2].dstSet = descSet;
+        writes[2].dstBinding = BINDING_VISBUF_HDR_OUTPUT;
+        writes[2].descriptorCount = 1;
+        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        writes[2].pImageInfo = &hdrImageInfo;
 
-        // Binding 3: Vertex buffer (SSBO)
+        // Binding 3: Vertex buffer (SSBO) - use placeholder if not wired
         VkDescriptorBufferInfo vertexBufInfo{};
-        vertexBufInfo.buffer = resolveBuffers_.vertexBuffer;
+        vertexBufInfo.buffer = resolveBuffers_.vertexBuffer != VK_NULL_HANDLE
+            ? resolveBuffers_.vertexBuffer : placeholder;
         vertexBufInfo.offset = 0;
-        vertexBufInfo.range = resolveBuffers_.vertexBufferSize;
+        vertexBufInfo.range = resolveBuffers_.vertexBuffer != VK_NULL_HANDLE
+            ? resolveBuffers_.vertexBufferSize : PLACEHOLDER_BUFFER_SIZE;
 
-        if (resolveBuffers_.vertexBuffer != VK_NULL_HANDLE) {
-            VkWriteDescriptorSet vertWrite{};
-            vertWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            vertWrite.dstSet = descSet;
-            vertWrite.dstBinding = BINDING_VISBUF_VERTEX_BUFFER;
-            vertWrite.descriptorCount = 1;
-            vertWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            vertWrite.pBufferInfo = &vertexBufInfo;
-            writes.push_back(vertWrite);
-        }
+        writes[3].dstSet = descSet;
+        writes[3].dstBinding = BINDING_VISBUF_VERTEX_BUFFER;
+        writes[3].descriptorCount = 1;
+        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[3].pBufferInfo = &vertexBufInfo;
 
-        // Binding 4: Index buffer (SSBO)
+        // Binding 4: Index buffer (SSBO) - use placeholder if not wired
         VkDescriptorBufferInfo indexBufInfo{};
-        indexBufInfo.buffer = resolveBuffers_.indexBuffer;
+        indexBufInfo.buffer = resolveBuffers_.indexBuffer != VK_NULL_HANDLE
+            ? resolveBuffers_.indexBuffer : placeholder;
         indexBufInfo.offset = 0;
-        indexBufInfo.range = resolveBuffers_.indexBufferSize;
+        indexBufInfo.range = resolveBuffers_.indexBuffer != VK_NULL_HANDLE
+            ? resolveBuffers_.indexBufferSize : PLACEHOLDER_BUFFER_SIZE;
 
-        if (resolveBuffers_.indexBuffer != VK_NULL_HANDLE) {
-            VkWriteDescriptorSet idxWrite{};
-            idxWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            idxWrite.dstSet = descSet;
-            idxWrite.dstBinding = BINDING_VISBUF_INDEX_BUFFER;
-            idxWrite.descriptorCount = 1;
-            idxWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            idxWrite.pBufferInfo = &indexBufInfo;
-            writes.push_back(idxWrite);
-        }
+        writes[4].dstSet = descSet;
+        writes[4].dstBinding = BINDING_VISBUF_INDEX_BUFFER;
+        writes[4].descriptorCount = 1;
+        writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[4].pBufferInfo = &indexBufInfo;
 
-        // Binding 5: Instance buffer (SSBO)
+        // Binding 5: Instance buffer (SSBO) - use placeholder if not wired
         VkDescriptorBufferInfo instanceBufInfo{};
-        instanceBufInfo.buffer = resolveBuffers_.instanceBuffer;
+        instanceBufInfo.buffer = resolveBuffers_.instanceBuffer != VK_NULL_HANDLE
+            ? resolveBuffers_.instanceBuffer : placeholder;
         instanceBufInfo.offset = 0;
-        instanceBufInfo.range = resolveBuffers_.instanceBufferSize;
+        instanceBufInfo.range = resolveBuffers_.instanceBuffer != VK_NULL_HANDLE
+            ? resolveBuffers_.instanceBufferSize : PLACEHOLDER_BUFFER_SIZE;
 
-        if (resolveBuffers_.instanceBuffer != VK_NULL_HANDLE) {
-            VkWriteDescriptorSet instWrite{};
-            instWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            instWrite.dstSet = descSet;
-            instWrite.dstBinding = BINDING_VISBUF_INSTANCE_BUFFER;
-            instWrite.descriptorCount = 1;
-            instWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            instWrite.pBufferInfo = &instanceBufInfo;
-            writes.push_back(instWrite);
-        }
+        writes[5].dstSet = descSet;
+        writes[5].dstBinding = BINDING_VISBUF_INSTANCE_BUFFER;
+        writes[5].descriptorCount = 1;
+        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[5].pBufferInfo = &instanceBufInfo;
 
-        // Binding 6: Material buffer (SSBO)
+        // Binding 6: Material buffer (SSBO) - use placeholder if not wired
         VkDescriptorBufferInfo materialBufInfo{};
-        materialBufInfo.buffer = resolveBuffers_.materialBuffer;
+        materialBufInfo.buffer = resolveBuffers_.materialBuffer != VK_NULL_HANDLE
+            ? resolveBuffers_.materialBuffer : placeholder;
         materialBufInfo.offset = 0;
-        materialBufInfo.range = resolveBuffers_.materialBufferSize;
+        materialBufInfo.range = resolveBuffers_.materialBuffer != VK_NULL_HANDLE
+            ? resolveBuffers_.materialBufferSize : PLACEHOLDER_BUFFER_SIZE;
 
-        if (resolveBuffers_.materialBuffer != VK_NULL_HANDLE) {
-            VkWriteDescriptorSet matWrite{};
-            matWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            matWrite.dstSet = descSet;
-            matWrite.dstBinding = BINDING_VISBUF_MATERIAL_BUFFER;
-            matWrite.descriptorCount = 1;
-            matWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            matWrite.pBufferInfo = &materialBufInfo;
-            writes.push_back(matWrite);
-        }
+        writes[6].dstSet = descSet;
+        writes[6].dstBinding = BINDING_VISBUF_MATERIAL_BUFFER;
+        writes[6].descriptorCount = 1;
+        writes[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[6].pBufferInfo = &materialBufInfo;
 
         // Binding 7: Resolve uniforms (UBO)
         VkDescriptorBufferInfo uniformBufInfo{};
@@ -1128,41 +1145,33 @@ void VisibilityBuffer::recordResolvePass(VkCommandBuffer cmd, uint32_t frameInde
         uniformBufInfo.offset = 0;
         uniformBufInfo.range = sizeof(VisBufResolveUniforms);
 
-        VkWriteDescriptorSet uboWrite{};
-        uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        uboWrite.dstSet = descSet;
-        uboWrite.dstBinding = BINDING_VISBUF_UNIFORMS;
-        uboWrite.descriptorCount = 1;
-        uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboWrite.pBufferInfo = &uniformBufInfo;
-        writes.push_back(uboWrite);
+        writes[7].dstSet = descSet;
+        writes[7].dstBinding = BINDING_VISBUF_UNIFORMS;
+        writes[7].descriptorCount = 1;
+        writes[7].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[7].pBufferInfo = &uniformBufInfo;
 
         // Binding 8: Material texture array (combined image sampler)
+        // Use placeholder texture if no texture array is wired
         VkDescriptorImageInfo texArrayInfo{};
         if (resolveBuffers_.textureArraySampler != VK_NULL_HANDLE) {
             texArrayInfo.sampler = resolveBuffers_.textureArraySampler;
         } else if (textureSampler_) {
             texArrayInfo.sampler = static_cast<VkSampler>(**textureSampler_);
         }
-        texArrayInfo.imageView = resolveBuffers_.textureArrayView;
+        texArrayInfo.imageView = resolveBuffers_.textureArrayView != VK_NULL_HANDLE
+            ? resolveBuffers_.textureArrayView : placeholderTexView_;
         texArrayInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        if (resolveBuffers_.textureArrayView != VK_NULL_HANDLE) {
-            VkWriteDescriptorSet texWrite{};
-            texWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            texWrite.dstSet = descSet;
-            texWrite.dstBinding = BINDING_VISBUF_TEXTURE_ARRAY;
-            texWrite.descriptorCount = 1;
-            texWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            texWrite.pImageInfo = &texArrayInfo;
-            writes.push_back(texWrite);
-        }
+        writes[8].dstSet = descSet;
+        writes[8].dstBinding = BINDING_VISBUF_TEXTURE_ARRAY;
+        writes[8].descriptorCount = 1;
+        writes[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[8].pImageInfo = &texArrayInfo;
 
-        if (!writes.empty()) {
-            vkUpdateDescriptorSets(device_,
-                                   static_cast<uint32_t>(writes.size()),
-                                   writes.data(), 0, nullptr);
-        }
+        vkUpdateDescriptorSets(device_,
+                               static_cast<uint32_t>(writes.size()),
+                               writes.data(), 0, nullptr);
 
         resolveDescSetsDirty_ = false;
     }
