@@ -157,15 +157,10 @@ public:
     bool hasCape() const { return hasCapeEnabled; }
     void setCapeEnabled(bool enabled) { hasCapeEnabled = enabled; }
 
-    // Weapon visibility
-    void setShowSword(bool show) { showSword_ = show; }
-    bool getShowSword() const { return showSword_; }
-    void setShowShield(bool show) { showShield_ = show; }
-    bool getShowShield() const { return showShield_; }
-
-    // Weapon debug axes
-    void setShowWeaponAxes(bool show) { showWeaponAxes_ = show; }
-    bool getShowWeaponAxes() const { return showWeaponAxes_; }
+    // Weapon visibility (controlled via WeaponTag.visible on entities)
+    void setShowSword(bool show);
+    void setShowShield(bool show);
+    void setShowWeaponAxes(bool show);
 
     // Well entrance position (for creating terrain hole)
     float getWellEntranceX() const { return wellEntranceX; }
@@ -283,10 +278,7 @@ private:
     PlayerCape playerCape;
     bool hasCapeEnabled = false;
 
-    // Weapon visibility and debug visualization
-    bool showSword_ = true;
-    bool showShield_ = true;
-    bool showWeaponAxes_ = false;
+    // (Weapon visibility now stored in WeaponTag.visible and DebugAxisTag.visible on entities)
 
     // Textures (managed via AssetRegistry with shared_ptr)
     std::shared_ptr<Texture> crateTexture_;

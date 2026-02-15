@@ -1196,30 +1196,39 @@ void Application::updateCameraOcclusion(float deltaTime) {
         currentlyOccluding.insert(hit.bodyId);
     }
 
-    // Update opacities using ECS queries - entities with PhysicsBody and Opacity components
+    // Update opacities and occlusion tags using ECS queries
     auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
 
-    // Query entities with PhysicsBody component (excludes player via PlayerTag check)
     for (auto [entity, physicsBody] : ecsWorld_.view<ecs::PhysicsBody>().each()) {
-        // Skip player entity
         if (ecsWorld_.has<ecs::PlayerTag>(entity)) continue;
 
         PhysicsBodyID bodyID = static_cast<PhysicsBodyID>(physicsBody.bodyId);
         if (bodyID == INVALID_BODY_ID) continue;
 
         bool isOccluding = currentlyOccluding.count(bodyID) > 0;
-        float targetOpacity = isOccluding ? occludedOpacity : 1.0f;
 
-        // Update renderable opacity via entity handle
+        // Update OccludingCamera tag
+        if (isOccluding && !ecsWorld_.has<ecs::OccludingCamera>(entity)) {
+            ecsWorld_.add<ecs::OccludingCamera>(entity);
+        } else if (!isOccluding && ecsWorld_.has<ecs::OccludingCamera>(entity)) {
+            ecsWorld_.remove<ecs::OccludingCamera>(entity);
+        }
+
+        // Update opacity via ECS component and sync to renderable
+        float targetOpacity = isOccluding ? occludedOpacity : 1.0f;
+        if (!ecsWorld_.has<ecs::Opacity>(entity)) {
+            ecsWorld_.add<ecs::Opacity>(entity, 1.0f);
+        }
+        auto& opacity = ecsWorld_.get<ecs::Opacity>(entity);
+        float fadeFactor = 1.0f - std::exp(-occlusionFadeSpeed * deltaTime);
+        opacity.value += (targetOpacity - opacity.value) * fadeFactor;
+
+        // Sync to renderable for current rendering pipeline
         Renderable* renderable = sceneBuilder.getRenderableForEntity(entity);
         if (renderable) {
-            float fadeFactor = 1.0f - std::exp(-occlusionFadeSpeed * deltaTime);
-            renderable->opacity += (targetOpacity - renderable->opacity) * fadeFactor;
+            renderable->opacity = opacity.value;
         }
     }
-
-    // Update tracking set
-    occludingBodies = std::move(currentlyOccluding);
 }
 
 void Application::updateFlag(float deltaTime) {

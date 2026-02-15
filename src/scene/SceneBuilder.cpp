@@ -196,21 +196,27 @@ void SceneBuilder::createEntitiesFromRenderables() {
                 break;
             case ObjectRole::DebugAxisRightX:
                 rightHandAxisEntities_[0] = entity;
+                ecsWorld_->add<ecs::DebugAxisTag>(entity);
                 break;
             case ObjectRole::DebugAxisRightY:
                 rightHandAxisEntities_[1] = entity;
+                ecsWorld_->add<ecs::DebugAxisTag>(entity);
                 break;
             case ObjectRole::DebugAxisRightZ:
                 rightHandAxisEntities_[2] = entity;
+                ecsWorld_->add<ecs::DebugAxisTag>(entity);
                 break;
             case ObjectRole::DebugAxisLeftX:
                 leftHandAxisEntities_[0] = entity;
+                ecsWorld_->add<ecs::DebugAxisTag>(entity);
                 break;
             case ObjectRole::DebugAxisLeftY:
                 leftHandAxisEntities_[1] = entity;
+                ecsWorld_->add<ecs::DebugAxisTag>(entity);
                 break;
             case ObjectRole::DebugAxisLeftZ:
                 leftHandAxisEntities_[2] = entity;
+                ecsWorld_->add<ecs::DebugAxisTag>(entity);
                 break;
             case ObjectRole::None:
                 break;
@@ -1010,6 +1016,25 @@ glm::mat4 SceneBuilder::buildCharacterTransform(const glm::vec3& position, float
     return transform;
 }
 
+void SceneBuilder::setShowSword(bool show) {
+    if (ecsWorld_ && swordEntity_ != ecs::NullEntity && ecsWorld_->has<ecs::WeaponTag>(swordEntity_)) {
+        ecsWorld_->get<ecs::WeaponTag>(swordEntity_).visible = show;
+    }
+}
+
+void SceneBuilder::setShowShield(bool show) {
+    if (ecsWorld_ && shieldEntity_ != ecs::NullEntity && ecsWorld_->has<ecs::WeaponTag>(shieldEntity_)) {
+        ecsWorld_->get<ecs::WeaponTag>(shieldEntity_).visible = show;
+    }
+}
+
+void SceneBuilder::setShowWeaponAxes(bool show) {
+    if (!ecsWorld_) return;
+    for (auto [entity, axis] : ecsWorld_->view<ecs::DebugAxisTag>().each()) {
+        axis.visible = show;
+    }
+}
+
 void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {
     Renderable* playerRenderable = getRenderableForEntity(playerEntity_);
     if (!playerRenderable) return;
@@ -1171,8 +1196,10 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     };
 
     // Update sword transform (attached to right hand)
-    if (swordEntity_ != ecs::NullEntity) {
-        if (showSword_ && rightHandBoneIndex >= 0) {
+    if (swordEntity_ != ecs::NullEntity && ecsWorld_) {
+        bool swordVisible = ecsWorld_->has<ecs::WeaponTag>(swordEntity_) &&
+                            ecsWorld_->get<ecs::WeaponTag>(swordEntity_).visible;
+        if (swordVisible && rightHandBoneIndex >= 0) {
             glm::mat4 boneWorld = worldTransform * globalTransforms[rightHandBoneIndex];
 
             // Cylinder has height along Y. We want it to point along bone's -X axis.
@@ -1187,8 +1214,10 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
     }
 
     // Update shield transform (attached to left hand)
-    if (shieldEntity_ != ecs::NullEntity) {
-        if (showShield_ && leftHandBoneIndex >= 0) {
+    if (shieldEntity_ != ecs::NullEntity && ecsWorld_) {
+        bool shieldVisible = ecsWorld_->has<ecs::WeaponTag>(shieldEntity_) &&
+                             ecsWorld_->get<ecs::WeaponTag>(shieldEntity_).visible;
+        if (shieldVisible && leftHandBoneIndex >= 0) {
             glm::mat4 boneWorld = worldTransform * globalTransforms[leftHandBoneIndex];
 
             // Shield flat face (cylinder Y axis) should point outward along -Z (blue axis)
@@ -1206,8 +1235,10 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
         glm::mat4 boneWorld = worldTransform * globalTransforms[rightHandBoneIndex];
 
         auto updateAxis = [&](ecs::Entity entity, const glm::mat4& offset) {
-            if (entity != ecs::NullEntity) {
-                updateRenderable(entity, showWeaponAxes_ ? (boneWorld * offset) : hideTransform);
+            if (entity != ecs::NullEntity && ecsWorld_) {
+                bool axisVisible = ecsWorld_->has<ecs::DebugAxisTag>(entity) &&
+                                   ecsWorld_->get<ecs::DebugAxisTag>(entity).visible;
+                updateRenderable(entity, axisVisible ? (boneWorld * offset) : hideTransform);
             }
         };
 
@@ -1231,8 +1262,10 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
         glm::mat4 boneWorld = worldTransform * globalTransforms[leftHandBoneIndex];
 
         auto updateAxis = [&](ecs::Entity entity, const glm::mat4& offset) {
-            if (entity != ecs::NullEntity) {
-                updateRenderable(entity, showWeaponAxes_ ? (boneWorld * offset) : hideTransform);
+            if (entity != ecs::NullEntity && ecsWorld_) {
+                bool axisVisible = ecsWorld_->has<ecs::DebugAxisTag>(entity) &&
+                                   ecsWorld_->get<ecs::DebugAxisTag>(entity).visible;
+                updateRenderable(entity, axisVisible ? (boneWorld * offset) : hideTransform);
             }
         };
 

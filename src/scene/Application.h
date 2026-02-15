@@ -3,7 +3,6 @@
 #include <SDL3/SDL.h>
 #include <string>
 #include <vector>
-#include <unordered_set>
 #include <optional>
 #include <memory>
 #include "Renderer.h"
@@ -70,8 +69,7 @@ private:
     float currentFps = 60.0f;
     float lastDeltaTime = 0.016f;
 
-    // Camera occlusion tracking
-    std::unordered_set<PhysicsBodyID> occludingBodies;
+    // Camera occlusion parameters (tracking via OccludingCamera ECS tag)
     static constexpr float occlusionFadeSpeed = 8.0f;
     static constexpr float occludedOpacity = 0.3f;
 

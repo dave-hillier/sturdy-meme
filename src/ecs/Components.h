@@ -441,9 +441,11 @@ enum class WeaponSlot : uint8_t {
 
 struct WeaponTag {
     WeaponSlot slot;
+    bool visible = true;  // User-controlled visibility (separate from frustum culling)
 
     WeaponTag() : slot(WeaponSlot::RightHand) {}
     explicit WeaponTag(WeaponSlot s) : slot(s) {}
+    WeaponTag(WeaponSlot s, bool vis) : slot(s), visible(vis) {}
 };
 
 // NPC entity marker
@@ -456,6 +458,16 @@ struct NPCTag {
 
 // Well entrance (terrain hole marker)
 struct WellEntranceTag {};
+
+// Debug axis indicator (for weapon bone visualization)
+struct DebugAxisTag {
+    bool visible = false;  // User-controlled visibility
+    DebugAxisTag() = default;
+    explicit DebugAxisTag(bool vis) : visible(vis) {}
+};
+
+// Camera occlusion marker (entity is between camera and player)
+struct OccludingCamera {};
 
 // =============================================================================
 // NPC Animation Components
