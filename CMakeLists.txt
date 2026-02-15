@@ -82,6 +82,7 @@ set(SOURCES
     src/core/passes/ShadowPassResources.cpp
     src/core/passes/WaterPasses.cpp
     src/core/passes/HDRPass.cpp
+    src/core/passes/VisBufferPasses.cpp
     src/core/passes/HDRPassRecorder.cpp
     src/core/passes/HDRPassResources.cpp
     src/core/passes/SceneObjectsDrawable.cpp
@@ -179,6 +180,7 @@ set(SOURCES
     src/visibility/VisibilityBuffer.cpp
     src/visibility/MeshClusterBuilder.cpp
     src/visibility/TwoPassCuller.cpp
+    src/visibility/GPUMaterialBuffer.cpp
     # Lighting
     src/lighting/FroxelSystem.cpp
     src/lighting/ShadowSystem.cpp

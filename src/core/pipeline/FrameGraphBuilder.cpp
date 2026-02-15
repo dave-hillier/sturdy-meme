@@ -7,6 +7,7 @@
 #include "passes/WaterPasses.h"
 #include "passes/HDRPass.h"
 #include "passes/PostPasses.h"
+#include "passes/VisBufferPasses.h"
 
 #include <SDL3/SDL.h>
 
@@ -47,6 +48,9 @@ bool FrameGraphBuilder::build(
     hdrConfig.recordHDRPassSecondarySlot = callbacks.recordHDRPassSecondarySlot;
     auto hdr = HDRPass::addPass(frameGraph, systems, hdrConfig);
 
+    // Visibility buffer resolve pass (material evaluation)
+    auto visBufferIds = VisBufferPasses::addPasses(frameGraph, systems);
+
     // Post passes (HiZ, bloom, bilateral grid, final composite)
     PostPasses::Config postConfig;
     postConfig.guiRenderCallback = callbacks.guiRenderCallback;
@@ -82,12 +86,19 @@ bool FrameGraphBuilder::build(
         frameGraph.addDependency(computeIds.gpuCull, hdr);
     }
 
-    // Post-HDR passes depend on HDR
-    frameGraph.addDependency(hdr, waterIds.ssr);
-    frameGraph.addDependency(hdr, waterIds.waterTileCull);
-    frameGraph.addDependency(hdr, postIds.hiZ);
-    frameGraph.addDependency(hdr, postIds.bilateralGrid);
-    frameGraph.addDependency(hdr, postIds.godRays);
+    // VisBuffer resolve depends on HDR (V-buffer rasterization happens there)
+    if (visBufferIds.resolve != FrameGraph::INVALID_PASS) {
+        frameGraph.addDependency(hdr, visBufferIds.resolve);
+    }
+
+    // Post-HDR passes depend on HDR (and VisBuffer resolve if active)
+    FrameGraph::PassId postDep = (visBufferIds.resolve != FrameGraph::INVALID_PASS)
+        ? visBufferIds.resolve : hdr;
+    frameGraph.addDependency(postDep, waterIds.ssr);
+    frameGraph.addDependency(postDep, waterIds.waterTileCull);
+    frameGraph.addDependency(postDep, postIds.hiZ);
+    frameGraph.addDependency(postDep, postIds.bilateralGrid);
+    frameGraph.addDependency(postDep, postIds.godRays);
 
     // Bloom depends on HiZ
     frameGraph.addDependency(postIds.hiZ, postIds.bloom);

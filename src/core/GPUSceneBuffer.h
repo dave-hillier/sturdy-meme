@@ -37,7 +37,7 @@ struct alignas(16) GPUSceneInstanceData {
     uint32_t pbrFlags;            // 4 bytes, offset 96
     float alphaTestThreshold;     // 4 bytes, offset 100
     float hueShift;               // 4 bytes, offset 104
-    float _pad1;                  // 4 bytes, offset 108
+    uint32_t materialId;          // 4 bytes, offset 108 (index into material buffer)
     // Total: 112 bytes per instance
 };
 static_assert(sizeof(GPUSceneInstanceData) == 112, "GPUSceneInstanceData size mismatch with shader");

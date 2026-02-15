@@ -32,6 +32,7 @@
 #include "HiZSystem.h"
 #include "ScreenSpaceShadowSystem.h"
 #include "VisibilityBuffer.h"
+#include "GPUMaterialBuffer.h"
 #include "GPUSceneBuffer.h"
 #include "culling/GPUCullPass.h"
 #include "WaterSystem.h"
@@ -192,6 +193,10 @@ void RendererSystems::setScreenSpaceShadow(std::unique_ptr<ScreenSpaceShadowSyst
 
 void RendererSystems::setVisibilityBuffer(std::unique_ptr<VisibilityBuffer> system) {
     visibilityBuffer_ = std::move(system);
+}
+
+void RendererSystems::setGPUMaterialBuffer(std::unique_ptr<GPUMaterialBuffer> buffer) {
+    gpuMaterialBuffer_ = std::move(buffer);
 }
 
 void RendererSystems::setSky(std::unique_ptr<SkySystem> system) {

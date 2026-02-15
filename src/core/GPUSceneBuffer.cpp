@@ -126,7 +126,7 @@ int32_t GPUSceneBuffer::addObject(const Renderable& renderable) {
     instance.pbrFlags = renderable.pbrFlags;
     instance.alphaTestThreshold = renderable.alphaTestThreshold;
     instance.hueShift = renderable.hueShift;
-    instance._pad1 = 0.0f;
+    instance.materialId = renderable.materialId;
 
     instances_.push_back(instance);
 
