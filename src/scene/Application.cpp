@@ -1368,20 +1368,9 @@ void Application::updateECS(float deltaTime) {
         }
     }
 
-    // Update bone attachments from skeleton
-    if (sceneBuilder.hasCharacter() && ecsWeaponsInitialized_) {
-        const auto& skeleton = sceneBuilder.getAnimatedCharacter().getSkeleton();
-        std::vector<glm::mat4> globalBoneTransforms;
-        skeleton.computeGlobalTransforms(globalBoneTransforms);
-
-        // Get character world transform from player state
-        glm::mat4 characterWorld = player_.movement.getModelMatrix(player_.transform);
-
-        // Update all bone-attached entities (ECS Transform only, for inspector/hierarchy)
-        // Renderable transforms are set by updateWeaponTransforms() which runs after
-        // the skeleton is animated and uses the correct player renderable world transform.
-        ecs::systems::updateBoneAttachments(ecsWorld_, characterWorld, globalBoneTransforms);
-    }
+    // Note: bone-attached entity transforms (weapons, debug axes) are updated by
+    // SceneBuilder::updateWeaponTransforms() which runs after skeleton animation and
+    // syncs both Renderable and ECS Transform using the correct world transform.
 
     // Update ECS material demo (wetness/damage cycling, selection toggling)
     static float totalTime = 0.0f;

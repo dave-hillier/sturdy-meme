@@ -1237,7 +1237,7 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
 
     glm::mat4 hideTransform = glm::scale(glm::mat4(1.0f), glm::vec3(0.0f));
 
-    // Position a bone-attached entity's Renderable, or hide it
+    // Position a bone-attached entity's Renderable and sync ECS Transform
     auto updateAttached = [&](ecs::Entity entity, int boneIndex, const glm::mat4& offset, bool visible) {
         if (entity == ecs::NullEntity) return;
         Renderable* r = getRenderableForEntity(entity);
@@ -1246,6 +1246,10 @@ void SceneBuilder::updateWeaponTransforms(const glm::mat4& worldTransform) {
             r->transform = worldTransform * globalTransforms[boneIndex] * offset;
         } else {
             r->transform = hideTransform;
+        }
+        // Keep ECS Transform in sync so gizmos and inspector show correct values
+        if (ecsWorld_->has<ecs::Transform>(entity)) {
+            ecsWorld_->get<ecs::Transform>(entity).matrix = r->transform;
         }
     };
 
