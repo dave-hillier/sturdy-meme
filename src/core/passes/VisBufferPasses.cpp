@@ -12,11 +12,147 @@
 #include "npc/NPCSimulation.h"
 #include "Mesh.h"
 #include "MaterialRegistry.h"
+#include "MeshClusterBuilder.h"
 
 #include <algorithm>
 #include <unordered_set>
+#include <unordered_map>
 
 namespace VisBufferPasses {
+
+// ============================================================================
+// Persistent cluster state (survives across frames)
+// ============================================================================
+
+struct ClusterState {
+    bool built = false;
+
+    // Clustered mesh data (CPU-side, kept for reference)
+    std::unordered_map<const Mesh*, ClusteredMesh> clusteredMeshes;
+
+    uint32_t totalDrawCommands = 0;
+};
+
+// Static cluster state - persists across frames
+static ClusterState s_clusterState;
+
+// ============================================================================
+// Build clusters from scene meshes (called once lazily)
+// ============================================================================
+
+static bool buildClusterState(RendererSystems& systems) {
+    auto* visBuf = systems.visibilityBuffer();
+    auto* clusterBuf = systems.gpuClusterBuffer();
+    if (!visBuf || !clusterBuf) return false;
+
+    const auto& sceneObjects = systems.scene().getRenderables();
+    SceneBuilder& sceneBuilder = systems.scene().getSceneBuilder();
+    size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
+    bool hasCharacter = sceneBuilder.hasCharacter();
+    const NPCSimulation* npcSim = sceneBuilder.getNPCSimulation();
+
+    // Collect unique meshes from renderable scene objects (excluding player/NPCs)
+    std::unordered_set<const Mesh*> meshSet;
+    for (size_t i = 0; i < sceneObjects.size(); ++i) {
+        if (hasCharacter && i == playerIndex) continue;
+        if (npcSim) {
+            bool isNPC = false;
+            const auto& npcData = npcSim->getData();
+            for (size_t npcIdx = 0; npcIdx < npcData.count(); ++npcIdx) {
+                if (i == npcData.renderableIndices[npcIdx]) {
+                    isNPC = true;
+                    break;
+                }
+            }
+            if (isNPC) continue;
+        }
+        if (sceneObjects[i].mesh) {
+            meshSet.insert(sceneObjects[i].mesh);
+        }
+    }
+
+    if (meshSet.empty()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "VisBufferPasses: No meshes to cluster");
+        return false;
+    }
+
+    // Build clusters for each unique mesh
+    MeshClusterBuilder builder;
+    builder.setTargetClusterSize(64);
+
+    uint32_t meshId = 0;
+    std::vector<std::pair<const Mesh*, const ClusteredMesh*>> meshClusterPairs;
+
+    for (const Mesh* mesh : meshSet) {
+        const auto& vertices = mesh->getVertices();
+        const auto& indices = mesh->getIndices();
+
+        if (vertices.empty() || indices.empty()) {
+            meshId++;
+            continue;
+        }
+
+        // Build clusters with DAG hierarchy for LOD
+        ClusteredMesh clustered = builder.buildWithDAG(vertices, indices, meshId);
+
+        SDL_Log("VisBufferPasses: Mesh %u clustered: %u clusters, %u triangles, %u DAG levels",
+                meshId, clustered.totalClusters, clustered.totalTriangles, clustered.dagLevels);
+
+        // Upload to GPUClusterBuffer
+        uint32_t baseCluster = clusterBuf->uploadMesh(clustered);
+        if (baseCluster == UINT32_MAX) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "VisBufferPasses: Failed to upload mesh %u to GPUClusterBuffer", meshId);
+            meshId++;
+            continue;
+        }
+
+        s_clusterState.clusteredMeshes[mesh] = std::move(clustered);
+        meshClusterPairs.push_back({mesh, &s_clusterState.clusteredMeshes[mesh]});
+        meshId++;
+    }
+
+    if (meshClusterPairs.empty()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "VisBufferPasses: No meshes successfully clustered");
+        return false;
+    }
+
+    // Build the packed vertex/index buffer for resolve from cluster data
+    // This ensures triangleIds in the raster output match the resolve buffer
+    visBuf->buildGlobalBuffersFromClusters(meshClusterPairs);
+
+    // Count total draw commands (leaf clusters x instances)
+    uint32_t totalDraws = 0;
+    for (size_t i = 0; i < sceneObjects.size(); ++i) {
+        if (hasCharacter && i == playerIndex) continue;
+        if (npcSim) {
+            bool isNPC = false;
+            const auto& npcData = npcSim->getData();
+            for (size_t npcIdx = 0; npcIdx < npcData.count(); ++npcIdx) {
+                if (i == npcData.renderableIndices[npcIdx]) {
+                    isNPC = true;
+                    break;
+                }
+            }
+            if (isNPC) continue;
+        }
+        const auto& obj = sceneObjects[i];
+        if (!obj.mesh) continue;
+        auto it = s_clusterState.clusteredMeshes.find(obj.mesh);
+        if (it == s_clusterState.clusteredMeshes.end()) continue;
+        for (const auto& cluster : it->second.clusters) {
+            if (cluster.lodLevel == 0) totalDraws++;
+        }
+    }
+
+    s_clusterState.totalDrawCommands = totalDraws;
+    s_clusterState.built = true;
+
+    SDL_Log("VisBufferPasses: Cluster state built: %u draw commands from %zu meshes",
+            totalDraws, meshClusterPairs.size());
+    return true;
+}
 
 // ============================================================================
 // Raster pass: Draw scene objects into the V-buffer
@@ -34,11 +170,17 @@ static void executeRasterPass(FrameGraph::RenderContext& ctx, RendererSystems& s
 
     systems.profiler().beginGpuZone(cmd, "VisBufferRaster");
 
-    // Lazily build global vertex/index buffers on first frame
-    if (!visBuf->hasGlobalBuffers()) {
+    // Lazily build cluster state if GPUClusterBuffer is available
+    bool useClusters = false;
+    if (systems.hasGPUClusterBuffer() && !s_clusterState.built) {
+        buildClusterState(systems);
+    }
+    useClusters = s_clusterState.built;
+
+    // Lazily build global vertex/index buffers on first frame (fallback path)
+    if (!visBuf->hasGlobalBuffers() && !useClusters) {
         const auto& sceneObjects = systems.scene().getRenderables();
 
-        // Collect unique meshes
         std::unordered_set<const Mesh*> meshSet;
         for (const auto& obj : sceneObjects) {
             if (obj.mesh) meshSet.insert(obj.mesh);
@@ -54,14 +196,13 @@ static void executeRasterPass(FrameGraph::RenderContext& ctx, RendererSystems& s
     if (!visBuf->hasTextureArray()) {
         const auto& registry = systems.scene().getSceneBuilder().getMaterialRegistry();
         if (visBuf->buildMaterialTextureArray(registry)) {
-            // Re-upload materials with correct texture array indices
             if (systems.hasGPUMaterialBuffer()) {
                 systems.gpuMaterialBuffer()->uploadFromRegistry(registry, *visBuf);
             }
         }
     }
 
-    // Lazily create raster descriptor sets (need UBO buffers from GlobalBufferManager)
+    // Lazily create raster descriptor sets
     if (!visBuf->hasRasterDescriptorSets()) {
         const auto& uboBuffers = systems.globalBuffers().getUniformBuffers();
         VkDeviceSize uboSize = systems.globalBuffers().getUniformBufferSize();
@@ -79,7 +220,7 @@ static void executeRasterPass(FrameGraph::RenderContext& ctx, RendererSystems& s
     VkExtent2D extent = visBuf->getExtent();
 
     std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color.uint32[0] = 0;  // V-buffer clear: 0 = no geometry
+    clearValues[0].color.uint32[0] = 0;
     clearValues[1].depthStencil = {1.0f, 0};
 
     VkRenderPassBeginInfo rpBeginInfo{};
@@ -113,7 +254,7 @@ static void executeRasterPass(FrameGraph::RenderContext& ctx, RendererSystems& s
                               vk::PipelineLayout(visBuf->getRasterPipelineLayout()),
                               0, vk::DescriptorSet(rasterDescSet), {});
 
-    // Iterate scene objects (same order as GPUSceneBuffer population in FrameUpdater)
+    // Iterate scene objects
     const auto& sceneObjects = systems.scene().getRenderables();
     SceneBuilder& sceneBuilder = systems.scene().getSceneBuilder();
     size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
@@ -121,63 +262,123 @@ static void executeRasterPass(FrameGraph::RenderContext& ctx, RendererSystems& s
     const NPCSimulation* npcSim = sceneBuilder.getNPCSimulation();
 
     uint32_t instanceId = 0;
-    uint32_t rasterizedCount = 0;
 
-    for (size_t i = 0; i < sceneObjects.size(); ++i) {
-        // Skip player character (rendered with GPU skinning)
-        if (hasCharacter && i == playerIndex) continue;
+    if (useClusters) {
+        // Cluster-based raster: bind GPUClusterBuffer vertex/index once,
+        // then draw each cluster per object with push constants.
+        // Future: replace with vkCmdDrawIndexedIndirectCount via TwoPassCuller.
+        auto* clusterBuf = systems.gpuClusterBuffer();
 
-        // Skip NPC characters (rendered with GPU skinning)
-        if (npcSim) {
-            bool isNPC = false;
-            const auto& npcData = npcSim->getData();
-            for (size_t npcIdx = 0; npcIdx < npcData.count(); ++npcIdx) {
-                if (i == npcData.renderableIndices[npcIdx]) {
-                    isNPC = true;
-                    break;
-                }
-            }
-            if (isNPC) {
-                continue;
-            }
-        }
-
-        const auto& obj = sceneObjects[i];
-        if (!obj.mesh) {
-            instanceId++;
-            continue;
-        }
-
-        // Look up mesh info for triangle offset
-        const VisBufMeshInfo* meshInfo = visBuf->getMeshInfo(obj.mesh);
-        if (!meshInfo) {
-            instanceId++;
-            continue;
-        }
-
-        // Push V-buffer constants
-        VisBufPushConstants push{};
-        push.model = obj.transform;
-        push.instanceId = instanceId;
-        push.triangleOffset = meshInfo->triangleOffset;
-        push.alphaTestThreshold = 0.0f;  // Skip alpha testing for now (all opaque)
-
-        vkCmd.pushConstants<VisBufPushConstants>(
-            vk::PipelineLayout(visBuf->getRasterPipelineLayout()),
-            vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-            0, push);
-
-        // Bind per-mesh vertex/index buffers
-        vk::Buffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
+        vk::Buffer vertexBuffers[] = {vk::Buffer(clusterBuf->getVertexBuffer())};
         vk::DeviceSize offsets[] = {0};
         vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
-        vkCmd.bindIndexBuffer(obj.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+        vkCmd.bindIndexBuffer(vk::Buffer(clusterBuf->getIndexBuffer()), 0, vk::IndexType::eUint32);
 
-        // Draw
-        vkCmd.drawIndexed(obj.mesh->getIndexCount(), 1, 0, 0, 0);
+        for (size_t i = 0; i < sceneObjects.size(); ++i) {
+            if (hasCharacter && i == playerIndex) continue;
 
-        instanceId++;
-        rasterizedCount++;
+            if (npcSim) {
+                bool isNPC = false;
+                const auto& npcData = npcSim->getData();
+                for (size_t npcIdx = 0; npcIdx < npcData.count(); ++npcIdx) {
+                    if (i == npcData.renderableIndices[npcIdx]) {
+                        isNPC = true;
+                        break;
+                    }
+                }
+                if (isNPC) continue;
+            }
+
+            const auto& obj = sceneObjects[i];
+            if (!obj.mesh) {
+                instanceId++;
+                continue;
+            }
+
+            auto it = s_clusterState.clusteredMeshes.find(obj.mesh);
+            if (it == s_clusterState.clusteredMeshes.end()) {
+                instanceId++;
+                continue;
+            }
+
+            const ClusteredMesh& clustered = it->second;
+            const VisBufMeshInfo* meshInfo = visBuf->getMeshInfo(obj.mesh);
+            if (!meshInfo) {
+                instanceId++;
+                continue;
+            }
+
+            // Draw each leaf cluster for this instance
+            for (const auto& cluster : clustered.clusters) {
+                if (cluster.lodLevel != 0) continue;
+
+                VisBufPushConstants push{};
+                push.model = obj.transform;
+                push.instanceId = instanceId;
+                push.triangleOffset = meshInfo->triangleOffset + cluster.firstIndex / 3;
+                push.alphaTestThreshold = 0.0f;
+
+                vkCmd.pushConstants<VisBufPushConstants>(
+                    vk::PipelineLayout(visBuf->getRasterPipelineLayout()),
+                    vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+                    0, push);
+
+                vkCmd.drawIndexed(cluster.indexCount, 1,
+                                  meshInfo->globalIndexOffset + cluster.firstIndex,
+                                  static_cast<int32_t>(meshInfo->globalVertexOffset), 0);
+            }
+
+            instanceId++;
+        }
+    } else {
+        // Fallback: per-object draws with original mesh vertex/index buffers
+        for (size_t i = 0; i < sceneObjects.size(); ++i) {
+            if (hasCharacter && i == playerIndex) continue;
+
+            if (npcSim) {
+                bool isNPC = false;
+                const auto& npcData = npcSim->getData();
+                for (size_t npcIdx = 0; npcIdx < npcData.count(); ++npcIdx) {
+                    if (i == npcData.renderableIndices[npcIdx]) {
+                        isNPC = true;
+                        break;
+                    }
+                }
+                if (isNPC) continue;
+            }
+
+            const auto& obj = sceneObjects[i];
+            if (!obj.mesh) {
+                instanceId++;
+                continue;
+            }
+
+            const VisBufMeshInfo* meshInfo = visBuf->getMeshInfo(obj.mesh);
+            if (!meshInfo) {
+                instanceId++;
+                continue;
+            }
+
+            VisBufPushConstants push{};
+            push.model = obj.transform;
+            push.instanceId = instanceId;
+            push.triangleOffset = meshInfo->triangleOffset;
+            push.alphaTestThreshold = 0.0f;
+
+            vkCmd.pushConstants<VisBufPushConstants>(
+                vk::PipelineLayout(visBuf->getRasterPipelineLayout()),
+                vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+                0, push);
+
+            vk::Buffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
+            vk::DeviceSize offsets[] = {0};
+            vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
+            vkCmd.bindIndexBuffer(obj.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+
+            vkCmd.drawIndexed(obj.mesh->getIndexCount(), 1, 0, 0, 0);
+
+            instanceId++;
+        }
     }
 
     vkCmdEndRenderPass(cmd);
@@ -235,7 +436,7 @@ static void executeResolvePass(FrameGraph::RenderContext& ctx, RendererSystems& 
             resolveBuffers.textureArraySampler = visBuf->getTextureArraySampler();
         }
 
-        // HDR depth for depth comparison (prevents overwriting closer HDR-pass objects)
+        // HDR depth for depth comparison
         resolveBuffers.hdrDepthView = renderCtx->resources.hdrDepthView;
         resolveBuffers.hdrDepthImage = renderCtx->resources.hdrDepthImage;
 

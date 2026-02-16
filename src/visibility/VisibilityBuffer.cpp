@@ -1,6 +1,7 @@
 #include "VisibilityBuffer.h"
 #include "ShaderLoader.h"
 #include "Mesh.h"
+#include "MeshClusterBuilder.h"
 #include "Texture.h"
 #include "MaterialRegistry.h"
 #include "vulkan/CommandBufferUtils.h"
@@ -438,6 +439,204 @@ void VisibilityBuffer::destroyRasterPipeline() {
         rasterPipelineLayout_ = VK_NULL_HANDLE;
     }
     rasterDescSetLayout_.reset();
+}
+
+// ============================================================================
+// Cluster raster pipeline (indirect draws, SSBO-based transforms)
+// ============================================================================
+
+bool VisibilityBuffer::createClusterRasterPipeline() {
+    if (!raiiDevice_) return false;
+
+    // Descriptor set layout: UBO + instance SSBO + draw info SSBO
+    std::array<vk::DescriptorSetLayoutBinding, 3> layoutBindings;
+    layoutBindings[0] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_CLUSTER_UBO)
+        .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex);
+
+    layoutBindings[1] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_CLUSTER_INSTANCES)
+        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex);
+
+    layoutBindings[2] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_CLUSTER_DRAW_INFO)
+        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment);
+
+    auto layoutInfo = vk::DescriptorSetLayoutCreateInfo{}.setBindings(layoutBindings);
+    try {
+        clusterRasterDescSetLayout_.emplace(*raiiDevice_, layoutInfo);
+    } catch (const vk::SystemError& e) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VisibilityBuffer: Failed to create cluster raster desc set layout: %s", e.what());
+        return false;
+    }
+
+    // Pipeline layout (no push constants)
+    vk::DescriptorSetLayout vkLayout(**clusterRasterDescSetLayout_);
+    auto pipelineLayoutInfo = vk::PipelineLayoutCreateInfo{}.setSetLayouts(vkLayout);
+
+    vk::Device vkDevice(device_);
+    clusterRasterPipelineLayout_ = static_cast<VkPipelineLayout>(
+        vkDevice.createPipelineLayout(pipelineLayoutInfo));
+
+    // Load cluster raster shaders
+    auto vertModule = ShaderLoader::loadShaderModule(vkDevice, shaderPath_ + "/visbuf_cluster.vert.spv");
+    auto fragModule = ShaderLoader::loadShaderModule(vkDevice, shaderPath_ + "/visbuf_cluster.frag.spv");
+
+    if (!vertModule || !fragModule) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VisibilityBuffer: Failed to load cluster raster shaders");
+        return false;
+    }
+
+    std::array<vk::PipelineShaderStageCreateInfo, 2> shaderStages;
+    shaderStages[0] = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eVertex)
+        .setModule(*vertModule)
+        .setPName("main");
+    shaderStages[1] = vk::PipelineShaderStageCreateInfo{}
+        .setStage(vk::ShaderStageFlagBits::eFragment)
+        .setModule(*fragModule)
+        .setPName("main");
+
+    // Vertex input - same as standard Vertex
+    auto bindingDesc = Vertex::getBindingDescription();
+    auto attrDescs = Vertex::getAttributeDescriptions();
+
+    auto vertexInputInfo = vk::PipelineVertexInputStateCreateInfo{}
+        .setVertexBindingDescriptionCount(1)
+        .setPVertexBindingDescriptions(reinterpret_cast<const vk::VertexInputBindingDescription*>(&bindingDesc))
+        .setVertexAttributeDescriptionCount(static_cast<uint32_t>(attrDescs.size()))
+        .setPVertexAttributeDescriptions(reinterpret_cast<const vk::VertexInputAttributeDescription*>(attrDescs.data()));
+
+    auto inputAssembly = vk::PipelineInputAssemblyStateCreateInfo{}
+        .setTopology(vk::PrimitiveTopology::eTriangleList);
+
+    // Dynamic viewport/scissor
+    auto viewport = vk::Viewport{0.0f, 0.0f,
+        static_cast<float>(extent_.width), static_cast<float>(extent_.height), 0.0f, 1.0f};
+    auto scissor = vk::Rect2D{{0, 0}, {extent_.width, extent_.height}};
+    auto viewportState = vk::PipelineViewportStateCreateInfo{}
+        .setViewportCount(1).setPViewports(&viewport)
+        .setScissorCount(1).setPScissors(&scissor);
+
+    auto rasterizer = vk::PipelineRasterizationStateCreateInfo{}
+        .setDepthClampEnable(VK_FALSE)
+        .setRasterizerDiscardEnable(VK_FALSE)
+        .setPolygonMode(vk::PolygonMode::eFill)
+        .setCullMode(vk::CullModeFlagBits::eBack)
+        .setFrontFace(vk::FrontFace::eCounterClockwise)
+        .setLineWidth(1.0f);
+
+    auto multisample = vk::PipelineMultisampleStateCreateInfo{}
+        .setRasterizationSamples(vk::SampleCountFlagBits::e1);
+
+    auto depthStencil = vk::PipelineDepthStencilStateCreateInfo{}
+        .setDepthTestEnable(VK_TRUE)
+        .setDepthWriteEnable(VK_TRUE)
+        .setDepthCompareOp(vk::CompareOp::eLess);
+
+    auto colorBlendAttachment = vk::PipelineColorBlendAttachmentState{}
+        .setColorWriteMask(
+            vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+            vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA);
+
+    auto colorBlend = vk::PipelineColorBlendStateCreateInfo{}
+        .setAttachmentCount(1)
+        .setPAttachments(&colorBlendAttachment);
+
+    std::array<vk::DynamicState, 2> dynamicStates = {
+        vk::DynamicState::eViewport, vk::DynamicState::eScissor};
+    auto dynamicState = vk::PipelineDynamicStateCreateInfo{}.setDynamicStates(dynamicStates);
+
+    auto pipelineInfo = vk::GraphicsPipelineCreateInfo{}
+        .setStageCount(static_cast<uint32_t>(shaderStages.size()))
+        .setPStages(shaderStages.data())
+        .setPVertexInputState(&vertexInputInfo)
+        .setPInputAssemblyState(&inputAssembly)
+        .setPViewportState(&viewportState)
+        .setPRasterizationState(&rasterizer)
+        .setPMultisampleState(&multisample)
+        .setPDepthStencilState(&depthStencil)
+        .setPColorBlendState(&colorBlend)
+        .setPDynamicState(&dynamicState)
+        .setLayout(clusterRasterPipelineLayout_)
+        .setRenderPass(renderPass_)
+        .setSubpass(0);
+
+    auto result = vkDevice.createGraphicsPipeline(nullptr, pipelineInfo);
+    if (result.result != vk::Result::eSuccess) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VisibilityBuffer: Failed to create cluster raster pipeline");
+        return false;
+    }
+    clusterRasterPipeline_ = static_cast<VkPipeline>(result.value);
+
+    SDL_Log("VisibilityBuffer: Cluster raster pipeline created");
+    return true;
+}
+
+bool VisibilityBuffer::createClusterRasterDescriptorSets(
+    const std::vector<VkBuffer>& uboBuffers, VkDeviceSize uboSize,
+    const std::vector<VkBuffer>& instanceBuffers, VkDeviceSize instanceBufferSize,
+    VkBuffer drawInfoBuffer, VkDeviceSize drawInfoBufferSize) {
+
+    if (!clusterRasterDescSetLayout_ || uboBuffers.empty()) {
+        return false;
+    }
+
+    VkDescriptorSetLayout rawLayout = **clusterRasterDescSetLayout_;
+    clusterRasterDescSets_ = descriptorPool_->allocate(
+        rawLayout, static_cast<uint32_t>(uboBuffers.size()));
+
+    for (uint32_t i = 0; i < uboBuffers.size(); ++i) {
+        vk::DescriptorBufferInfo uboInfo{uboBuffers[i], 0, uboSize};
+        vk::DescriptorBufferInfo instanceInfo{
+            (i < instanceBuffers.size()) ? instanceBuffers[i] : instanceBuffers[0],
+            0, instanceBufferSize};
+        vk::DescriptorBufferInfo drawInfo{drawInfoBuffer, 0, drawInfoBufferSize};
+
+        std::array<vk::WriteDescriptorSet, 3> writes;
+        writes[0] = vk::WriteDescriptorSet{}
+            .setDstSet(clusterRasterDescSets_[i])
+            .setDstBinding(BINDING_CLUSTER_UBO)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(1)
+            .setPBufferInfo(&uboInfo);
+
+        writes[1] = vk::WriteDescriptorSet{}
+            .setDstSet(clusterRasterDescSets_[i])
+            .setDstBinding(BINDING_CLUSTER_INSTANCES)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setPBufferInfo(&instanceInfo);
+
+        writes[2] = vk::WriteDescriptorSet{}
+            .setDstSet(clusterRasterDescSets_[i])
+            .setDstBinding(BINDING_CLUSTER_DRAW_INFO)
+            .setDescriptorType(vk::DescriptorType::eStorageBuffer)
+            .setDescriptorCount(1)
+            .setPBufferInfo(&drawInfo);
+
+        vk::Device(device_).updateDescriptorSets(writes, {});
+    }
+
+    SDL_Log("VisibilityBuffer: Cluster raster descriptor sets created (%zu frames)",
+            uboBuffers.size());
+    return true;
+}
+
+VkDescriptorSet VisibilityBuffer::getClusterRasterDescriptorSet(uint32_t frameIndex) const {
+    if (frameIndex < clusterRasterDescSets_.size()) {
+        return clusterRasterDescSets_[frameIndex];
+    }
+    return VK_NULL_HANDLE;
 }
 
 // ============================================================================
@@ -1003,6 +1202,108 @@ bool VisibilityBuffer::buildGlobalBuffers(const std::vector<const Mesh*>& unique
     globalBuffersBuilt_ = true;
     SDL_Log("VisibilityBuffer: Global buffers built (%u vertices, %u indices, %zu meshes)",
             totalVertices, totalIndices, uniqueMeshes.size());
+    return true;
+}
+
+bool VisibilityBuffer::buildGlobalBuffersFromClusters(
+        const std::vector<std::pair<const Mesh*, const ClusteredMesh*>>& meshClusters) {
+    if (meshClusters.empty()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "VisibilityBuffer: No clustered meshes to build global buffers");
+        return false;
+    }
+
+    // Count total vertices and indices across all clustered meshes
+    uint32_t totalVertices = 0;
+    uint32_t totalIndices = 0;
+    for (const auto& [mesh, clustered] : meshClusters) {
+        if (!clustered) continue;
+        totalVertices += static_cast<uint32_t>(clustered->vertices.size());
+        totalIndices += static_cast<uint32_t>(clustered->indices.size());
+    }
+
+    if (totalVertices == 0 || totalIndices == 0) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "VisibilityBuffer: Empty clustered mesh data");
+        return false;
+    }
+
+    // Build CPU-side packed vertex and offset-adjusted index arrays
+    std::vector<VisBufPackedVertex> packedVertices;
+    packedVertices.reserve(totalVertices);
+    std::vector<uint32_t> globalIndices;
+    globalIndices.reserve(totalIndices);
+    meshInfoMap_.clear();
+
+    uint32_t currentVertexOffset = 0;
+    uint32_t currentIndexOffset = 0;
+
+    for (const auto& [mesh, clustered] : meshClusters) {
+        if (!clustered || !mesh) continue;
+
+        // Track mesh info (same structure as buildGlobalBuffers)
+        VisBufMeshInfo info{};
+        info.globalVertexOffset = currentVertexOffset;
+        info.globalIndexOffset = currentIndexOffset;
+        info.triangleOffset = currentIndexOffset / 3;
+        meshInfoMap_[mesh] = info;
+
+        // Repack cluster vertices into PackedVertex format
+        for (const auto& v : clustered->vertices) {
+            VisBufPackedVertex pv{};
+            pv.positionAndU = glm::vec4(v.position, v.texCoord.x);
+            pv.normalAndV = glm::vec4(v.normal, v.texCoord.y);
+            pv.tangent = v.tangent;
+            pv.color = v.color;
+            packedVertices.push_back(pv);
+        }
+
+        // Copy cluster indices, offset to global vertex space
+        for (uint32_t idx : clustered->indices) {
+            globalIndices.push_back(idx + currentVertexOffset);
+        }
+
+        currentVertexOffset += static_cast<uint32_t>(clustered->vertices.size());
+        currentIndexOffset += static_cast<uint32_t>(clustered->indices.size());
+    }
+
+    // Upload to GPU storage buffers
+    globalVertexBufferSize_ = packedVertices.size() * sizeof(VisBufPackedVertex);
+    globalIndexBufferSize_ = globalIndices.size() * sizeof(uint32_t);
+
+    if (!VmaBufferFactory::createStorageBufferHostWritable(
+            allocator_, globalVertexBufferSize_, globalVertexBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VisibilityBuffer: Failed to create cluster global vertex buffer");
+        return false;
+    }
+
+    VmaAllocationInfo vertAllocInfo{};
+    vmaGetAllocationInfo(allocator_, globalVertexBuffer_.get_deleter().allocation, &vertAllocInfo);
+    if (vertAllocInfo.pMappedData) {
+        memcpy(vertAllocInfo.pMappedData, packedVertices.data(), globalVertexBufferSize_);
+        vmaFlushAllocation(allocator_, globalVertexBuffer_.get_deleter().allocation,
+                           0, globalVertexBufferSize_);
+    }
+
+    if (!VmaBufferFactory::createStorageBufferHostWritable(
+            allocator_, globalIndexBufferSize_, globalIndexBuffer_)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VisibilityBuffer: Failed to create cluster global index buffer");
+        return false;
+    }
+
+    VmaAllocationInfo idxAllocInfo{};
+    vmaGetAllocationInfo(allocator_, globalIndexBuffer_.get_deleter().allocation, &idxAllocInfo);
+    if (idxAllocInfo.pMappedData) {
+        memcpy(idxAllocInfo.pMappedData, globalIndices.data(), globalIndexBufferSize_);
+        vmaFlushAllocation(allocator_, globalIndexBuffer_.get_deleter().allocation,
+                           0, globalIndexBufferSize_);
+    }
+
+    globalBuffersBuilt_ = true;
+    SDL_Log("VisibilityBuffer: Cluster global buffers built (%u vertices, %u indices, %zu meshes)",
+            totalVertices, totalIndices, meshClusters.size());
     return true;
 }
 

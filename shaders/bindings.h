@@ -512,6 +512,11 @@
 #define BINDING_VISBUF_TEXTURE_ARRAY       8   // Material texture array (sampler2DArray)
 #define BINDING_VISBUF_HDR_DEPTH           9   // HDR pass depth buffer (sampler2D) for depth comparison
 
+// Cluster Raster Pass (separate descriptor set for indirect cluster draws)
+#define BINDING_CLUSTER_UBO                0   // Main UBO (view/proj matrices)
+#define BINDING_CLUSTER_INSTANCES          1   // Instance data SSBO (GPUSceneInstanceData[])
+#define BINDING_CLUSTER_DRAW_INFO          2   // Per-draw cluster metadata SSBO (DrawClusterInfo[])
+
 // Visibility Buffer Debug Visualization (fullscreen pass)
 #define BINDING_VISBUF_DEBUG_INPUT         0   // Visibility buffer input (usampler2D)
 #define BINDING_VISBUF_DEBUG_DEPTH_INPUT   1   // Depth buffer input (sampler2D)
@@ -916,6 +921,9 @@ constexpr uint32_t VISBUF_UNIFORMS         = BINDING_VISBUF_UNIFORMS;
 constexpr uint32_t VISBUF_HDR_DEPTH        = BINDING_VISBUF_HDR_DEPTH;
 constexpr uint32_t VISBUF_DEBUG_INPUT      = BINDING_VISBUF_DEBUG_INPUT;
 constexpr uint32_t VISBUF_DEBUG_DEPTH_INPUT = BINDING_VISBUF_DEBUG_DEPTH_INPUT;
+constexpr uint32_t CLUSTER_UBO             = BINDING_CLUSTER_UBO;
+constexpr uint32_t CLUSTER_INSTANCES       = BINDING_CLUSTER_INSTANCES;
+constexpr uint32_t CLUSTER_DRAW_INFO       = BINDING_CLUSTER_DRAW_INFO;
 
 } // namespace Bindings
 

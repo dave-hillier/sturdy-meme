@@ -21,6 +21,7 @@ class Mesh;
 class Texture;
 class MaterialRegistry;
 struct Renderable;
+struct ClusteredMesh;
 
 // Packed vertex format for SSBO (matches PackedVertex in visbuf_resolve.comp)
 struct VisBufPackedVertex {
@@ -70,6 +71,12 @@ struct VisBufPushConstants {
     uint32_t triangleOffset;
     float alphaTestThreshold;
     float _pad;
+};
+
+// Per-draw metadata for cluster indirect draws (matches GLSL DrawClusterInfo)
+struct DrawClusterInfo {
+    uint32_t instanceId;
+    uint32_t triangleOffset;  // = cluster.firstIndex / 3
 };
 
 // Push constants for debug visualization
@@ -207,6 +214,14 @@ public:
      */
     bool buildGlobalBuffers(const std::vector<const Mesh*>& uniqueMeshes);
 
+    /**
+     * Build global vertex/index buffers from clustered mesh data.
+     * Uses cluster vertex/index ordering so resolve triangleIds match cluster raster output.
+     * meshId maps each ClusteredMesh back to its source Mesh pointer.
+     */
+    bool buildGlobalBuffersFromClusters(
+        const std::vector<std::pair<const Mesh*, const ClusteredMesh*>>& meshClusters);
+
     /** Get mesh info (offsets) for a given mesh pointer. Returns nullptr if not found. */
     const VisBufMeshInfo* getMeshInfo(const Mesh* mesh) const;
 
@@ -245,6 +260,27 @@ public:
     VkImageView getTextureArrayView() const { return textureArrayView_; }
     VkSampler getTextureArraySampler() const;
     uint32_t getTextureLayerIndex(const Texture* tex) const;
+
+    // ====================================================================
+    // Cluster raster pipeline (indirect draws via SSBOs + gl_DrawID)
+    // ====================================================================
+
+    bool createClusterRasterPipeline();
+    VkPipeline getClusterRasterPipeline() const { return clusterRasterPipeline_; }
+    VkPipelineLayout getClusterRasterPipelineLayout() const { return clusterRasterPipelineLayout_; }
+    bool hasClusterRasterPipeline() const { return clusterRasterPipeline_ != VK_NULL_HANDLE; }
+
+    /**
+     * Create cluster raster descriptor sets.
+     * Binds: UBO, instance SSBO, draw info SSBO.
+     */
+    bool createClusterRasterDescriptorSets(
+        const std::vector<VkBuffer>& uboBuffers, VkDeviceSize uboSize,
+        const std::vector<VkBuffer>& instanceBuffers, VkDeviceSize instanceBufferSize,
+        VkBuffer drawInfoBuffer, VkDeviceSize drawInfoBufferSize);
+
+    VkDescriptorSet getClusterRasterDescriptorSet(uint32_t frameIndex) const;
+    bool hasClusterRasterDescriptorSets() const { return !clusterRasterDescSets_.empty(); }
 
     // Get the depth image/view (shared with main HDR pass when V-buffer is active)
     VkImageView getDepthView() const { return depthView_; }
@@ -311,6 +347,12 @@ private:
     std::optional<vk::raii::DescriptorSetLayout> rasterDescSetLayout_;
     VkPipelineLayout rasterPipelineLayout_ = VK_NULL_HANDLE;
     VkPipeline rasterPipeline_ = VK_NULL_HANDLE;
+
+    // Cluster rasterization pipeline (indirect draws, SSBO-based transforms)
+    std::optional<vk::raii::DescriptorSetLayout> clusterRasterDescSetLayout_;
+    VkPipelineLayout clusterRasterPipelineLayout_ = VK_NULL_HANDLE;
+    VkPipeline clusterRasterPipeline_ = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> clusterRasterDescSets_;
 
     // Debug visualization pipeline (fullscreen quad)
     std::optional<vk::raii::DescriptorSetLayout> debugDescSetLayout_;
