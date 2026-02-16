@@ -5,12 +5,13 @@
 #include "bindings.glsl"
 
 // Visibility buffer fragment shader
-// Writes packed (instanceID, triangleID) into a uint32 render target
+// Writes (instanceID, triangleID) into a 64-bit (R32G32_UINT) render target
 //
-// Packing format (32-bit):
-//   Bits [31:23] = instanceId (9 bits, up to 512 instances)
-//   Bits [22:0]  = triangleId (23 bits, up to ~8M triangles)
+// Output format:
+//   R (uint32) = instanceId + 1  (full 32-bit range)
+//   G (uint32) = triangleId + 1  (full 32-bit range)
 //
+// +1 bias: (0, 0) is reserved as the background sentinel (no geometry).
 // triangleId = gl_PrimitiveID + triangleOffset
 
 layout(location = 0) flat in uint inInstanceId;
@@ -27,7 +28,7 @@ layout(push_constant) uniform VisBufPushConstants {
 // Optional: diffuse texture for alpha testing (transparent objects)
 layout(binding = BINDING_DIFFUSE_TEX) uniform sampler2D diffuseTexture;
 
-layout(location = 0) out uint outVisibility;
+layout(location = 0) out uvec2 outVisibility;
 
 void main() {
     // Alpha test (for foliage/transparent objects)
@@ -40,6 +41,7 @@ void main() {
 
     uint triangleId = uint(gl_PrimitiveID) + visbuf.triangleOffset;
 
-    // Pack: 9 bits instance (512 max), 23 bits triangle (~8M max)
-    outVisibility = (inInstanceId << 23u) | (triangleId & 0x7FFFFFu);
+    // 64-bit V-buffer: no bit packing — full 32-bit per channel
+    // +1 bias so (0,0) remains the background sentinel
+    outVisibility = uvec2(inInstanceId + 1u, triangleId + 1u);
 }

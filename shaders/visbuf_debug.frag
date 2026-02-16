@@ -6,6 +6,7 @@
 
 // Visibility buffer debug visualization fragment shader
 // Colors pixels by instance ID and triangle ID for verification
+// Reads R32G32_UINT V-buffer: R=instanceId+1, G=triangleId+1 (0=background)
 
 layout(binding = BINDING_VISBUF_DEBUG_INPUT) uniform usampler2D visibilityBuffer;
 layout(binding = BINDING_VISBUF_DEBUG_DEPTH_INPUT) uniform sampler2D depthBuffer;
@@ -34,17 +35,17 @@ layout(push_constant) uniform DebugPushConstants {
 } debugParams;
 
 void main() {
-    uint packed = texture(visibilityBuffer, inTexCoord).r;
+    uvec4 packed = texture(visibilityBuffer, inTexCoord);
 
-    // 0 means no geometry was written (background)
-    if (packed == 0u) {
+    // (0, 0) means no geometry was written (background)
+    if (packed.r == 0u && packed.g == 0u) {
         outColor = vec4(0.05, 0.05, 0.1, 1.0);  // Dark background
         return;
     }
 
-    // Unpack: 9 bits instance, 23 bits triangle
-    uint instanceId = packed >> 23u;
-    uint triangleId = packed & 0x7FFFFFu;
+    // 64-bit V-buffer: separate channels, -1 to undo bias
+    uint instanceId = packed.r - 1u;
+    uint triangleId = packed.g - 1u;
 
     if (debugParams.mode == 0u) {
         // Color by instance ID

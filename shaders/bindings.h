@@ -501,7 +501,7 @@
 // =============================================================================
 // Visibility Buffer Descriptor Set (compute resolve pass)
 // =============================================================================
-#define BINDING_VISBUF_VISIBILITY          0   // Visibility buffer (uimage2D, R32UI)
+#define BINDING_VISBUF_VISIBILITY          0   // Visibility buffer (uimage2D, RG32UI — 64-bit)
 #define BINDING_VISBUF_DEPTH               1   // Depth buffer (sampler2D)
 #define BINDING_VISBUF_HDR_OUTPUT          2   // HDR output (image2D, RGBA16F)
 #define BINDING_VISBUF_VERTEX_BUFFER       3   // Global vertex buffer (SSBO)

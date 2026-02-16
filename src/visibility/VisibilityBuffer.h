@@ -80,10 +80,11 @@ struct VisBufDebugPushConstants {
  * VisibilityBuffer - GPU-driven visibility buffer rendering system
  *
  * Implements a two-phase rendering approach:
- * Phase 1 (rasterize): Render scene objects writing (instanceID, triangleID) to a uint32 target
+ * Phase 1 (rasterize): Render scene objects writing (instanceID, triangleID) to a uint target
  * Phase 2 (resolve):   Compute shader reads V-buffer, reconstructs attributes, evaluates materials
  *
- * The V-buffer target is a single R32_UINT image, dramatically reducing bandwidth vs G-buffer.
+ * The V-buffer target is a R32G32_UINT image (64-bit): R = instanceId, G = triangleId.
+ * Full 32-bit range for both IDs — no bit-packing limits.
  *
  * Usage:
  *   1. create() - Initialize once at startup
@@ -122,7 +123,7 @@ public:
 
     void resize(VkExtent2D newExtent);
 
-    // Get the V-buffer render pass (color=R32_UINT + depth)
+    // Get the V-buffer render pass (color=R32G32_UINT + depth)
     VkRenderPass getRenderPass() const { return renderPass_; }
     VkFramebuffer getFramebuffer() const { return framebuffer_; }
     VkExtent2D getExtent() const { return extent_; }
@@ -272,8 +273,8 @@ private:
     VkFormat depthFormat_ = VK_FORMAT_D32_SFLOAT;
     const vk::raii::Device* raiiDevice_ = nullptr;
 
-    // V-buffer render target (R32_UINT)
-    static constexpr VkFormat VISBUF_FORMAT = VK_FORMAT_R32_UINT;
+    // V-buffer render target (R32G32_UINT — 64-bit: R=instanceId, G=triangleId)
+    static constexpr VkFormat VISBUF_FORMAT = VK_FORMAT_R32G32_UINT;
     ManagedImage visibilityImage_;
     VkImageView visibilityView_ = VK_NULL_HANDLE;
 

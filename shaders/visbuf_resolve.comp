@@ -11,8 +11,8 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-// Visibility buffer (R32UI)
-layout(binding = BINDING_VISBUF_VISIBILITY, r32ui) uniform readonly uimage2D visibilityBuffer;
+// Visibility buffer (R32G32_UINT — R=instanceId+1, G=triangleId+1; 0=background)
+layout(binding = BINDING_VISBUF_VISIBILITY, rg32ui) uniform readonly uimage2D visibilityBuffer;
 
 // Depth buffer for position reconstruction
 layout(binding = BINDING_VISBUF_DEPTH) uniform sampler2D depthBuffer;
@@ -146,16 +146,17 @@ void main() {
         return;
     }
 
-    uint packed = imageLoad(visibilityBuffer, pixelCoord).r;
+    uvec2 packed = imageLoad(visibilityBuffer, pixelCoord).rg;
 
     // Background pixel - no V-buffer data, preserve existing HDR content
-    if (packed == 0u) {
+    // (0, 0) is the clear/sentinel value
+    if (packed.r == 0u && packed.g == 0u) {
         return;
     }
 
-    // Unpack visibility data
-    uint instanceId = packed >> 23u;
-    uint triangleId = packed & 0x7FFFFFu;
+    // 64-bit V-buffer: separate channels, -1 to undo the +1 bias from raster pass
+    uint instanceId = packed.r - 1u;
+    uint triangleId = packed.g - 1u;
 
     // Fetch triangle indices
     uint i0 = indices[triangleId * 3u + 0u];

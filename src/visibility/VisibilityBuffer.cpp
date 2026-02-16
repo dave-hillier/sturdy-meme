@@ -111,7 +111,7 @@ void VisibilityBuffer::cleanup() {
 // ============================================================================
 
 bool VisibilityBuffer::createRenderTargets() {
-    // V-buffer: R32_UINT for packed instance+triangle IDs
+    // V-buffer: R32G32_UINT — R=instanceId, G=triangleId (64-bit, no packing)
     bool ok = ImageBuilder(allocator_)
         .setExtent(extent_)
         .setFormat(VISBUF_FORMAT)
@@ -374,9 +374,9 @@ bool VisibilityBuffer::createRasterPipeline() {
         .setDepthWriteEnable(VK_TRUE)
         .setDepthCompareOp(vk::CompareOp::eLess);
 
-    // No blending for R32_UINT (integer format)
+    // No blending for R32G32_UINT (integer format) — write R and G channels
     auto colorBlendAttachment = vk::PipelineColorBlendAttachmentState{}
-        .setColorWriteMask(vk::ColorComponentFlagBits::eR);  // Only R channel for uint
+        .setColorWriteMask(vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG);
 
     auto colorBlending = vk::PipelineColorBlendStateCreateInfo{}
         .setAttachmentCount(1)

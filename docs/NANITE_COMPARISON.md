@@ -162,7 +162,7 @@ Separate system for non-clustered objects: per-object sphere+AABB frustum test, 
 **What matches Nanite**: Two-phase architecture (rasterize IDs → resolve materials), global vertex/index SSBOs, per-pixel barycentric reconstruction, decoupled geometry/material evaluation.
 
 **Gaps**:
-- **V-buffer width**: 32-bit vs Nanite's 64-bit. The 9-bit instance limit (512) and 23-bit triangle limit (~8M) are restrictive. Nanite uses 30 bits depth + 27 bits cluster + 7 bits triangle ID. The 64-bit format allows depth testing in the same atomic, enabling software rasterization.
+- **V-buffer width**: Now 64-bit (R32G32_UINT). Full 32-bit instanceId and 32-bit triangleId per pixel — no packing limits. Nanite uses a different 64-bit layout (30-bit depth + 27-bit cluster + 7-bit triangle) that integrates depth testing into the atomic write for software rasterization. The engine's layout doesn't embed depth, which would need to change when adding a software rasterizer.
 - **Software rasterizer**: Not implemented. This is Nanite's biggest performance win — a compute shader that does scan-line rasterization with 64-bit atomic compare-and-swap, ~3x faster than hardware for sub-pixel triangles (which are 90%+ of clusters in a Nanite scene). The engine uses hardware rasterization exclusively.
 - **Material sort/binning**: The resolve shader evaluates materials per-pixel via a material SSBO lookup. Nanite classifies pixels into 64x64 tiles by material, then dispatches a per-material full-screen pass that evaluates only relevant tiles. This tile-based approach is more efficient for scenes with many diverse materials.
 
@@ -174,7 +174,7 @@ Separate system for non-clustered objects: per-object sphere+AABB frustum test, 
 |---|---|---|
 | **Cluster path** | `cluster_select.comp` → `cluster_cull.comp` → `VkDrawIndexedIndirectCommand[]` → hardware rasterize | DAG traversal → cluster cull → raster bin sort → software/hardware rasterize dispatch |
 | **Object path** | `GPUSceneBuffer` → `scene_cull.comp` → `vkCmdDrawIndexedIndirectCount` | N/A (everything is clusters) |
-| **Instance limit** | 512 (9-bit V-buffer packing) for cluster path; 8192 for object path | 16M instances |
+| **Instance limit** | ~4B (full 32-bit V-buffer channel) for cluster path; 8192 for object path | 16M instances |
 | **Subgroup optimization** | Yes — ballot + broadcast for batched atomics in all cull shaders | Yes — similar wave-level batching |
 
 **What matches Nanite**: The cluster pipeline (LOD select → cull → indirect draw) is the correct sequence. Subgroup-batched atomics throughout. Global vertex/index buffers.
@@ -230,7 +230,7 @@ Separate system for non-clustered objects: per-object sphere+AABB frustum test, 
 | METIS graph partitioning | **Not implemented** — spatial grouping instead | — |
 | Boundary-locked simplification | **Not implemented** — generic meshoptimizer | — |
 | Software rasterizer | **Not implemented** | — |
-| 64-bit visibility buffer | **Not implemented** — 32-bit | — |
+| 64-bit visibility buffer | **Done** — R32G32_UINT (instanceId, triangleId) | — |
 | Material tile classification | **Not implemented** — per-pixel material lookup | — |
 | Cluster streaming | **Not implemented** — fully resident | — |
 | Virtual shadow maps | **Not implemented** — CSM | — |
@@ -255,8 +255,8 @@ The current flat dispatch (one thread per cluster in the entire DAG) evaluates e
 ### 5. Material Tile Classification
 The resolve shader evaluates materials per-pixel via SSBO lookup with texture array sampling and Cook-Torrance PBR. This works correctly but Nanite's tile classification (64x64 pixel tiles binned by material → per-material fullscreen dispatch) would reduce divergence for scenes with many distinct materials.
 
-### 6. 64-bit V-Buffer + Instance Scalability
-The 9-bit instance / 23-bit triangle packing limits the system to 512 instances. Nanite's 64-bit buffer (30-bit depth + 27-bit cluster + 7-bit triangle) supports much larger scenes and integrates depth testing into the atomic write, which is essential for software rasterization.
+### 6. 64-bit V-Buffer + Instance Scalability — DONE
+The V-buffer is now R32G32_UINT (64-bit): R = instanceId, G = triangleId, both full 32-bit. The previous 9-bit/23-bit packing is gone. Note: Nanite's 64-bit layout embeds depth (30-bit depth + 27-bit cluster + 7-bit triangle) to enable atomic depth testing in the software rasterizer. Adding depth would require repacking when the software rasterizer is implemented.
 
 ### 7. Cluster Streaming (scale-dependent)
 Only needed when total geometry exceeds GPU memory budget. The `AsyncTransferManager` and tile cache patterns could be extended to stream cluster pages.
@@ -270,4 +270,4 @@ Would replace CSM with per-page shadow allocation reusing the cluster pipeline f
 
 The engine has already implemented the core Nanite architecture: cluster DAG representation, GPU LOD selection via screen-space error, two-pass temporal occlusion culling, normal cone backface culling, and a visibility buffer with compute material resolve. This is significantly further along than a traditional renderer.
 
-The remaining gaps fall into two categories: **quality** (boundary-locked simplification, METIS partitioning — needed for crack-free LOD transitions) and **performance at scale** (software rasterizer, persistent-thread traversal, 64-bit V-buffer, streaming). The software rasterizer is the single largest performance gap and the primary reason Nanite achieves its headline numbers. The simplification quality is the most important correctness gap.
+The remaining gaps fall into two categories: **quality** (boundary-locked simplification, METIS partitioning — needed for crack-free LOD transitions) and **performance at scale** (software rasterizer, persistent-thread traversal, streaming). The 64-bit V-buffer is now implemented (R32G32_UINT with full 32-bit instance/triangle IDs). The software rasterizer is the single largest performance gap and the primary reason Nanite achieves its headline numbers. The simplification quality is the most important correctness gap.
