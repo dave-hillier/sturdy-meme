@@ -29,8 +29,16 @@ vec3 hashColor(uint id) {
     return mix(vec3(0.5), vec3(r, g, b), 0.8) * 0.8 + 0.2;
 }
 
+// LOD level color ramp (blue=LOD0 -> green=LOD1 -> yellow=LOD2 -> red=LOD3+)
+vec3 lodColor(uint lodLevel) {
+    if (lodLevel == 0u) return vec3(0.2, 0.4, 1.0);   // Blue - highest detail
+    if (lodLevel == 1u) return vec3(0.2, 1.0, 0.4);   // Green
+    if (lodLevel == 2u) return vec3(1.0, 1.0, 0.2);   // Yellow
+    return vec3(1.0, 0.3, 0.2);                        // Red - coarsest
+}
+
 layout(push_constant) uniform DebugPushConstants {
-    uint mode;  // 0 = instance ID, 1 = triangle ID, 2 = checkerboard
+    uint mode;  // 0=instance, 1=triangle, 2=mixed, 3=cluster, 4=cluster+instance, 5=depth
     float _pad0, _pad1, _pad2;
 } debugParams;
 
@@ -39,7 +47,13 @@ void main() {
 
     // (0, 0) means no geometry was written (background)
     if (packed.r == 0u && packed.g == 0u) {
-        outColor = vec4(0.05, 0.05, 0.1, 1.0);  // Dark background
+        if (debugParams.mode == 5u) {
+            // Depth mode: show depth buffer for background
+            float depth = texture(depthBuffer, inTexCoord).r;
+            outColor = vec4(vec3(depth), 1.0);
+        } else {
+            outColor = vec4(0.05, 0.05, 0.1, 1.0);
+        }
         return;
     }
 
@@ -47,16 +61,38 @@ void main() {
     uint instanceId = packed.r - 1u;
     uint triangleId = packed.g - 1u;
 
+    // Approximate cluster ID from triangle ID (clusters are ~64 triangles)
+    uint clusterId = triangleId / 64u;
+
     if (debugParams.mode == 0u) {
         // Color by instance ID
         outColor = vec4(hashColor(instanceId), 1.0);
     } else if (debugParams.mode == 1u) {
         // Color by triangle ID
         outColor = vec4(hashColor(triangleId), 1.0);
-    } else {
-        // Checkerboard: alternate instance/triangle coloring
+    } else if (debugParams.mode == 2u) {
+        // Mixed: blend instance and triangle coloring
         vec3 instColor = hashColor(instanceId);
         vec3 triColor = hashColor(triangleId);
         outColor = vec4(mix(instColor, triColor, 0.5), 1.0);
+    } else if (debugParams.mode == 3u) {
+        // Cluster coloring: hash of approximate cluster ID
+        // Each cluster gets a unique color, making cluster boundaries visible
+        outColor = vec4(hashColor(clusterId), 1.0);
+    } else if (debugParams.mode == 4u) {
+        // Cluster + instance: combine instance tint with cluster pattern
+        // This shows both which object and which cluster within that object
+        vec3 instColor = hashColor(instanceId);
+        vec3 clusterColor = hashColor(clusterId);
+        outColor = vec4(mix(instColor, clusterColor, 0.6), 1.0);
+    } else if (debugParams.mode == 5u) {
+        // Depth visualization (linearized)
+        float depth = texture(depthBuffer, inTexCoord).r;
+        // Simple linearization for visualization
+        float linearDepth = 1.0 / (1.0 - depth + 0.001);
+        float normalized = clamp(linearDepth / 100.0, 0.0, 1.0);
+        outColor = vec4(vec3(1.0 - normalized), 1.0);
+    } else {
+        outColor = vec4(hashColor(instanceId ^ triangleId), 1.0);
     }
 }

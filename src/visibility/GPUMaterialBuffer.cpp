@@ -126,11 +126,15 @@ bool GPUMaterialBuffer::uploadFromRegistry(const MaterialRegistry& registry,
             gpuMat.normalScale = 1.0f;
             gpuMat.aoStrength = 1.0f;
 
-            // Look up albedo texture layer in the texture array
+            // Look up texture layers in the unified texture array
             gpuMat.albedoTexIndex = def->diffuse
                 ? visBuf.getTextureLayerIndex(def->diffuse) : ~0u;
-            gpuMat.normalTexIndex = ~0u;
-            gpuMat.roughnessMetallicTexIndex = ~0u;
+            gpuMat.normalTexIndex = def->normal
+                ? visBuf.getTextureLayerIndex(def->normal) : ~0u;
+            // Use roughness map as roughness-metallic packed texture
+            // (glTF convention: green=roughness, blue=metallic)
+            gpuMat.roughnessMetallicTexIndex = def->roughnessMap
+                ? visBuf.getTextureLayerIndex(def->roughnessMap) : ~0u;
             gpuMat.flags = 0;
         } else {
             gpuMat.baseColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);

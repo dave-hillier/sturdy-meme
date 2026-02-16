@@ -1,7 +1,6 @@
-#version 450
+#version 460
 
 #extension GL_GOOGLE_include_directive : require
-#extension GL_ARB_shader_draw_parameters : require
 
 #include "bindings.glsl"
 #include "ubo_common.glsl"
@@ -42,6 +41,7 @@ layout(std430, binding = BINDING_CLUSTER_DRAW_INFO) readonly buffer DrawInfoBuff
 
 layout(location = 0) flat out uint outInstanceId;
 layout(location = 1) out vec2 outTexCoord;
+layout(location = 2) flat out uint outTriangleOffset;
 
 void main() {
     DrawClusterInfo info = drawInfos[gl_DrawID];
@@ -52,4 +52,5 @@ void main() {
 
     outInstanceId = info.instanceId;
     outTexCoord = inTexCoord;
+    outTriangleOffset = info.triangleOffset;
 }

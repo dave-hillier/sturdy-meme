@@ -867,8 +867,8 @@ bool VisibilityBuffer::createResolvePipeline() {
         return false;
     }
 
-    // Descriptor set layout: 10 bindings matching visbuf_resolve.comp
-    std::array<vk::DescriptorSetLayoutBinding, 10> bindings;
+    // Descriptor set layout: 11 bindings matching visbuf_resolve.comp
+    std::array<vk::DescriptorSetLayoutBinding, 11> bindings;
 
     // Binding 0: Visibility buffer (uimage2D, storage image)
     bindings[0] = vk::DescriptorSetLayoutBinding{}
@@ -937,6 +937,13 @@ bool VisibilityBuffer::createResolvePipeline() {
     bindings[9] = vk::DescriptorSetLayoutBinding{}
         .setBinding(BINDING_VISBUF_HDR_DEPTH)
         .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
+
+    // Binding 10: Dynamic light buffer (SSBO) — for multi-light resolve
+    bindings[10] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_VISBUF_LIGHT_BUFFER)
+        .setDescriptorType(vk::DescriptorType::eStorageBuffer)
         .setDescriptorCount(1)
         .setStageFlags(vk::ShaderStageFlagBits::eCompute);
 
@@ -1326,18 +1333,25 @@ bool VisibilityBuffer::buildMaterialTextureArray(const MaterialRegistry& registr
         return false;
     }
 
-    // Collect unique diffuse textures from all materials
+    // Collect unique textures from all materials (diffuse, normal, roughness/metallic)
     std::vector<const Texture*> textures;
     textureLayerMap_.clear();
+
+    auto addTexture = [&](const Texture* tex) {
+        if (!tex) return;
+        if (textureLayerMap_.find(tex) != textureLayerMap_.end()) return;
+        textureLayerMap_[tex] = static_cast<uint32_t>(textures.size());
+        textures.push_back(tex);
+    };
 
     size_t matCount = registry.getMaterialCount();
     for (uint32_t i = 0; i < matCount; ++i) {
         const auto* def = registry.getMaterial(i);
-        if (!def || !def->diffuse) continue;
-        if (textureLayerMap_.find(def->diffuse) != textureLayerMap_.end()) continue;
-
-        textureLayerMap_[def->diffuse] = static_cast<uint32_t>(textures.size());
-        textures.push_back(def->diffuse);
+        if (!def) continue;
+        addTexture(def->diffuse);
+        addTexture(def->normal);
+        addTexture(def->roughnessMap);
+        addTexture(def->metallicMap);
     }
 
     if (textures.empty()) {
@@ -1353,10 +1367,10 @@ bool VisibilityBuffer::buildMaterialTextureArray(const MaterialRegistry& registr
     SDL_Log("VisibilityBuffer: Building texture array %ux%u with %u layers",
             arrayW, arrayH, layerCount);
 
-    // Create the 2D array image (SRGB for albedo)
+    // Create the 2D array image (UNORM - sRGB conversion done in shader for albedo)
     auto imageInfo = vk::ImageCreateInfo{}
         .setImageType(vk::ImageType::e2D)
-        .setFormat(vk::Format::eR8G8B8A8Srgb)
+        .setFormat(vk::Format::eR8G8B8A8Unorm)
         .setExtent({arrayW, arrayH, 1})
         .setMipLevels(1)
         .setArrayLayers(layerCount)
@@ -1489,7 +1503,7 @@ bool VisibilityBuffer::buildMaterialTextureArray(const MaterialRegistry& registr
     auto viewInfo = vk::ImageViewCreateInfo{}
         .setImage(textureArrayImage_.get())
         .setViewType(vk::ImageViewType::e2DArray)
-        .setFormat(vk::Format::eR8G8B8A8Srgb)
+        .setFormat(vk::Format::eR8G8B8A8Unorm)
         .setSubresourceRange({vk::ImageAspectFlagBits::eColor, 0, 1, 0, layerCount});
 
     vk::Device vkDevice(device_);
@@ -1751,12 +1765,12 @@ void VisibilityBuffer::recordResolvePass(VkCommandBuffer cmd, uint32_t frameInde
         VkDescriptorSet descSet = resolveDescSets_[frameIndex];
         VkBuffer placeholder = placeholderBuffer_.get();
 
-        // Always bind all 10 descriptors. Use placeholder buffer/texture for
+        // Always bind all 11 descriptors. Use placeholder buffer/texture for
         // unbound slots so Vulkan validation is satisfied. The resolve shader
         // early-returns on background pixels (packed == 0) so placeholders
         // are never actually read when the V-buffer is empty.
 
-        std::array<VkWriteDescriptorSet, 10> writes{};
+        std::array<VkWriteDescriptorSet, 11> writes{};
         for (auto& w : writes) w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 
         // Binding 0: Visibility buffer (storage image)
@@ -1892,6 +1906,20 @@ void VisibilityBuffer::recordResolvePass(VkCommandBuffer cmd, uint32_t frameInde
         writes[9].descriptorCount = 1;
         writes[9].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[9].pImageInfo = &hdrDepthInfo;
+
+        // Binding 10: Dynamic light buffer (SSBO)
+        VkDescriptorBufferInfo lightBufInfo{};
+        lightBufInfo.buffer = resolveBuffers_.lightBuffer != VK_NULL_HANDLE
+            ? resolveBuffers_.lightBuffer : placeholder;
+        lightBufInfo.offset = 0;
+        lightBufInfo.range = resolveBuffers_.lightBuffer != VK_NULL_HANDLE
+            ? resolveBuffers_.lightBufferSize : PLACEHOLDER_BUFFER_SIZE;
+
+        writes[10].dstSet = descSet;
+        writes[10].dstBinding = BINDING_VISBUF_LIGHT_BUFFER;
+        writes[10].descriptorCount = 1;
+        writes[10].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[10].pBufferInfo = &lightBufInfo;
 
         vkUpdateDescriptorSets(device_,
                                static_cast<uint32_t>(writes.size()),

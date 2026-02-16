@@ -440,6 +440,13 @@ static void executeResolvePass(FrameGraph::RenderContext& ctx, RendererSystems& 
         resolveBuffers.hdrDepthView = renderCtx->resources.hdrDepthView;
         resolveBuffers.hdrDepthImage = renderCtx->resources.hdrDepthImage;
 
+        // Dynamic light buffer for multi-light resolve
+        const auto& lightBuffers = systems.globalBuffers().getLightBuffers();
+        if (frameIndex < lightBuffers.size()) {
+            resolveBuffers.lightBuffer = lightBuffers[frameIndex];
+            resolveBuffers.lightBufferSize = systems.globalBuffers().getLightBufferSize();
+        }
+
         visBuf->setResolveBuffers(resolveBuffers);
     }
 

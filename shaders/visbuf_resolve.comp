@@ -82,11 +82,20 @@ layout(std140, binding = BINDING_VISBUF_UNIFORMS) uniform ResolveUniforms {
     uint _pad1, _pad2;
 } resolveUniforms;
 
-// Texture array for material textures
+// Texture array for material textures (UNORM format - sRGB conversion done manually for albedo)
 layout(binding = BINDING_VISBUF_TEXTURE_ARRAY) uniform sampler2DArray materialTextures;
+
+// sRGB to linear conversion (since texture array uses UNORM, not SRGB format)
+vec3 srgbToLinear(vec3 srgb) {
+    return mix(srgb / 12.92, pow((srgb + 0.055) / 1.055, vec3(2.4)), step(0.04045, srgb));
+}
 
 // HDR pass depth buffer for depth comparison (prevents overwriting closer HDR-pass objects)
 layout(binding = BINDING_VISBUF_HDR_DEPTH) uniform sampler2D hdrDepthBuffer;
+
+// Dynamic light buffer for multiple point/spot lights
+#define DYNAMIC_LIGHT_BUFFER_BINDING BINDING_VISBUF_LIGHT_BUFFER
+#include "dynamic_lights_common.glsl"
 
 // ============================================================================
 // Helper functions
@@ -253,7 +262,7 @@ void main() {
 
     if (albedoTexIdx != 0xFFFFFFFFu) {
         vec4 texColor = texture(materialTextures, vec3(texCoord, float(albedoTexIdx)));
-        baseColor *= texColor.rgb;
+        baseColor *= srgbToLinear(texColor.rgb);
     }
 
     if (roughMetalTexIdx != 0xFFFFFFFFu) {
@@ -294,15 +303,19 @@ void main() {
     vec3 L = normalize(resolveUniforms.lightDirection.xyz);
     float lightIntensity = resolveUniforms.lightDirection.w;
 
-    // Direct lighting via Cook-Torrance BRDF
+    // Direct lighting via Cook-Torrance BRDF (sun/directional)
     vec3 directLight = evaluateBRDF(normal, V, L, baseColor, roughness, metallic) * lightIntensity;
+
+    // Dynamic point/spot lights
+    vec3 dynamicLight = calculateAllDynamicLightsPBRNoShadow(
+        normal, V, worldPos, baseColor, roughness, metallic);
 
     // Ambient (hemisphere approximation)
     float NoUp = dot(normal, vec3(0.0, 1.0, 0.0)) * 0.5 + 0.5;
     vec3 skyColor = mix(vec3(0.05, 0.05, 0.08), vec3(0.12, 0.15, 0.2), NoUp);
     vec3 ambient = baseColor * skyColor * (1.0 - metallic);
 
-    vec3 finalColor = directLight + ambient;
+    vec3 finalColor = directLight + dynamicLight + ambient;
 
     // Emissive
     float emissiveIntensity = inst.materialParams.z;

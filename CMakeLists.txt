@@ -778,6 +778,8 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/godrays_compute.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/visbuf.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/visbuf.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/visbuf_cluster.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/visbuf_cluster.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/visbuf_debug.vert.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/visbuf_debug.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/visbuf_resolve.comp.spv
@@ -891,6 +893,7 @@ if(SHADER_COMPILE_CMD)
         scene_cull.comp
         bloom_compute.comp bloom_upsample_compute.comp bloom_spd.comp godrays_compute.comp
         visbuf.vert visbuf.frag
+        visbuf_cluster.vert visbuf_cluster.frag
         visbuf_debug.frag
         visbuf_resolve.comp
         cluster_cull.comp

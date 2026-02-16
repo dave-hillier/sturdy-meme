@@ -81,7 +81,7 @@ struct DrawClusterInfo {
 
 // Push constants for debug visualization
 struct VisBufDebugPushConstants {
-    uint32_t mode;  // 0=instance, 1=triangle, 2=mixed
+    uint32_t mode;  // 0=instance, 1=triangle, 2=mixed, 3=cluster, 4=cluster+instance, 5=depth
     float _pad0, _pad1, _pad2;
 };
 
@@ -179,6 +179,8 @@ public:
         VkSampler textureArraySampler = VK_NULL_HANDLE;
         VkImageView hdrDepthView = VK_NULL_HANDLE;    // HDR pass depth for depth comparison
         VkImage hdrDepthImage = VK_NULL_HANDLE;       // HDR depth image (for layout barriers)
+        VkBuffer lightBuffer = VK_NULL_HANDLE;        // Dynamic light SSBO
+        VkDeviceSize lightBufferSize = 0;
     };
 
     /**

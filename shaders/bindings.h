@@ -511,6 +511,7 @@
 #define BINDING_VISBUF_UNIFORMS            7   // Resolve uniforms (UBO)
 #define BINDING_VISBUF_TEXTURE_ARRAY       8   // Material texture array (sampler2DArray)
 #define BINDING_VISBUF_HDR_DEPTH           9   // HDR pass depth buffer (sampler2D) for depth comparison
+#define BINDING_VISBUF_LIGHT_BUFFER        10  // Dynamic light SSBO for multi-light resolve
 
 // Cluster Raster Pass (separate descriptor set for indirect cluster draws)
 #define BINDING_CLUSTER_UBO                0   // Main UBO (view/proj matrices)
@@ -919,6 +920,7 @@ constexpr uint32_t VISBUF_INSTANCE_BUFFER  = BINDING_VISBUF_INSTANCE_BUFFER;
 constexpr uint32_t VISBUF_MATERIAL_BUFFER  = BINDING_VISBUF_MATERIAL_BUFFER;
 constexpr uint32_t VISBUF_UNIFORMS         = BINDING_VISBUF_UNIFORMS;
 constexpr uint32_t VISBUF_HDR_DEPTH        = BINDING_VISBUF_HDR_DEPTH;
+constexpr uint32_t VISBUF_LIGHT_BUFFER     = BINDING_VISBUF_LIGHT_BUFFER;
 constexpr uint32_t VISBUF_DEBUG_INPUT      = BINDING_VISBUF_DEBUG_INPUT;
 constexpr uint32_t VISBUF_DEBUG_DEPTH_INPUT = BINDING_VISBUF_DEBUG_DEPTH_INPUT;
 constexpr uint32_t CLUSTER_UBO             = BINDING_CLUSTER_UBO;
