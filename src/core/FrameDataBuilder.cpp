@@ -110,6 +110,7 @@ RenderResources FrameDataBuilder::buildRenderResources(
     resources.hdrExtent = systems.postProcess().getExtent();
     resources.hdrColorView = systems.postProcess().getHDRColorView();
     resources.hdrDepthView = systems.postProcess().getHDRDepthView();
+    resources.hdrDepthImage = systems.postProcess().getHDRDepthImage();
 
     // Shadow resources (from ShadowSystem)
     resources.shadowRenderPass = systems.shadow().getShadowRenderPass();

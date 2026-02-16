@@ -85,6 +85,9 @@ layout(std140, binding = BINDING_VISBUF_UNIFORMS) uniform ResolveUniforms {
 // Texture array for material textures
 layout(binding = BINDING_VISBUF_TEXTURE_ARRAY) uniform sampler2DArray materialTextures;
 
+// HDR pass depth buffer for depth comparison (prevents overwriting closer HDR-pass objects)
+layout(binding = BINDING_VISBUF_HDR_DEPTH) uniform sampler2D hdrDepthBuffer;
+
 // ============================================================================
 // Helper functions
 // ============================================================================
@@ -157,6 +160,20 @@ void main() {
     // 64-bit V-buffer: separate channels, -1 to undo the +1 bias from raster pass
     uint instanceId = packed.r - 1u;
     uint triangleId = packed.g - 1u;
+
+    // Depth comparison: only write if V-buffer object is in front of HDR-pass content.
+    // Sample V-buffer depth and HDR depth; skip if HDR is closer (smaller depth value).
+    // This prevents the resolve from overwriting textured HDR objects that are at the
+    // same depth (double-rendered) or in front (terrain, trees, etc.).
+    vec2 depthUV = (vec2(pixelCoord) + 0.5) * resolveUniforms.screenParams.zw;
+    float visBufDepth = texelFetch(depthBuffer, pixelCoord, 0).r;
+    float hdrDepth = texture(hdrDepthBuffer, depthUV).r;
+
+    // Use a small bias: V-buffer must be strictly in front of HDR content.
+    // Same-depth objects (rendered in both passes) keep the HDR textured version.
+    if (visBufDepth >= hdrDepth) {
+        return;
+    }
 
     // Fetch triangle indices
     uint i0 = indices[triangleId * 3u + 0u];

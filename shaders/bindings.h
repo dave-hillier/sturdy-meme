@@ -510,6 +510,7 @@
 #define BINDING_VISBUF_MATERIAL_BUFFER     6   // Material data (SSBO)
 #define BINDING_VISBUF_UNIFORMS            7   // Resolve uniforms (UBO)
 #define BINDING_VISBUF_TEXTURE_ARRAY       8   // Material texture array (sampler2DArray)
+#define BINDING_VISBUF_HDR_DEPTH           9   // HDR pass depth buffer (sampler2D) for depth comparison
 
 // Visibility Buffer Debug Visualization (fullscreen pass)
 #define BINDING_VISBUF_DEBUG_INPUT         0   // Visibility buffer input (usampler2D)
@@ -912,6 +913,7 @@ constexpr uint32_t VISBUF_INDEX_BUFFER     = BINDING_VISBUF_INDEX_BUFFER;
 constexpr uint32_t VISBUF_INSTANCE_BUFFER  = BINDING_VISBUF_INSTANCE_BUFFER;
 constexpr uint32_t VISBUF_MATERIAL_BUFFER  = BINDING_VISBUF_MATERIAL_BUFFER;
 constexpr uint32_t VISBUF_UNIFORMS         = BINDING_VISBUF_UNIFORMS;
+constexpr uint32_t VISBUF_HDR_DEPTH        = BINDING_VISBUF_HDR_DEPTH;
 constexpr uint32_t VISBUF_DEBUG_INPUT      = BINDING_VISBUF_DEBUG_INPUT;
 constexpr uint32_t VISBUF_DEBUG_DEPTH_INPUT = BINDING_VISBUF_DEBUG_DEPTH_INPUT;
 

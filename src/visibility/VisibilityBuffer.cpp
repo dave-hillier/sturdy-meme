@@ -661,8 +661,8 @@ bool VisibilityBuffer::createResolvePipeline() {
         return false;
     }
 
-    // Descriptor set layout: 9 bindings matching visbuf_resolve.comp
-    std::array<vk::DescriptorSetLayoutBinding, 9> bindings;
+    // Descriptor set layout: 10 bindings matching visbuf_resolve.comp
+    std::array<vk::DescriptorSetLayoutBinding, 10> bindings;
 
     // Binding 0: Visibility buffer (uimage2D, storage image)
     bindings[0] = vk::DescriptorSetLayoutBinding{}
@@ -671,7 +671,7 @@ bool VisibilityBuffer::createResolvePipeline() {
         .setDescriptorCount(1)
         .setStageFlags(vk::ShaderStageFlagBits::eCompute);
 
-    // Binding 1: Depth buffer (sampler2D)
+    // Binding 1: Depth buffer (sampler2D) — V-buffer depth
     bindings[1] = vk::DescriptorSetLayoutBinding{}
         .setBinding(BINDING_VISBUF_DEPTH)
         .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
@@ -723,6 +723,13 @@ bool VisibilityBuffer::createResolvePipeline() {
     // Binding 8: Material texture array (sampler2DArray)
     bindings[8] = vk::DescriptorSetLayoutBinding{}
         .setBinding(BINDING_VISBUF_TEXTURE_ARRAY)
+        .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+        .setDescriptorCount(1)
+        .setStageFlags(vk::ShaderStageFlagBits::eCompute);
+
+    // Binding 9: HDR pass depth buffer (sampler2D) — for depth comparison
+    bindings[9] = vk::DescriptorSetLayoutBinding{}
+        .setBinding(BINDING_VISBUF_HDR_DEPTH)
         .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
         .setDescriptorCount(1)
         .setStageFlags(vk::ShaderStageFlagBits::eCompute);
@@ -785,7 +792,7 @@ bool VisibilityBuffer::createResolvePipeline() {
         return false;
     }
 
-    SDL_Log("VisibilityBuffer: Resolve pipeline created (9 bindings)");
+    SDL_Log("VisibilityBuffer: Resolve pipeline created (10 bindings)");
     return true;
 }
 
@@ -1228,12 +1235,12 @@ void VisibilityBuffer::recordResolvePass(VkCommandBuffer cmd, uint32_t frameInde
         VkDescriptorSet descSet = resolveDescSets_[frameIndex];
         VkBuffer placeholder = placeholderBuffer_.get();
 
-        // Always bind all 9 descriptors. Use placeholder buffer/texture for
+        // Always bind all 10 descriptors. Use placeholder buffer/texture for
         // unbound slots so Vulkan validation is satisfied. The resolve shader
         // early-returns on background pixels (packed == 0) so placeholders
         // are never actually read when the V-buffer is empty.
 
-        std::array<VkWriteDescriptorSet, 9> writes{};
+        std::array<VkWriteDescriptorSet, 10> writes{};
         for (auto& w : writes) w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 
         // Binding 0: Visibility buffer (storage image)
@@ -1356,6 +1363,20 @@ void VisibilityBuffer::recordResolvePass(VkCommandBuffer cmd, uint32_t frameInde
         writes[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[8].pImageInfo = &texArrayInfo;
 
+        // Binding 9: HDR pass depth buffer (combined image sampler)
+        // Used for depth comparison to avoid overwriting closer HDR-pass objects
+        VkDescriptorImageInfo hdrDepthInfo{};
+        hdrDepthInfo.sampler = depthSampler_ ? static_cast<VkSampler>(**depthSampler_) : VK_NULL_HANDLE;
+        hdrDepthInfo.imageView = resolveBuffers_.hdrDepthView != VK_NULL_HANDLE
+            ? resolveBuffers_.hdrDepthView : depthView_;  // fallback to V-buffer depth
+        hdrDepthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+        writes[9].dstSet = descSet;
+        writes[9].dstBinding = BINDING_VISBUF_HDR_DEPTH;
+        writes[9].descriptorCount = 1;
+        writes[9].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[9].pImageInfo = &hdrDepthInfo;
+
         vkUpdateDescriptorSets(device_,
                                static_cast<uint32_t>(writes.size()),
                                writes.data(), 0, nullptr);
@@ -1364,22 +1385,42 @@ void VisibilityBuffer::recordResolvePass(VkCommandBuffer cmd, uint32_t frameInde
     }
 
     // Transition visibility buffer to GENERAL for storage image read
+    // and HDR depth to READ_ONLY for sampling in the depth comparison
     {
-        VkImageMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.image = visibilityImage_.get();
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.layerCount = 1;
+        std::array<VkImageMemoryBarrier, 2> barriers{};
+
+        // V-buffer: COLOR_ATTACHMENT → GENERAL (for storage image read)
+        barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barriers[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        barriers[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        barriers[0].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barriers[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barriers[0].image = visibilityImage_.get();
+        barriers[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barriers[0].subresourceRange.levelCount = 1;
+        barriers[0].subresourceRange.layerCount = 1;
+
+        uint32_t barrierCount = 1;
+
+        // HDR depth: DEPTH_STENCIL_ATTACHMENT → DEPTH_STENCIL_READ_ONLY (for sampling)
+        if (resolveBuffers_.hdrDepthImage != VK_NULL_HANDLE) {
+            barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barriers[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            barriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            barriers[1].oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            barriers[1].newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+            barriers[1].image = resolveBuffers_.hdrDepthImage;
+            barriers[1].subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            barriers[1].subresourceRange.levelCount = 1;
+            barriers[1].subresourceRange.layerCount = 1;
+            barrierCount = 2;
+        }
 
         vkCmdPipelineBarrier(cmd,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
+            0, 0, nullptr, 0, nullptr, barrierCount, barriers.data());
     }
 
     // Bind pipeline and descriptor set

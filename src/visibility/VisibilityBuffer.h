@@ -166,6 +166,8 @@ public:
         uint32_t materialCount = 0;
         VkImageView textureArrayView = VK_NULL_HANDLE; // sampler2DArray
         VkSampler textureArraySampler = VK_NULL_HANDLE;
+        VkImageView hdrDepthView = VK_NULL_HANDLE;    // HDR pass depth for depth comparison
+        VkImage hdrDepthImage = VK_NULL_HANDLE;       // HDR depth image (for layout barriers)
     };
 
     /**

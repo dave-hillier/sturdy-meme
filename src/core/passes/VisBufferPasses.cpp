@@ -217,6 +217,10 @@ static void executeResolvePass(FrameGraph::RenderContext& ctx, RendererSystems& 
             resolveBuffers.materialCount = matBuf->getMaterialCount();
         }
 
+        // HDR depth for depth comparison (prevents overwriting closer HDR-pass objects)
+        resolveBuffers.hdrDepthView = renderCtx->resources.hdrDepthView;
+        resolveBuffers.hdrDepthImage = renderCtx->resources.hdrDepthImage;
+
         visBuf->setResolveBuffers(resolveBuffers);
     }
 

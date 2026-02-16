@@ -106,6 +106,7 @@ public:
     // Render target accessors (vulkan-hpp)
     vk::ImageView getHDRColorView() const { return vk::ImageView(hdrColorView); }
     vk::ImageView getHDRDepthView() const { return vk::ImageView(hdrDepthView); }
+    vk::Image getHDRDepthImage() const { return vk::Image(hdrDepthImage); }
     vk::RenderPass getHDRRenderPass() const { return vk::RenderPass(hdrRenderPass); }
     vk::Framebuffer getHDRFramebuffer() const { return vk::Framebuffer(hdrFramebuffer); }
     vk::Extent2D getRenderExtent() const { return vk::Extent2D{}.setWidth(extent.width).setHeight(extent.height); }
