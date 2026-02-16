@@ -1088,20 +1088,7 @@ void SceneBuilder::updatePlayerTransform(const glm::mat4& transform) {
     Renderable* playerRenderable = getRenderableForEntity(playerEntity_);
     if (!playerRenderable) return;
 
-    if (hasAnimatedCharacter) {
-        // Extract position and adjust Y (remove capsule center offset)
-        glm::vec3 pos = glm::vec3(transform[3]);
-        pos.y -= 0.9f;  // CAPSULE_HEIGHT * 0.5 = 1.8 * 0.5
-
-        // Use the player transform's rotation directly, just adjust position
-        // Note: Scale is now handled by FBX post-import processing
-        glm::mat4 result = transform;
-        result[3] = glm::vec4(pos, 1.0f);
-
-        playerRenderable->transform = result;
-    } else {
-        playerRenderable->transform = transform;
-    }
+    playerRenderable->transform = transform;
 }
 
 void SceneBuilder::updateAnimatedCharacter(float deltaTime, VmaAllocator allocator, VkDevice device,

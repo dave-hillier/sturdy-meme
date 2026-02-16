@@ -68,7 +68,7 @@ struct PlayerMovement {
 
     glm::mat4 getModelMatrix(const PlayerTransform& transform) const {
         glm::mat4 model = glm::mat4(1.0f);
-        model = glm::translate(model, transform.position + glm::vec3(0.0f, CAPSULE_HEIGHT * 0.5f, 0.0f));
+        model = glm::translate(model, transform.position);
         float effectiveYaw = orientationLocked ? lockedYaw : transform.getYaw();
         model = glm::rotate(model, glm::radians(effectiveYaw), glm::vec3(0.0f, 1.0f, 0.0f));
         return model;
