@@ -40,7 +40,9 @@ public:
 
     // Access internals for weight loading
     StyleConditionedNetwork& network() { return network_; }
+    const StyleConditionedNetwork& network() const { return network_; }
     MLPNetwork& muHead() { return muHead_; }
+    const MLPNetwork& muHead() const { return muHead_; }
 
 private:
     StyleConditionedNetwork network_;  // Style MLP + main body
