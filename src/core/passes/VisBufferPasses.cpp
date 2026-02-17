@@ -346,11 +346,20 @@ static void executeRasterPass(FrameGraph::RenderContext& ctx, RendererSystems& s
 
     // GPU-driven indirect draw from TwoPassCuller pass 1 output
     if (culler && culler->hasDescriptorSets()) {
-        vkCmdDrawIndexedIndirectCount(cmd,
-            culler->getPass1IndirectBuffer(frameIndex), 0,
-            culler->getPass1DrawCountBuffer(frameIndex), 0,
-            culler->getMaxDrawCommands(),
-            sizeof(VkDrawIndexedIndirectCommand));
+        if (culler->supportsDrawIndirectCount()) {
+            // GPU-driven draw count: only draws commands actually written by cull shader
+            vkCmdDrawIndexedIndirectCount(cmd,
+                culler->getPass1IndirectBuffer(frameIndex), 0,
+                culler->getPass1DrawCountBuffer(frameIndex), 0,
+                culler->getMaxDrawCommands(),
+                sizeof(VkDrawIndexedIndirectCommand));
+        } else {
+            // Fallback: draw all slots (unused slots zeroed by cull pass clear)
+            vkCmdDrawIndexedIndirect(cmd,
+                culler->getPass1IndirectBuffer(frameIndex), 0,
+                culler->getMaxDrawCommands(),
+                sizeof(VkDrawIndexedIndirectCommand));
+        }
     }
 
     vkCmdEndRenderPass(cmd);

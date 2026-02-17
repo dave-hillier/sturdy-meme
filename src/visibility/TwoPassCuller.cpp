@@ -50,6 +50,7 @@ bool TwoPassCuller::initInternal(const InitInfo& info) {
     maxClusters_ = info.maxClusters;
     maxDrawCommands_ = info.maxDrawCommands;
     maxDAGLevels_ = info.maxDAGLevels;
+    hasDrawIndirectCount_ = info.hasDrawIndirectCount;
     raiiDevice_ = info.raiiDevice;
 
     if (!createBuffers()) {
@@ -795,9 +796,11 @@ void TwoPassCuller::updateUniforms(uint32_t frameIndex,
 }
 
 void TwoPassCuller::recordPass1(VkCommandBuffer cmd, uint32_t frameIndex) {
-    // Clear draw count to 0
+    // Clear draw count to 0 and indirect command buffer (unused slots have indexCount=0)
     vkCmdFillBuffer(cmd, pass1DrawCountBuffers_.buffers[frameIndex], 0, sizeof(uint32_t), 0);
     vkCmdFillBuffer(cmd, visibleCountBuffers_.buffers[frameIndex], 0, sizeof(uint32_t), 0);
+    VkDeviceSize indirectSize = maxDrawCommands_ * sizeof(VkDrawIndexedIndirectCommand);
+    vkCmdFillBuffer(cmd, pass1IndirectBuffers_.buffers[frameIndex], 0, indirectSize, 0);
 
     // Barrier: transfer -> compute
     VkMemoryBarrier memBarrier{};

@@ -126,6 +126,12 @@ public:
     // Check if timeline semaphores are supported (always true for Vulkan 1.2+)
     bool hasTimelineSemaphores() const { return hasTimelineSemaphores_; }
 
+    // Check if drawIndirectCount is supported (vkCmdDrawIndexedIndirectCount)
+    bool hasDrawIndirectCount() const { return hasDrawIndirectCount_; }
+
+    // Check if shaderDrawParameters is supported (gl_DrawID)
+    bool hasShaderDrawParameters() const { return hasShaderDrawParameters_; }
+
 private:
     bool createInstance();
     bool createSurface();
@@ -157,6 +163,8 @@ private:
     uint32_t transferQueueFamily_ = 0;
     bool hasDedicatedTransfer_ = false;
     bool hasTimelineSemaphores_ = false;
+    bool hasDrawIndirectCount_ = false;
+    bool hasShaderDrawParameters_ = false;
 
     VmaAllocator allocator = VK_NULL_HANDLE;
 

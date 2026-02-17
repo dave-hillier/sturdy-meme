@@ -97,6 +97,7 @@ public:
         uint32_t maxDrawCommands;   // Max indirect draw commands
         uint32_t maxDAGLevels = 8;  // Max depth of DAG hierarchy
         const vk::raii::Device* raiiDevice = nullptr;
+        bool hasDrawIndirectCount = false;  // vkCmdDrawIndexedIndirectCount support
     };
 
     static std::unique_ptr<TwoPassCuller> create(const InitInfo& info);
@@ -183,6 +184,7 @@ public:
     VkDeviceSize getDrawDataBufferSize() const;
 
     uint32_t getMaxDrawCommands() const { return maxDrawCommands_; }
+    bool supportsDrawIndirectCount() const { return hasDrawIndirectCount_; }
 
     /**
      * Set external buffer references needed by culling descriptor sets.
@@ -226,6 +228,7 @@ private:
     uint32_t maxClusters_ = 0;
     uint32_t maxDrawCommands_ = 0;
     uint32_t maxDAGLevels_ = 8;
+    bool hasDrawIndirectCount_ = false;
     const vk::raii::Device* raiiDevice_ = nullptr;
 
     // Compute pipeline (cluster_cull.comp)

@@ -723,12 +723,26 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
             }
 
             // Two-pass GPU culler for Nanite-style occlusion + LOD selection
-            {
-                auto twoPassCuller = TwoPassCuller::create(*ctxPtr, 16384, 16384);
+            // Requires shaderDrawParameters (gl_DrawID) for GPU-driven V-buffer rendering
+            if (vulkanContext_->hasShaderDrawParameters()) {
+                TwoPassCuller::InitInfo cullerInfo{};
+                cullerInfo.device = ctxPtr->device;
+                cullerInfo.allocator = ctxPtr->allocator;
+                cullerInfo.descriptorPool = ctxPtr->descriptorPool;
+                cullerInfo.shaderPath = ctxPtr->shaderPath;
+                cullerInfo.framesInFlight = ctxPtr->framesInFlight;
+                cullerInfo.maxClusters = 16384;
+                cullerInfo.maxDrawCommands = 16384;
+                cullerInfo.raiiDevice = ctxPtr->raiiDevice;
+                cullerInfo.hasDrawIndirectCount = vulkanContext_->hasDrawIndirectCount();
+                auto twoPassCuller = TwoPassCuller::create(cullerInfo);
                 if (twoPassCuller) {
                     systems_->setTwoPassCuller(std::move(twoPassCuller));
                     SDL_Log("TwoPassCuller: Initialized for GPU-driven cluster culling");
                 }
+            } else {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "TwoPassCuller: Skipped - shaderDrawParameters not supported");
             }
 
             // Profiler

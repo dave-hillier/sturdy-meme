@@ -150,22 +150,15 @@ bool VulkanContext::selectPhysicalDevice() {
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_FALSE;
 
-    // Vulkan 1.1 features - shaderDrawParameters for gl_DrawID in GPU-driven rendering
-    VkPhysicalDeviceVulkan11Features vulkan11Features{};
-    vulkan11Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    vulkan11Features.shaderDrawParameters = VK_TRUE;
-
     // Vulkan 1.2 features - timeline semaphores are core in 1.2
     VkPhysicalDeviceVulkan12Features vulkan12Features{};
     vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     vulkan12Features.timelineSemaphore = VK_TRUE;  // Required for non-blocking GPU timeline queries
-    vulkan12Features.drawIndirectCount = VK_TRUE;  // Required for vkCmdDrawIndexedIndirectCount
 
     vkb::PhysicalDeviceSelector selector{vkbInstance};
     auto physRet = selector.set_minimum_version(1, 2)
         .set_surface(surface)
         .set_required_features(features)
-        .set_required_features_11(vulkan11Features)
         .set_required_features_12(vulkan12Features)
         .select();
 
@@ -194,12 +187,15 @@ bool VulkanContext::selectPhysicalDevice() {
     SDL_Log("Selected physical device: %s (Vulkan %u.%u.%u)",
         props.deviceName, major, minor, VK_API_VERSION_PATCH(props.apiVersion));
 
-    // Verify timeline semaphore support (should always be true if we got here)
+    // Query supported features for optional capabilities
+    VkPhysicalDeviceVulkan11Features supportedFeatures11{};
+    supportedFeatures11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     VkPhysicalDeviceVulkan12Features supportedFeatures12{};
     supportedFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    supportedFeatures11.pNext = &supportedFeatures12;
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    features2.pNext = &supportedFeatures12;
+    features2.pNext = &supportedFeatures11;
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
 
     hasTimelineSemaphores_ = supportedFeatures12.timelineSemaphore == VK_TRUE;
@@ -210,6 +206,22 @@ bool VulkanContext::selectPhysicalDevice() {
             "Timeline semaphores not supported - falling back to fences");
     }
 
+    hasDrawIndirectCount_ = supportedFeatures12.drawIndirectCount == VK_TRUE;
+    if (hasDrawIndirectCount_) {
+        SDL_Log("drawIndirectCount supported - GPU-driven indirect draw enabled");
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+            "drawIndirectCount not supported - using fixed max draw count fallback");
+    }
+
+    hasShaderDrawParameters_ = supportedFeatures11.shaderDrawParameters == VK_TRUE;
+    if (hasShaderDrawParameters_) {
+        SDL_Log("shaderDrawParameters supported - gl_DrawID enabled");
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+            "shaderDrawParameters not supported - GPU-driven V-buffer rendering disabled");
+    }
+
     // Create RAII wrapper for physical device (non-owning - physical devices aren't destroyed)
     raiiPhysicalDevice_ = std::make_unique<vk::raii::PhysicalDevice>(*raiiInstance_, physicalDevice);
 
@@ -218,6 +230,22 @@ bool VulkanContext::selectPhysicalDevice() {
 
 bool VulkanContext::createLogicalDevice() {
     vkb::DeviceBuilder deviceBuilder{vkbPhysicalDevice};
+
+    // Enable optional features that were detected during physical device selection
+    VkPhysicalDeviceVulkan11Features enabledFeatures11{};
+    enabledFeatures11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    if (hasShaderDrawParameters_) {
+        enabledFeatures11.shaderDrawParameters = VK_TRUE;
+        deviceBuilder.add_pNext(&enabledFeatures11);
+    }
+
+    VkPhysicalDeviceVulkan12Features enabledFeatures12{};
+    enabledFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    if (hasDrawIndirectCount_) {
+        enabledFeatures12.drawIndirectCount = VK_TRUE;
+        deviceBuilder.add_pNext(&enabledFeatures12);
+    }
+
     auto devRet = deviceBuilder.build();
 
     if (!devRet) {
