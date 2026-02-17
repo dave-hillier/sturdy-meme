@@ -12,7 +12,7 @@
 struct Skeleton;
 
 namespace JPH {
-    class TwoBodyConstraint;
+    class Ragdoll;
 }
 
 // Definition for a single rigid body part in an articulated body
@@ -54,7 +54,7 @@ struct ArticulatedBodyConfig {
 ArticulatedBodyConfig createHumanoidConfig(const Skeleton& skeleton);
 
 // Multi-rigid-body structure connected by Jolt constraints.
-// Each part is a capsule body connected to its parent via a SwingTwist constraint.
+// Uses Jolt's Ragdoll API for numerically stable constraint solving.
 class ArticulatedBody {
 public:
     ArticulatedBody() = default;
@@ -74,7 +74,7 @@ public:
     // Remove all bodies and constraints from the physics world.
     void destroy(PhysicsWorld& physics);
 
-    bool isValid() const { return !bodyIDs_.empty(); }
+    bool isValid() const { return ragdoll_ != nullptr; }
 
     // State extraction (for building observation vectors)
     struct PartState {
@@ -111,9 +111,9 @@ public:
 private:
     void cleanup(PhysicsWorld& physics);
 
-    std::vector<PhysicsBodyID> bodyIDs_;
-    std::vector<int32_t> jointIndices_;         // Maps part index -> skeleton joint index
-    std::vector<float> effortFactors_;          // Torque scaling per part
-    std::vector<JPH::TwoBodyConstraint*> constraints_;  // Jolt constraint handles
-    PhysicsWorld* ownerPhysics_ = nullptr;      // Track which physics world owns us
+    JPH::Ragdoll* ragdoll_ = nullptr;              // Jolt ragdoll instance (manages bodies + constraints)
+    std::vector<PhysicsBodyID> bodyIDs_;            // Cached body IDs from ragdoll
+    std::vector<int32_t> jointIndices_;             // Maps part index -> skeleton joint index
+    std::vector<float> effortFactors_;              // Torque scaling per part
+    PhysicsWorld* ownerPhysics_ = nullptr;
 };
