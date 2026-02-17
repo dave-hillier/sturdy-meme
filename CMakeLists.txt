@@ -277,6 +277,9 @@ set(SOURCES
     src/debug/CpuProfiler.cpp
     src/debug/DebugLineSystem.cpp
     src/debug/RoadRiverVisualization.cpp
+    # Machine Learning
+    src/ml/MLPNetwork.cpp
+    src/ml/ModelLoader.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -297,6 +300,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ik
     ${CMAKE_CURRENT_SOURCE_DIR}/src/lighting
     ${CMAKE_CURRENT_SOURCE_DIR}/src/loaders
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ml
     ${CMAKE_CURRENT_SOURCE_DIR}/src/physics
     ${CMAKE_CURRENT_SOURCE_DIR}/src/postprocess
     ${CMAKE_CURRENT_SOURCE_DIR}/src/scene
@@ -1287,6 +1291,7 @@ if(BUILD_TESTS)
         tests/test_flamegraph.cpp
         tests/test_player_state.cpp
         tests/test_motion_matching.cpp
+        tests/test_mlp.cpp
         # Source files needed by tests
         src/atmosphere/CelestialCalculator.cpp
         src/animation/Animation.cpp
@@ -1303,6 +1308,8 @@ if(BUILD_TESTS)
         src/scene/Camera.cpp
         src/animation/AnimationBlend.cpp
         src/animation/MotionMatchingKDTree.cpp
+        src/ml/MLPNetwork.cpp
+        src/ml/ModelLoader.cpp
     )
 
     target_include_directories(vulkan_game_tests PRIVATE
@@ -1313,6 +1320,7 @@ if(BUILD_TESTS)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture  # For VirtualTextureTypes.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/water    # For WaterPlacementData.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/debug    # For Flamegraph.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ml       # For MLP inference
     )
 
     target_link_libraries(vulkan_game_tests PRIVATE
