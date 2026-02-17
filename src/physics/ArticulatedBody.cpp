@@ -4,8 +4,11 @@
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Body/BodyLockMulti.h>
+#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/GroupFilterTable.h>
 #include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 
 // Skeleton is defined in GLTFLoader.h
@@ -75,43 +78,99 @@ bool ArticulatedBody::create(PhysicsWorld& physics, const ArticulatedBodyConfig&
     jointIndices_.resize(numParts, -1);
     effortFactors_.resize(numParts, 200.0f);
 
-    // Phase 1: Create all rigid bodies
-    // Each part gets a capsule shape positioned relative to the root.
-    // For simplicity, all parts start at rootPosition offset by their parent chain.
-    // The actual positions will be set using the parent anchor offsets.
+    JPH::BodyInterface& bodyInterface = joltSystem->GetBodyInterface();
 
-    // Compute world positions for each part by traversing the parent chain
+    // Phase 0: Set up collision group filter to prevent self-collision
+    // between parent-child pairs. Each body part gets a unique sub-group ID.
+    // Connected parts (parent-child) have collision disabled between them.
+    JPH::Ref<JPH::GroupFilterTable> groupFilter = new JPH::GroupFilterTable(static_cast<uint>(numParts));
+
+    // Disable collision between each parent-child pair
+    for (size_t i = 0; i < numParts; ++i) {
+        int32_t parentIdx = config.parts[i].parentPartIndex;
+        if (parentIdx >= 0) {
+            groupFilter->DisableCollision(
+                static_cast<JPH::CollisionGroup::SubGroupID>(i),
+                static_cast<JPH::CollisionGroup::SubGroupID>(parentIdx));
+        }
+    }
+
+    // Also disable collision between siblings that are close together
+    // (e.g., left/right thigh both attach to pelvis and can overlap)
+    for (size_t i = 0; i < numParts; ++i) {
+        for (size_t j = i + 1; j < numParts; ++j) {
+            if (config.parts[i].parentPartIndex == config.parts[j].parentPartIndex &&
+                config.parts[i].parentPartIndex >= 0) {
+                groupFilter->DisableCollision(
+                    static_cast<JPH::CollisionGroup::SubGroupID>(i),
+                    static_cast<JPH::CollisionGroup::SubGroupID>(j));
+            }
+        }
+    }
+
+    // Use a unique group ID for this ragdoll instance (use address as ID)
+    JPH::CollisionGroup::GroupID ragdollGroupID =
+        static_cast<JPH::CollisionGroup::GroupID>(reinterpret_cast<uintptr_t>(this) & 0xFFFFFFFF);
+
+    // Phase 1: Compute world positions for each part by traversing the parent chain
     std::vector<glm::vec3> partPositions(numParts);
     std::vector<glm::quat> partRotations(numParts, glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 
     for (size_t i = 0; i < numParts; ++i) {
         const auto& part = config.parts[i];
         if (part.parentPartIndex < 0) {
-            // Root part: place at rootPosition
             partPositions[i] = rootPosition;
         } else {
-            // Child part: offset from parent's position using the anchor points
             size_t parentIdx = static_cast<size_t>(part.parentPartIndex);
             glm::vec3 parentPos = partPositions[parentIdx];
-            // The child is placed such that localAnchorInParent in parent space
-            // connects to localAnchorInChild in child space
             glm::vec3 worldAnchor = parentPos + partRotations[parentIdx] * (part.localAnchorInParent * scale);
             partPositions[i] = worldAnchor - partRotations[i] * (part.localAnchorInChild * scale);
         }
     }
 
+    // Phase 2: Create all rigid bodies via Jolt directly (for collision group + damping control)
+    // Bodies are created DEACTIVATED to prevent physics explosion before constraints exist.
     for (size_t i = 0; i < numParts; ++i) {
         const auto& part = config.parts[i];
         float halfH = part.halfHeight * scale;
         float rad = part.radius * scale;
 
-        PhysicsBodyID bodyID = physics.createCapsule(
-            partPositions[i], halfH, rad, part.mass,
-            0.8f,  // friction
-            0.0f   // restitution (ragdoll should not bounce)
+        JPH::CapsuleShapeSettings capsuleSettings(halfH, rad);
+        JPH::ShapeSettings::ShapeResult shapeResult = capsuleSettings.Create();
+        if (!shapeResult.IsValid()) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "ArticulatedBody::create: failed to create shape for part '%s': %s",
+                         part.name.c_str(), shapeResult.GetError().c_str());
+            cleanup(physics);
+            return false;
+        }
+
+        const glm::vec3& pos = partPositions[i];
+        JPH::BodyCreationSettings bodySettings(
+            shapeResult.Get(),
+            JPH::RVec3(pos.x, pos.y, pos.z),
+            toJolt(partRotations[i]),
+            JPH::EMotionType::Dynamic,
+            PhysicsLayers::MOVING
         );
 
-        if (bodyID == INVALID_BODY_ID) {
+        bodySettings.mFriction = 0.8f;
+        bodySettings.mRestitution = 0.0f;
+        bodySettings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+        bodySettings.mMassPropertiesOverride.mMass = part.mass;
+
+        // Higher damping prevents velocity explosion from constraint forces
+        bodySettings.mLinearDamping = 0.3f;
+        bodySettings.mAngularDamping = 0.5f;
+
+        // Self-collision filtering: same group, unique sub-group per part
+        bodySettings.mCollisionGroup = JPH::CollisionGroup(
+            groupFilter,
+            ragdollGroupID,
+            static_cast<JPH::CollisionGroup::SubGroupID>(i));
+
+        JPH::Body* body = bodyInterface.CreateBody(bodySettings);
+        if (!body) {
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                          "ArticulatedBody::create: failed to create body for part '%s'",
                          part.name.c_str());
@@ -119,15 +178,18 @@ bool ArticulatedBody::create(PhysicsWorld& physics, const ArticulatedBodyConfig&
             return false;
         }
 
-        bodyIDs_[i] = bodyID;
+        // Add body but DON'T activate yet — wait until constraints are set up
+        bodyInterface.AddBody(body->GetID(), JPH::EActivation::DontActivate);
+
+        bodyIDs_[i] = body->GetID().GetIndexAndSequenceNumber();
         jointIndices_[i] = part.skeletonJointIndex;
         effortFactors_[i] = part.effortFactor;
     }
 
-    // Phase 2: Create SwingTwist constraints between parent-child pairs
+    // Phase 3: Create SwingTwist constraints between parent-child pairs
     for (size_t i = 0; i < numParts; ++i) {
         const auto& part = config.parts[i];
-        if (part.parentPartIndex < 0) continue;  // Root has no constraint
+        if (part.parentPartIndex < 0) continue;
 
         size_t parentIdx = static_cast<size_t>(part.parentPartIndex);
         JPH::BodyID parentJoltID(bodyIDs_[parentIdx]);
@@ -148,11 +210,10 @@ bool ArticulatedBody::create(PhysicsWorld& physics, const ArticulatedBodyConfig&
             return false;
         }
 
-        // Compute world-space constraint position (the anchor point between parent and child)
+        // Compute world-space constraint anchor point
         glm::vec3 worldAnchor = partPositions[parentIdx] +
             partRotations[parentIdx] * (part.localAnchorInParent * scale);
 
-        // Set up SwingTwist constraint in world space
         JPH::SwingTwistConstraintSettings settings;
         settings.mSpace = JPH::EConstraintSpace::WorldSpace;
 
@@ -169,18 +230,23 @@ bool ArticulatedBody::create(PhysicsWorld& physics, const ArticulatedBodyConfig&
         settings.mTwistMinAngle = part.twistMinAngle;
         settings.mTwistMaxAngle = part.twistMaxAngle;
 
-        // Add some friction to prevent jittery ragdoll
-        settings.mMaxFrictionTorque = 2.0f;
+        // Higher friction torque prevents jittery ragdoll and dampens joint oscillation
+        settings.mMaxFrictionTorque = 5.0f;
 
         JPH::TwoBodyConstraint* constraint = static_cast<JPH::TwoBodyConstraint*>(
             settings.Create(*parentBody, *childBody)
         );
 
-        // Must release the body locks before adding the constraint to the system
+        // Must release locks before AddConstraint
         lock.ReleaseLocks();
 
         joltSystem->AddConstraint(constraint);
         constraints_.push_back(constraint);
+    }
+
+    // Phase 4: Now that all constraints are in place, activate all bodies
+    for (size_t i = 0; i < numParts; ++i) {
+        bodyInterface.ActivateBody(JPH::BodyID(bodyIDs_[i]));
     }
 
     ownerPhysics_ = &physics;
