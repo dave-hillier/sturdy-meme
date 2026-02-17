@@ -191,6 +191,8 @@ set(SOURCES
     src/physics/PhysicsDebugRenderer.cpp
     src/physics/RagdollBuilder.cpp
     src/physics/RagdollInstance.cpp
+    # UniCon
+    src/unicon/StateEncoder.cpp
     # Terrain
     src/terrain/TerrainSystem.cpp
     src/terrain/TerrainDescriptorSets.cpp
@@ -338,6 +340,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture
     ${CMAKE_CURRENT_SOURCE_DIR}/src/training
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/unicon
     ${CMAKE_CURRENT_SOURCE_DIR}/src/vegetation
     ${CMAKE_CURRENT_SOURCE_DIR}/src/water
     ${CMAKE_CURRENT_SOURCE_DIR}/generated
