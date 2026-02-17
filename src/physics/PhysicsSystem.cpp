@@ -359,6 +359,43 @@ PhysicsBodyID PhysicsWorld::createSphere(const glm::vec3& position, float radius
     return body->GetID().GetIndexAndSequenceNumber();
 }
 
+PhysicsBodyID PhysicsWorld::createCapsule(const glm::vec3& position, float halfHeight, float radius,
+                                           float mass, float friction, float restitution,
+                                           const glm::quat& rotation) {
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
+
+    JPH::CapsuleShapeSettings capsuleSettings(halfHeight, radius);
+    JPH::ShapeSettings::ShapeResult shapeResult = capsuleSettings.Create();
+    if (!shapeResult.IsValid()) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create dynamic capsule shape: %s",
+                     shapeResult.GetError().c_str());
+        return INVALID_BODY_ID;
+    }
+
+    JPH::BodyCreationSettings bodySettings(
+        shapeResult.Get(),
+        JPH::RVec3(position.x, position.y, position.z),
+        toJolt(rotation),
+        JPH::EMotionType::Dynamic,
+        PhysicsLayers::MOVING
+    );
+    bodySettings.mFriction = friction;
+    bodySettings.mRestitution = restitution;
+    bodySettings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+    bodySettings.mMassPropertiesOverride.mMass = mass;
+    bodySettings.mLinearDamping = 0.05f;
+    bodySettings.mAngularDamping = 0.05f;
+
+    JPH::Body* body = bodyInterface.CreateBody(bodySettings);
+    if (!body) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create dynamic capsule body");
+        return INVALID_BODY_ID;
+    }
+
+    bodyInterface.AddBody(body->GetID(), JPH::EActivation::Activate);
+    return body->GetID().GetIndexAndSequenceNumber();
+}
+
 PhysicsBodyID PhysicsWorld::createStaticBox(const glm::vec3& position, const glm::vec3& halfExtents,
                                              const glm::quat& rotation) {
     JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
@@ -554,6 +591,7 @@ PhysicsBodyInfo PhysicsWorld::getBodyInfo(PhysicsBodyID bodyID) const {
     info.position = toGLM(bodyInterface.GetPosition(joltID));
     info.rotation = toGLM(bodyInterface.GetRotation(joltID));
     info.linearVelocity = toGLM(bodyInterface.GetLinearVelocity(joltID));
+    info.angularVelocity = toGLM(bodyInterface.GetAngularVelocity(joltID));
     info.isAwake = bodyInterface.IsActive(joltID);
 
     return info;
@@ -587,6 +625,90 @@ void PhysicsWorld::applyImpulse(PhysicsBodyID bodyID, const glm::vec3& impulse) 
     if (!bodyInterface.IsAdded(joltID)) return;
 
     bodyInterface.AddImpulse(joltID, toJolt(impulse));
+}
+
+void PhysicsWorld::applyAngularImpulse(PhysicsBodyID bodyID, const glm::vec3& angularImpulse) {
+    if (bodyID == INVALID_BODY_ID) return;
+
+    JPH::BodyID joltID(bodyID);
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
+    if (!bodyInterface.IsAdded(joltID)) return;
+
+    bodyInterface.AddAngularImpulse(joltID, toJolt(angularImpulse));
+}
+
+void PhysicsWorld::applyForce(PhysicsBodyID bodyID, const glm::vec3& force) {
+    if (bodyID == INVALID_BODY_ID) return;
+
+    JPH::BodyID joltID(bodyID);
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
+    if (!bodyInterface.IsAdded(joltID)) return;
+
+    bodyInterface.AddForce(joltID, toJolt(force));
+}
+
+void PhysicsWorld::applyForceAtPoint(PhysicsBodyID bodyID, const glm::vec3& force, const glm::vec3& point) {
+    if (bodyID == INVALID_BODY_ID) return;
+
+    JPH::BodyID joltID(bodyID);
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
+    if (!bodyInterface.IsAdded(joltID)) return;
+
+    bodyInterface.AddForce(joltID, toJolt(force), JPH::RVec3(point.x, point.y, point.z));
+}
+
+void PhysicsWorld::applyTorque(PhysicsBodyID bodyID, const glm::vec3& torque) {
+    if (bodyID == INVALID_BODY_ID) return;
+
+    JPH::BodyID joltID(bodyID);
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
+    if (!bodyInterface.IsAdded(joltID)) return;
+
+    bodyInterface.AddTorque(joltID, toJolt(torque));
+}
+
+void PhysicsWorld::setAngularVelocity(PhysicsBodyID bodyID, const glm::vec3& angularVelocity) {
+    if (bodyID == INVALID_BODY_ID) return;
+
+    JPH::BodyID joltID(bodyID);
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
+    if (!bodyInterface.IsAdded(joltID)) return;
+
+    bodyInterface.SetAngularVelocity(joltID, toJolt(angularVelocity));
+}
+
+glm::vec3 PhysicsWorld::getAngularVelocity(PhysicsBodyID bodyID) const {
+    if (bodyID == INVALID_BODY_ID) return glm::vec3(0.0f);
+
+    JPH::BodyID joltID(bodyID);
+    const JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
+    if (!bodyInterface.IsAdded(joltID)) return glm::vec3(0.0f);
+
+    return toGLM(bodyInterface.GetAngularVelocity(joltID));
+}
+
+void PhysicsWorld::setBodyRotation(PhysicsBodyID bodyID, const glm::quat& rotation) {
+    if (bodyID == INVALID_BODY_ID) return;
+
+    JPH::BodyID joltID(bodyID);
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
+    if (!bodyInterface.IsAdded(joltID)) return;
+
+    bodyInterface.SetRotation(joltID, toJolt(rotation), JPH::EActivation::Activate);
+}
+
+void PhysicsWorld::setBodyPositionAndRotation(PhysicsBodyID bodyID, const glm::vec3& position,
+                                                const glm::quat& rotation) {
+    if (bodyID == INVALID_BODY_ID) return;
+
+    JPH::BodyID joltID(bodyID);
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
+    if (!bodyInterface.IsAdded(joltID)) return;
+
+    bodyInterface.SetPositionAndRotation(joltID,
+        JPH::RVec3(position.x, position.y, position.z),
+        toJolt(rotation),
+        JPH::EActivation::Activate);
 }
 
 glm::mat4 PhysicsWorld::getBodyTransform(PhysicsBodyID bodyID) const {

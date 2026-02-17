@@ -30,6 +30,7 @@ struct PhysicsBodyInfo {
     glm::vec3 position{0.0f};
     glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
     glm::vec3 linearVelocity{0.0f};
+    glm::vec3 angularVelocity{0.0f};
     bool isAwake = false;
 };
 
@@ -129,6 +130,11 @@ public:
                                                const std::vector<CapsuleData>& capsules,
                                                const glm::quat& rotation = glm::quat(1, 0, 0, 0));
 
+    // Dynamic capsule (for articulated body parts)
+    PhysicsBodyID createCapsule(const glm::vec3& position, float halfHeight, float radius,
+                                float mass = 1.0f, float friction = 0.5f, float restitution = 0.0f,
+                                const glm::quat& rotation = glm::quat(1, 0, 0, 0));
+
     // Character controller
     bool createCharacter(const glm::vec3& position, float height, float radius);
     void updateCharacter(float deltaTime, const glm::vec3& desiredVelocity, bool jump);
@@ -140,8 +146,17 @@ public:
     // Body queries
     PhysicsBodyInfo getBodyInfo(PhysicsBodyID bodyID) const;
     void setBodyPosition(PhysicsBodyID bodyID, const glm::vec3& position);
+    void setBodyRotation(PhysicsBodyID bodyID, const glm::quat& rotation);
     void setBodyVelocity(PhysicsBodyID bodyID, const glm::vec3& velocity);
+    void setAngularVelocity(PhysicsBodyID bodyID, const glm::vec3& angularVelocity);
+    glm::vec3 getAngularVelocity(PhysicsBodyID bodyID) const;
     void applyImpulse(PhysicsBodyID bodyID, const glm::vec3& impulse);
+    void applyAngularImpulse(PhysicsBodyID bodyID, const glm::vec3& angularImpulse);
+    void applyForce(PhysicsBodyID bodyID, const glm::vec3& force);
+    void applyForceAtPoint(PhysicsBodyID bodyID, const glm::vec3& force, const glm::vec3& point);
+    void applyTorque(PhysicsBodyID bodyID, const glm::vec3& torque);
+    void setBodyPositionAndRotation(PhysicsBodyID bodyID, const glm::vec3& position,
+                                     const glm::quat& rotation);
 
     // Convert between GLM and physics transforms
     glm::mat4 getBodyTransform(PhysicsBodyID bodyID) const;
@@ -155,12 +170,12 @@ public:
     // Debug
     int getActiveBodyCount() const;
 
-    // Access to the underlying Jolt physics system.
-    // Used by ragdoll instances and debug rendering.
+    // Access to underlying Jolt physics system (for constraint creation, ragdolls, debug)
+    JPH::PhysicsSystem* getJoltSystem() { return physicsSystem_.get(); }
+    const JPH::PhysicsSystem* getJoltSystem() const { return physicsSystem_.get(); }
     JPH::PhysicsSystem* getPhysicsSystem() { return physicsSystem_.get(); }
 
 #ifdef JPH_DEBUG_RENDERER
-    // Legacy alias for debug rendering
     JPH::PhysicsSystem* getPhysicsSystemForDebug() { return physicsSystem_.get(); }
 #endif
 
