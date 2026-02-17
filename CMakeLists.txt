@@ -180,6 +180,7 @@ set(SOURCES
     src/lighting/ShadowSystem.cpp
     # Physics
     src/physics/PhysicsSystem.cpp
+    src/physics/ArticulatedBody.cpp
     src/physics/JoltLayerConfig.cpp
     src/physics/JoltRuntime.cpp
     src/physics/CharacterController.cpp

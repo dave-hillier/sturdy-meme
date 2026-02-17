@@ -513,6 +513,14 @@ bool Application::init(const std::string& title, int width, int height) {
         gui_->endFrame(cmd);
     });
 
+    // Wire up ragdoll spawn callback for debug UI
+    renderer_->getSystems().debugControl().setSpawnRagdollCallback([this]() {
+        spawnRagdoll();
+    });
+    renderer_->getSystems().debugControl().setRagdollCountCallback([this]() -> int {
+        return static_cast<int>(ragdolls_.size());
+    });
+
     // Set up input system with GUI reference for input blocking
     input.setGuiSystem(gui_.get());
     input.setMoveSpeed(moveSpeed);
@@ -856,6 +864,13 @@ void Application::shutdown() {
     renderer_->waitIdle();
     gui_.reset();  // RAII cleanup via destructor
     // InputSystem cleanup handled by destructor (RAII)
+
+    // Destroy ragdolls before physics world
+    for (auto& ragdoll : ragdolls_) {
+        ragdoll.destroy(physics());
+    }
+    ragdolls_.clear();
+
     physicsTerrainManager_.cleanup();
     physics_.reset();  // RAII cleanup via optional reset
     renderer_.reset();  // RAII cleanup via unique_ptr reset
@@ -994,6 +1009,9 @@ void Application::processEvents() {
                     glm::vec3 playerPos = player_.transform.position;
                     sys.environmentControl().spawnConfetti(playerPos, 8.0f, 100.0f, 0.5f);
                     SDL_Log("Confetti!");
+                }
+                else if (event.key.scancode == SDL_SCANCODE_R) {
+                    spawnRagdoll();
                 }
                 else if (event.key.scancode == SDL_SCANCODE_V) {
                     sys.environmentControl().toggleCloudStyle();
@@ -1470,4 +1488,36 @@ void Application::updateECS(float deltaTime) {
 
     // Get culling stats for debugging (could expose to GUI later)
     [[maybe_unused]] ecs::render::CullStats stats = ecs::render::getCullStats(ecsWorld_);
+}
+
+void Application::spawnRagdoll() {
+    if (!physics_) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Cannot spawn ragdoll: physics not initialized");
+        return;
+    }
+
+    auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
+
+    // Build humanoid config from the player's skeleton if available,
+    // otherwise use a default config with generic proportions
+    ArticulatedBodyConfig config;
+    if (sceneBuilder.hasCharacter()) {
+        const Skeleton& skeleton = sceneBuilder.getAnimatedCharacter().getSkeleton();
+        config = createHumanoidConfig(skeleton);
+    } else {
+        // Fallback: create a minimal config without skeleton mapping
+        config = createHumanoidConfig(Skeleton{});
+    }
+
+    // Spawn 5m above the player position
+    glm::vec3 spawnPos = player_.transform.position + glm::vec3(0.0f, 5.0f, 0.0f);
+
+    ArticulatedBody ragdoll;
+    if (ragdoll.create(physics(), config, spawnPos)) {
+        ragdolls_.push_back(std::move(ragdoll));
+        SDL_Log("Spawned ragdoll at (%.1f, %.1f, %.1f) - total ragdolls: %zu",
+                spawnPos.x, spawnPos.y, spawnPos.z, ragdolls_.size());
+    } else {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to spawn ragdoll");
+    }
 }

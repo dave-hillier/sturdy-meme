@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 
 class DebugLineSystem;
 
@@ -57,4 +58,16 @@ public:
         uint32_t occlusionCulled;
     };
     virtual CullingStats getHiZCullingStats() const = 0;
+
+    // Articulated body ragdoll spawning (for testing)
+    using SpawnRagdollCallback = std::function<void()>;
+    using RagdollCountCallback = std::function<int()>;
+    void setSpawnRagdollCallback(SpawnRagdollCallback callback) { ragdollCallback_ = std::move(callback); }
+    void setRagdollCountCallback(RagdollCountCallback callback) { ragdollCountCallback_ = std::move(callback); }
+    void spawnRagdoll() { if (ragdollCallback_) ragdollCallback_(); }
+    int getActiveRagdollCount() const { return ragdollCountCallback_ ? ragdollCountCallback_() : 0; }
+
+private:
+    SpawnRagdollCallback ragdollCallback_;
+    RagdollCountCallback ragdollCountCallback_;
 };

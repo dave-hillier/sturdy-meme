@@ -106,6 +106,20 @@ void GuiDebugTab::render(IDebugControl& debugControl) {
         ImGui::Spacing();
         ImGui::Text("Lines: %zu", debugLines.getLineCount());
         ImGui::Text("Triangles: %zu", debugLines.getTriangleCount());
+
+        // Ragdoll spawning
+        ImGui::Spacing();
+        if (ImGui::Button("Spawn Ragdoll")) {
+            debugControl.spawnRagdoll();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Drop an articulated ragdoll from 5m above player (also: R key)");
+        }
+        int ragdollCount = debugControl.getActiveRagdollCount();
+        if (ragdollCount > 0) {
+            ImGui::SameLine();
+            ImGui::Text("Active: %d", ragdollCount);
+        }
     }
 #endif
 
@@ -170,4 +184,5 @@ void GuiDebugTab::render(IDebugControl& debugControl) {
     ImGui::BulletText("[ ] - Fog density");
     ImGui::BulletText("\\ - Toggle fog");
     ImGui::BulletText("F - Spawn confetti");
+    ImGui::BulletText("R - Spawn ragdoll");
 }
