@@ -82,13 +82,8 @@ layout(std140, binding = BINDING_VISBUF_UNIFORMS) uniform ResolveUniforms {
     uint _pad1, _pad2;
 } resolveUniforms;
 
-// Texture array for material textures (UNORM format - sRGB conversion done manually for albedo)
+// Texture array for material textures (UNORM - sRGB sources linearized during blit)
 layout(binding = BINDING_VISBUF_TEXTURE_ARRAY) uniform sampler2DArray materialTextures;
-
-// sRGB to linear conversion (since texture array uses UNORM, not SRGB format)
-vec3 srgbToLinear(vec3 srgb) {
-    return mix(srgb / 12.92, pow((srgb + 0.055) / 1.055, vec3(2.4)), step(0.04045, srgb));
-}
 
 // HDR pass depth buffer for depth comparison (prevents overwriting closer HDR-pass objects)
 layout(binding = BINDING_VISBUF_HDR_DEPTH) uniform sampler2D hdrDepthBuffer;
@@ -262,7 +257,8 @@ void main() {
 
     if (albedoTexIdx != 0xFFFFFFFFu) {
         vec4 texColor = texture(materialTextures, vec3(texCoord, float(albedoTexIdx)));
-        baseColor *= srgbToLinear(texColor.rgb);
+        // Texture data is already linear: sRGB sources are linearized during blit to UNORM array
+        baseColor *= texColor.rgb;
     }
 
     if (roughMetalTexIdx != 0xFFFFFFFFu) {
