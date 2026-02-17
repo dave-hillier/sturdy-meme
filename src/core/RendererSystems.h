@@ -71,6 +71,7 @@ class HiZSystem;
 class GPUSceneBuffer;
 class GPUCullPass;
 class GPUClusterBuffer;
+class TwoPassCuller;
 class WaterSystem;
 class WaterDisplacement;
 class FlowMapGenerator;
@@ -292,6 +293,10 @@ public:
     const GPUClusterBuffer* gpuClusterBuffer() const { return gpuClusterBuffer_.get(); }
     bool hasGPUClusterBuffer() const { return gpuClusterBuffer_ != nullptr; }
     void setGPUClusterBuffer(std::unique_ptr<GPUClusterBuffer> buffer);
+    TwoPassCuller* twoPassCuller() { return twoPassCuller_.get(); }
+    const TwoPassCuller* twoPassCuller() const { return twoPassCuller_.get(); }
+    bool hasTwoPassCuller() const { return twoPassCuller_ != nullptr; }
+    void setTwoPassCuller(std::unique_ptr<TwoPassCuller> culler);
 
     // Screen-space shadow buffer
     ScreenSpaceShadowSystem* screenSpaceShadow() { return screenSpaceShadowSystem_.get(); }
@@ -582,6 +587,7 @@ private:
     std::unique_ptr<GPUSceneBuffer> gpuSceneBuffer_;
     std::unique_ptr<GPUCullPass> gpuCullPass_;
     std::unique_ptr<GPUClusterBuffer> gpuClusterBuffer_;
+    std::unique_ptr<TwoPassCuller> twoPassCuller_;
 
     // Screen-space shadow buffer
     std::unique_ptr<ScreenSpaceShadowSystem> screenSpaceShadowSystem_;

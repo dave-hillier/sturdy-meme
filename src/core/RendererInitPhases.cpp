@@ -68,6 +68,7 @@
 #include "VisibilityBuffer.h"
 #include "GPUMaterialBuffer.h"
 #include "MeshClusterBuilder.h"
+#include "TwoPassCuller.h"
 #include "threading/TaskScheduler.h"
 #include <SDL3/SDL.h>
 
@@ -701,6 +702,15 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 if (gpuClusterBuf) {
                     systems_->setGPUClusterBuffer(std::move(gpuClusterBuf));
                     SDL_Log("GPUClusterBuffer: Initialized for cluster-based rendering");
+                }
+            }
+
+            // Two-pass GPU culler for Nanite-style occlusion + LOD selection
+            {
+                auto twoPassCuller = TwoPassCuller::create(*ctxPtr, 16384, 16384);
+                if (twoPassCuller) {
+                    systems_->setTwoPassCuller(std::move(twoPassCuller));
+                    SDL_Log("TwoPassCuller: Initialized for GPU-driven cluster culling");
                 }
             }
 

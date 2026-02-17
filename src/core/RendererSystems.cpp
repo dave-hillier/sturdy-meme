@@ -36,6 +36,7 @@
 #include "GPUSceneBuffer.h"
 #include "culling/GPUCullPass.h"
 #include "MeshClusterBuilder.h"
+#include "TwoPassCuller.h"
 #include "WaterSystem.h"
 #include "WaterDisplacement.h"
 #include "FlowMapGenerator.h"
@@ -190,6 +191,10 @@ void RendererSystems::setGPUCullPass(std::unique_ptr<GPUCullPass> pass) {
 
 void RendererSystems::setGPUClusterBuffer(std::unique_ptr<GPUClusterBuffer> buffer) {
     gpuClusterBuffer_ = std::move(buffer);
+}
+
+void RendererSystems::setTwoPassCuller(std::unique_ptr<TwoPassCuller> culler) {
+    twoPassCuller_ = std::move(culler);
 }
 
 void RendererSystems::setScreenSpaceShadow(std::unique_ptr<ScreenSpaceShadowSystem> system) {
@@ -355,6 +360,7 @@ void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
     // Tier 2+ first, then Tier 1
 
     // GPU-driven rendering (must be destroyed before allocator shutdown)
+    twoPassCuller_.reset();  // RAII cleanup via destructor
     gpuClusterBuffer_.reset();  // RAII cleanup via destructor
     gpuCullPass_.reset();  // RAII cleanup via destructor
     if (gpuSceneBuffer_) {
