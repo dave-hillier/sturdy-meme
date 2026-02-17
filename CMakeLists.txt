@@ -280,6 +280,9 @@ set(SOURCES
     # Machine Learning
     src/ml/MLPNetwork.cpp
     src/ml/ModelLoader.cpp
+    src/ml/CALMCharacterConfig.cpp
+    src/ml/CALMObservation.cpp
+    src/ml/CALMActionApplier.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -1292,6 +1295,7 @@ if(BUILD_TESTS)
         tests/test_player_state.cpp
         tests/test_motion_matching.cpp
         tests/test_mlp.cpp
+        tests/test_calm_observation.cpp
         # Source files needed by tests
         src/atmosphere/CelestialCalculator.cpp
         src/animation/Animation.cpp
@@ -1310,12 +1314,17 @@ if(BUILD_TESTS)
         src/animation/MotionMatchingKDTree.cpp
         src/ml/MLPNetwork.cpp
         src/ml/ModelLoader.cpp
+        src/ml/CALMCharacterConfig.cpp
+        src/ml/CALMObservation.cpp
+        src/ml/CALMActionApplier.cpp
     )
 
     target_include_directories(vulkan_game_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/src/loaders  # For GLTFLoader.h used by animation
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/animation # For AnimationBlend.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core     # For Mesh.h used by loaders
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/physics  # For CharacterController.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain  # For TileGridLogic.h, ErosionDataLoader.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture  # For VirtualTextureTypes.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/water    # For WaterPlacementData.h
