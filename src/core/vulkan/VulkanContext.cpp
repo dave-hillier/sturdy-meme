@@ -192,11 +192,26 @@ bool VulkanContext::selectPhysicalDevice() {
     supportedFeatures11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     VkPhysicalDeviceVulkan12Features supportedFeatures12{};
     supportedFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceDriverProperties driverProps{};
+    driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
     supportedFeatures11.pNext = &supportedFeatures12;
+    supportedFeatures12.pNext = &driverProps;
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     features2.pNext = &supportedFeatures11;
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+
+    // Detect MoltenVK/portability layer — reports shaderDrawParameters but can't
+    // compile SPIR-V DrawIndex to MSL
+    bool isMoltenVK = (driverProps.driverID == VK_DRIVER_ID_MOLTENVK);
+    if (!isMoltenVK) {
+        // Also check driver name string as fallback
+        std::string driverName(driverProps.driverName);
+        isMoltenVK = (driverName.find("MoltenVK") != std::string::npos);
+    }
+    if (isMoltenVK) {
+        SDL_Log("MoltenVK detected - disabling features not supported in MSL translation");
+    }
 
     hasTimelineSemaphores_ = supportedFeatures12.timelineSemaphore == VK_TRUE;
     if (hasTimelineSemaphores_) {
@@ -206,7 +221,7 @@ bool VulkanContext::selectPhysicalDevice() {
             "Timeline semaphores not supported - falling back to fences");
     }
 
-    hasDrawIndirectCount_ = supportedFeatures12.drawIndirectCount == VK_TRUE;
+    hasDrawIndirectCount_ = supportedFeatures12.drawIndirectCount == VK_TRUE && !isMoltenVK;
     if (hasDrawIndirectCount_) {
         SDL_Log("drawIndirectCount supported - GPU-driven indirect draw enabled");
     } else {
@@ -214,7 +229,8 @@ bool VulkanContext::selectPhysicalDevice() {
             "drawIndirectCount not supported - using fixed max draw count fallback");
     }
 
-    hasShaderDrawParameters_ = supportedFeatures11.shaderDrawParameters == VK_TRUE;
+    // MoltenVK reports shaderDrawParameters but can't translate DrawIndex to MSL
+    hasShaderDrawParameters_ = supportedFeatures11.shaderDrawParameters == VK_TRUE && !isMoltenVK;
     if (hasShaderDrawParameters_) {
         SDL_Log("shaderDrawParameters supported - gl_DrawID enabled");
     } else {
