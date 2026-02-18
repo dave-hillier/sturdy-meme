@@ -67,6 +67,12 @@ public:
     bool wantsOrientationLockToggle() const { return orientationLockToggleRequested; }
     bool isOrientationLockHeld() const { return orientationLockHeld; }
 
+    // Combat input (mouse buttons or keyboard)
+    bool wantsLightAttack() const { return lightAttackRequested; }
+    bool wantsHeavyAttack() const { return heavyAttackRequested; }
+    bool isBlockHeld() const { return blockHeld; }
+    bool wantsDodge() const { return dodgeRequested; }
+
     // Settings
     void setMoveSpeed(float speed) { moveSpeed = speed; }
     void setRotateSpeed(float speed) { rotateSpeed = speed; }
@@ -138,6 +144,14 @@ private:
     bool orientationLockHeld = false;
     bool keyboardLockHeld = false;
     bool gamepadLockToggleHeld = false;
+
+    // Combat input state
+    bool lightAttackRequested = false;
+    bool heavyAttackRequested = false;
+    bool blockHeld = false;
+    bool dodgeRequested = false;
+    bool mouseLeftPressed = false;
+    bool mouseRightPressed = false;
 
     // Input settings
     float moveSpeed = 5.0f;

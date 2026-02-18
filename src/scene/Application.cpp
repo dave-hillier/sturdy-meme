@@ -34,6 +34,7 @@
 #include "DebugLineSystem.h"
 #include "npc/NPCSimulation.h"
 #include "Texture.h"
+#include "combat/CombatComponents.h"
 
 #ifdef JPH_DEBUG_RENDERER
 #include "PhysicsDebugRenderer.h"
@@ -802,6 +803,9 @@ void Application::run() {
                                glm::vec4(1.0f, 0.5f, 0.0f, 0.5f));
         }
 
+        // Update combat system (after character animation, before rendering)
+        updateCombatSystem(deltaTime);
+
         // Update NPC animations with LOD based on camera position
         renderer_->getSystems().scene().getSceneBuilder().updateNPCs(
             deltaTime, camera.getPosition());
@@ -1470,4 +1474,110 @@ void Application::updateECS(float deltaTime) {
 
     // Get culling stats for debugging (could expose to GUI later)
     [[maybe_unused]] ecs::render::CullStats stats = ecs::render::getCullStats(ecsWorld_);
+}
+
+void Application::initCombatSystem() {
+    auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
+    if (!sceneBuilder.hasCharacter()) return;
+
+    auto& character = sceneBuilder.getAnimatedCharacter();
+    const auto& skeleton = character.getSkeleton();
+
+    // Build ragdoll definition from skeleton
+    RagdollDefinition ragdollDef = RagdollDefinition::buildFromSkeleton(skeleton);
+    if (ragdollDef.bones.empty()) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "No ragdoll bones found in skeleton");
+        return;
+    }
+
+    // Create active ragdoll
+    glm::vec3 playerPos = physics().getCharacterPosition();
+    playerRagdoll_ = ActiveRagdoll::create(physics(), ragdollDef, skeleton, playerPos);
+
+    if (!playerRagdoll_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create player ragdoll");
+        return;
+    }
+
+    // Set initial ragdoll to powered mode (animation-driven with physics response)
+    playerRagdoll_->setBlendMode(RagdollBlendMode::Powered);
+    playerRagdoll_->setMotorStrength(0.85f);
+
+    // Initialize combat animation controller
+    combatAnimController_.initialize(character, playerRagdoll_.get());
+
+    // Register player as combatant
+    ecs::Entity playerEntity = sceneBuilder.getPlayerEntity();
+    if (ecsWorld_.valid(playerEntity)) {
+        CombatSystem::CombatantInfo info;
+        info.entity = playerEntity;
+        info.ragdoll = playerRagdoll_.get();
+        info.character = &character;
+        info.rightHandBoneIndex = sceneBuilder.getRightHandBoneIndex();
+        info.leftHandBoneIndex = sceneBuilder.getLeftHandBoneIndex();
+        combatSystem_.registerCombatant(info);
+
+        // Add combat state and health to player entity
+        ecsWorld_.add<CombatState>(playerEntity);
+        ecsWorld_.add<Health>(playerEntity, 100.0f);
+    }
+
+    // Set hit callback for debug logging
+    combatSystem_.setHitCallback([](const CombatHitResult& hit) {
+        SDL_Log("Combat hit! damage=%.1f blocked=%d parried=%d",
+                hit.damage, hit.wasBlocked, hit.wasParried);
+    });
+
+    // Teleport ragdoll to current animation pose
+    std::vector<glm::mat4> boneMatrices;
+    character.computeBoneMatrices(boneMatrices);
+    glm::mat4 charTransform = player_.movement.getModelMatrix(player_.transform);
+    playerRagdoll_->teleportToAnimation(boneMatrices, charTransform);
+
+    combatInitialized_ = true;
+    SDL_Log("Combat system initialized with %zu ragdoll bones", ragdollDef.bones.size());
+}
+
+void Application::updateCombatSystem(float deltaTime) {
+    if (!combatInitialized_) {
+        // Try to initialize once character is loaded
+        auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
+        if (sceneBuilder.hasCharacter() && physics_.has_value()) {
+            initCombatSystem();
+        }
+        return;
+    }
+
+    auto& sceneBuilder = renderer_->getSystems().scene().getSceneBuilder();
+    ecs::Entity playerEntity = sceneBuilder.getPlayerEntity();
+
+    // Build combat input from input system
+    CombatInput combatInput;
+    combatInput.attackLight = input.wantsLightAttack();
+    combatInput.attackHeavy = input.wantsHeavyAttack();
+    combatInput.block = input.isBlockHeld();
+    combatInput.dodge = input.wantsDodge();
+    combatInput.aimDirection = player_.transform.getForward();
+
+    // Process combat input
+    combatSystem_.processInput(playerEntity, combatInput, ecsWorld_);
+
+    // Update combat system (state machine, hit detection)
+    combatSystem_.update(deltaTime, physics(), ecsWorld_);
+
+    // Get character world transform for ragdoll
+    glm::mat4 charTransform = player_.movement.getModelMatrix(player_.transform);
+    float movementSpeed = glm::length(glm::vec2(
+        physics().getCharacterVelocity().x,
+        physics().getCharacterVelocity().z));
+    bool isGrounded = physics().isCharacterOnGround();
+
+    // Get combat state
+    CombatState combatState;
+    if (ecsWorld_.has<CombatState>(playerEntity)) {
+        combatState = ecsWorld_.get<CombatState>(playerEntity);
+    }
+
+    // Update combat animation controller (drives ragdoll, blends poses)
+    combatAnimController_.update(deltaTime, combatState, charTransform, movementSpeed, isGrounded);
 }

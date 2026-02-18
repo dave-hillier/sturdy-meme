@@ -84,6 +84,28 @@ bool InputSystem::processEvent(const SDL_Event& event) {
             mouseWheelAccumulator -= event.wheel.y * 0.5f;
             return true;
 
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            if (event.button.button == SDL_BUTTON_LEFT) {
+                mouseLeftPressed = true;
+                return true;
+            }
+            if (event.button.button == SDL_BUTTON_RIGHT) {
+                mouseRightPressed = true;
+                return true;
+            }
+            break;
+
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            if (event.button.button == SDL_BUTTON_LEFT) {
+                mouseLeftPressed = false;
+                return true;
+            }
+            if (event.button.button == SDL_BUTTON_RIGHT) {
+                mouseRightPressed = false;
+                return true;
+            }
+            break;
+
         default:
             break;
     }
@@ -108,6 +130,9 @@ void InputSystem::update(float deltaTime, float cameraYaw) {
     freeCameraUp = 0.0f;
     timeScaleInput = 0.0f;
     orientationLockToggleRequested = false;
+    lightAttackRequested = false;
+    heavyAttackRequested = false;
+    dodgeRequested = false;
 
     // Skip game input if GUI wants it
     if (isGuiBlocking()) {
@@ -257,6 +282,21 @@ void InputSystem::processThirdPersonKeyboard(float deltaTime, float cameraYaw, c
     // Middle mouse button to hold orientation lock
     Uint32 mouseState = SDL_GetMouseState(nullptr, nullptr);
     orientationLockHeld = (mouseState & SDL_BUTTON_MMASK) != 0;
+
+    // Combat input: Left click = light attack, Right click = heavy attack
+    // F = block (held), G = dodge
+    if (mouseLeftPressed) {
+        lightAttackRequested = true;
+        mouseLeftPressed = false; // Consume
+    }
+    if (mouseRightPressed) {
+        heavyAttackRequested = true;
+        mouseRightPressed = false; // Consume
+    }
+    blockHeld = keyState[SDL_SCANCODE_F];
+    if (keyState[SDL_SCANCODE_G]) {
+        dodgeRequested = true;
+    }
 }
 
 void InputSystem::processGamepadInput(float deltaTime, float cameraYaw) {

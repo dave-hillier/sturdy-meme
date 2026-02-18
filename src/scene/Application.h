@@ -19,6 +19,9 @@
 #include "ecs/Systems.h"
 #include "ecs/EntityFactory.h"
 #include "ecs/ECSMaterialDemo.h"
+#include "combat/CombatSystem.h"
+#include "combat/CombatAnimationController.h"
+#include "physics/ActiveRagdoll.h"
 
 class Application {
 public:
@@ -41,6 +44,8 @@ private:
     void updateCameraOcclusion(float deltaTime);
     void initECS();
     void updateECS(float deltaTime);
+    void initCombatSystem();
+    void updateCombatSystem(float deltaTime);
 
     SDL_Window* window = nullptr;
     std::unique_ptr<Renderer> renderer_;
@@ -77,6 +82,12 @@ private:
     ecs::World ecsWorld_;
     bool ecsWeaponsInitialized_ = false;      // Track if weapon bone attachments are set up
     std::unique_ptr<ecs::ECSMaterialDemo> ecsMaterialDemo_;  // ECS material demo entities
+
+    // Combat system
+    CombatSystem combatSystem_;
+    CombatAnimationController combatAnimController_;
+    std::unique_ptr<ActiveRagdoll> playerRagdoll_;
+    bool combatInitialized_ = false;
 
     bool running = false;
     // Walk speed matches animation root motion: 158.42 cm / 1.10s * 0.01 scale = 1.44 m/s

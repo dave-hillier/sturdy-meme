@@ -188,6 +188,10 @@ set(SOURCES
     src/physics/ClothSimulation.cpp
     src/physics/PlayerCape.cpp
     src/physics/PhysicsDebugRenderer.cpp
+    src/physics/ActiveRagdoll.cpp
+    # Combat
+    src/combat/CombatSystem.cpp
+    src/combat/CombatAnimationController.cpp
     # Terrain
     src/terrain/TerrainSystem.cpp
     src/terrain/TerrainDescriptorSets.cpp
