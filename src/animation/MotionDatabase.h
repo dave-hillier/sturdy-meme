@@ -66,6 +66,11 @@ struct DatabaseClip {
 
     // Tags applied to all poses from this clip
     std::vector<std::string> tags;
+
+    // Stride length (meters per full animation cycle) - computed during build.
+    // For root-motion clips: total XZ root displacement over one cycle.
+    // For in-place clips with locomotionSpeed > 0: locomotionSpeed * duration.
+    float strideLength = 0.0f;
 };
 
 // Database building options

@@ -93,6 +93,24 @@ void MotionDatabase::build(const DatabaseBuildOptions& options,
         indexClip(i, options);
         clips_[i].startPoseIndex = posesBeforeClip;
         clips_[i].poseCount = poses_.size() - posesBeforeClip;
+
+        // Compute stride length for playback speed scaling
+        DatabaseClip& dbClip = clips_[i];
+        if (dbClip.locomotionSpeed > 0.0f) {
+            // In-place animation with known speed: stride = speed * duration
+            dbClip.strideLength = dbClip.locomotionSpeed * dbClip.duration;
+        } else if (dbClip.clip && dbClip.duration > 0.0f) {
+            // Root-motion clip: measure total XZ displacement over one cycle
+            Skeleton tempSkel = skeleton_;
+            dbClip.clip->sample(0.0f, tempSkel, false);
+            glm::vec3 startPos = glm::vec3(tempSkel.joints[0].localTransform[3]);
+            dbClip.clip->sample(dbClip.duration, tempSkel, false);
+            glm::vec3 endPos = glm::vec3(tempSkel.joints[0].localTransform[3]);
+            dbClip.strideLength = glm::length(glm::vec2(endPos.x - startPos.x, endPos.z - startPos.z));
+        }
+        if (dbClip.strideLength > 0.01f) {
+            SDL_Log("  -> Clip '%s' stride length: %.3f m", dbClip.name.c_str(), dbClip.strideLength);
+        }
     }
 
     // Prune poses if requested

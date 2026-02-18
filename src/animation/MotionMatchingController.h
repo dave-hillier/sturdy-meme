@@ -21,6 +21,7 @@ struct PlaybackState {
 
     size_t matchedPoseIndex = 0;    // Last matched pose index
     float timeSinceMatch = 0.0f;    // Time since last pose match
+    float playbackSpeedScale = 1.0f; // Current speed scaling for stride matching (debug)
 };
 
 // Statistics for debugging
@@ -128,6 +129,12 @@ public:
     // Force a search on next update
     void forceSearch() { forceSearchNextUpdate_ = true; }
 
+    // Get the Y-axis rotation delta extracted from the root bone this frame.
+    // For walk/run clips this is near-zero. For turn-in-place clips, this
+    // represents the animation-driven rotation that should be fed into the
+    // character controller's facing direction.
+    float getExtractedRootYawDelta() const { return extractedRootYawDelta_; }
+
     // Set required tags for search
     void setRequiredTags(const std::vector<std::string>& tags);
 
@@ -187,6 +194,13 @@ private:
     // Flags
     bool initialized_ = false;
     bool forceSearchNextUpdate_ = false;
+
+    // Root yaw extraction
+    float extractedRootYawDelta_ = 0.0f;
+
+    // Per-bone velocity tracking for inertial blending
+    SkeletonPose prevPrevPose_;          // Pose from two frames ago
+    float prevDeltaTime_ = 0.0f;        // Delta time from previous frame
 
     // Strafe mode (Unreal-style)
     bool strafeMode_ = false;
