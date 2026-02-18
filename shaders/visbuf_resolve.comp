@@ -1,0 +1,313 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+
+#include "bindings.glsl"
+#include "lighting_common.glsl"
+
+// Visibility buffer material resolve compute shader
+// Reads the visibility buffer, reconstructs world position via barycentrics,
+// fetches vertex attributes, evaluates material, and writes to HDR output.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// Visibility buffer (R32G32_UINT — R=instanceId+1, G=triangleId+1; 0=background)
+layout(binding = BINDING_VISBUF_VISIBILITY, rg32ui) uniform readonly uimage2D visibilityBuffer;
+
+// Depth buffer for position reconstruction
+layout(binding = BINDING_VISBUF_DEPTH) uniform sampler2D depthBuffer;
+
+// HDR output
+layout(binding = BINDING_VISBUF_HDR_OUTPUT, rgba16f) uniform writeonly image2D hdrOutput;
+
+// Vertex data (global vertex buffer as SSBO)
+struct PackedVertex {
+    vec4 positionAndU;    // xyz = position, w = texCoord.x
+    vec4 normalAndV;      // xyz = normal,   w = texCoord.y
+    vec4 tangent;         // xyzw = tangent (w = handedness)
+    vec4 color;           // vertex color
+};
+
+layout(std430, binding = BINDING_VISBUF_VERTEX_BUFFER) readonly buffer VertexBuffer {
+    PackedVertex vertices[];
+};
+
+// Index buffer (global)
+layout(std430, binding = BINDING_VISBUF_INDEX_BUFFER) readonly buffer IndexBuffer {
+    uint indices[];
+};
+
+// Instance data
+struct InstanceData {
+    mat4 model;
+    vec4 materialParams;  // roughness, metallic, emissiveIntensity, opacity
+    vec4 emissiveColor;
+    uint pbrFlags;
+    float alphaTestThreshold;
+    float hueShift;
+    uint materialId;      // index into material buffer
+};
+
+layout(std430, binding = BINDING_VISBUF_INSTANCE_BUFFER) readonly buffer InstanceBuffer {
+    InstanceData instances[];
+};
+
+// GPU Material data
+struct GPUMaterial {
+    vec4 baseColor;         // RGB + alpha
+    float roughness;
+    float metallic;
+    float normalScale;
+    float aoStrength;
+    uint albedoTexIndex;    // UINT32_MAX = no texture
+    uint normalTexIndex;    // UINT32_MAX = no texture
+    uint roughnessMetallicTexIndex; // UINT32_MAX = no texture
+    uint flags;             // reserved
+};
+
+layout(std430, binding = BINDING_VISBUF_MATERIAL_BUFFER) readonly buffer MaterialBuffer {
+    GPUMaterial materials[];
+};
+
+// Resolve uniforms
+layout(std140, binding = BINDING_VISBUF_UNIFORMS) uniform ResolveUniforms {
+    mat4 invViewProj;
+    mat4 viewMatrix;
+    mat4 projMatrix;
+    vec4 cameraPosition;
+    vec4 screenParams;    // width, height, 1/width, 1/height
+    vec4 lightDirection;  // xyz = sun direction, w = intensity
+    uint instanceCount;
+    uint materialCount;
+    uint _pad1, _pad2;
+} resolveUniforms;
+
+// Texture array for material textures (UNORM - sRGB sources linearized during blit)
+layout(binding = BINDING_VISBUF_TEXTURE_ARRAY) uniform sampler2DArray materialTextures;
+
+// Dynamic light buffer for multiple point/spot lights
+#define DYNAMIC_LIGHT_BUFFER_BINDING BINDING_VISBUF_LIGHT_BUFFER
+#include "dynamic_lights_common.glsl"
+
+// ============================================================================
+// Helper functions
+// ============================================================================
+
+// Compute barycentric coordinates for a point in a triangle (screen space)
+vec3 computeBarycentrics(vec2 p, vec2 a, vec2 b, vec2 c) {
+    vec2 v0 = c - a;
+    vec2 v1 = b - a;
+    vec2 v2 = p - a;
+
+    float dot00 = dot(v0, v0);
+    float dot01 = dot(v0, v1);
+    float dot02 = dot(v0, v2);
+    float dot11 = dot(v1, v1);
+    float dot12 = dot(v1, v2);
+
+    float invDenom = 1.0 / (dot00 * dot11 - dot01 * dot01);
+    float u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+    float v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+
+    return vec3(1.0 - u - v, v, u);
+}
+
+// Cook-Torrance specular BRDF
+vec3 evaluateBRDF(vec3 N, vec3 V, vec3 L, vec3 baseColor, float roughness, float metallic) {
+    vec3 H = normalize(V + L);
+
+    float NoV = max(dot(N, V), 0.001);
+    float NoL = max(dot(N, L), 0.0);
+    float NoH = max(dot(N, H), 0.0);
+    float VoH = max(dot(V, H), 0.0);
+
+    // F0: dielectric = 0.04, metal = baseColor
+    vec3 F0 = mix(vec3(F0_DIELECTRIC), baseColor, metallic);
+
+    // Specular BRDF: D * V * F
+    float D = D_GGX(NoH, roughness);
+    float Vis = V_SmithGGX(NoV, NoL, roughness);
+    vec3 F = F_Schlick(VoH, F0);
+
+    vec3 specular = D * Vis * F;
+
+    // Diffuse: metals have no diffuse
+    vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+    vec3 diffuse = kD * baseColor / PI;
+
+    return (diffuse + specular) * NoL;
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
+void main() {
+    ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 imageSize = imageSize(visibilityBuffer);
+
+    if (pixelCoord.x >= imageSize.x || pixelCoord.y >= imageSize.y) {
+        return;
+    }
+
+    uvec2 packed = imageLoad(visibilityBuffer, pixelCoord).rg;
+
+    // Background pixel - no V-buffer data, preserve existing HDR content
+    // (0, 0) is the clear/sentinel value
+    if (packed.r == 0u && packed.g == 0u) {
+        return;
+    }
+
+    // 64-bit V-buffer: separate channels, -1 to undo the +1 bias from raster pass
+    uint instanceId = packed.r - 1u;
+    uint triangleId = packed.g - 1u;
+
+    // No depth comparison needed — V-buffer and HDR pass share the same depth buffer.
+    // Visibility between V-buffer objects and HDR objects (terrain, trees, water)
+    // is resolved by hardware depth testing during rasterization.
+
+    // Fetch triangle indices
+    uint i0 = indices[triangleId * 3u + 0u];
+    uint i1 = indices[triangleId * 3u + 1u];
+    uint i2 = indices[triangleId * 3u + 2u];
+
+    // Fetch instance and material data
+    InstanceData inst = instances[instanceId];
+
+    // Look up material (fallback to defaults if materialId is invalid)
+    uint matId = inst.materialId;
+    vec4 matBaseColor = vec4(0.8, 0.8, 0.8, 1.0);
+    float matRoughness = inst.materialParams.x;
+    float matMetallic = inst.materialParams.y;
+    float matNormalScale = 1.0;
+    uint albedoTexIdx = 0xFFFFFFFFu;
+    uint normalTexIdx = 0xFFFFFFFFu;
+    uint roughMetalTexIdx = 0xFFFFFFFFu;
+
+    if (matId < resolveUniforms.materialCount) {
+        GPUMaterial mat = materials[matId];
+        matBaseColor = mat.baseColor;
+        matRoughness = mat.roughness;
+        matMetallic = mat.metallic;
+        matNormalScale = mat.normalScale;
+        albedoTexIdx = mat.albedoTexIndex;
+        normalTexIdx = mat.normalTexIndex;
+        roughMetalTexIdx = mat.roughnessMetallicTexIndex;
+    }
+
+    // Transform vertex positions to world space
+    vec3 p0 = (inst.model * vec4(vertices[i0].positionAndU.xyz, 1.0)).xyz;
+    vec3 p1 = (inst.model * vec4(vertices[i1].positionAndU.xyz, 1.0)).xyz;
+    vec3 p2 = (inst.model * vec4(vertices[i2].positionAndU.xyz, 1.0)).xyz;
+
+    // Project triangle vertices to screen space for barycentric computation
+    mat4 viewProj = resolveUniforms.projMatrix * resolveUniforms.viewMatrix;
+    vec4 sp0 = viewProj * vec4(p0, 1.0);
+    vec4 sp1 = viewProj * vec4(p1, 1.0);
+    vec4 sp2 = viewProj * vec4(p2, 1.0);
+
+    vec2 ss0 = sp0.xy / sp0.w;
+    vec2 ss1 = sp1.xy / sp1.w;
+    vec2 ss2 = sp2.xy / sp2.w;
+
+    // Current pixel in NDC
+    vec2 screenUV = (vec2(pixelCoord) + 0.5) * resolveUniforms.screenParams.zw;
+    vec2 ndc = screenUV * 2.0 - 1.0;
+
+    // Perspective-correct barycentrics
+    vec3 bary = computeBarycentrics(ndc, ss0, ss1, ss2);
+
+    float w0 = 1.0 / sp0.w;
+    float w1 = 1.0 / sp1.w;
+    float w2 = 1.0 / sp2.w;
+    float wInterp = bary.x * w0 + bary.y * w1 + bary.z * w2;
+    bary = vec3(bary.x * w0, bary.y * w1, bary.z * w2) / wInterp;
+
+    // Interpolate vertex attributes
+    vec3 normal = normalize(
+        bary.x * vertices[i0].normalAndV.xyz +
+        bary.y * vertices[i1].normalAndV.xyz +
+        bary.z * vertices[i2].normalAndV.xyz
+    );
+
+    vec2 texCoord = bary.x * vec2(vertices[i0].positionAndU.w, vertices[i0].normalAndV.w) +
+                    bary.y * vec2(vertices[i1].positionAndU.w, vertices[i1].normalAndV.w) +
+                    bary.z * vec2(vertices[i2].positionAndU.w, vertices[i2].normalAndV.w);
+
+    vec3 worldPos = bary.x * p0 + bary.y * p1 + bary.z * p2;
+
+    // Transform normal to world space
+    mat3 normalMatrix = mat3(inst.model);
+    normal = normalize(normalMatrix * normal);
+
+    // Sample textures if available
+    vec3 baseColor = matBaseColor.rgb;
+    float roughness = matRoughness;
+    float metallic = matMetallic;
+
+    if (albedoTexIdx != 0xFFFFFFFFu) {
+        vec4 texColor = texture(materialTextures, vec3(texCoord, float(albedoTexIdx)));
+        // Texture data is already linear: sRGB sources are linearized during blit to UNORM array
+        baseColor *= texColor.rgb;
+    }
+
+    if (roughMetalTexIdx != 0xFFFFFFFFu) {
+        // Green = roughness, Blue = metallic (glTF convention)
+        vec4 rm = texture(materialTextures, vec3(texCoord, float(roughMetalTexIdx)));
+        roughness = rm.g;
+        metallic = rm.b;
+    }
+
+    // Normal mapping
+    if (normalTexIdx != 0xFFFFFFFFu) {
+        // Interpolate tangent
+        vec4 tangent = normalize(
+            bary.x * vertices[i0].tangent +
+            bary.y * vertices[i1].tangent +
+            bary.z * vertices[i2].tangent
+        );
+        vec3 T = normalize(normalMatrix * tangent.xyz);
+        vec3 B = cross(normal, T) * tangent.w;
+
+        vec3 normalMap = texture(materialTextures, vec3(texCoord, float(normalTexIdx))).rgb;
+        normalMap = normalMap * 2.0 - 1.0;
+        normalMap.xy *= matNormalScale;
+        normal = normalize(T * normalMap.x + B * normalMap.y + normal * normalMap.z);
+    }
+
+    // Apply vertex color tint
+    vec3 vertexColor = bary.x * vertices[i0].color.rgb +
+                       bary.y * vertices[i1].color.rgb +
+                       bary.z * vertices[i2].color.rgb;
+    // Only apply if vertex color is non-white (avoid darkening untinted meshes)
+    if (dot(vertexColor, vertexColor) > 0.01) {
+        baseColor *= vertexColor;
+    }
+
+    // PBR lighting
+    vec3 V = normalize(resolveUniforms.cameraPosition.xyz - worldPos);
+    vec3 L = normalize(resolveUniforms.lightDirection.xyz);
+    float lightIntensity = resolveUniforms.lightDirection.w;
+
+    // Direct lighting via Cook-Torrance BRDF (sun/directional)
+    vec3 directLight = evaluateBRDF(normal, V, L, baseColor, roughness, metallic) * lightIntensity;
+
+    // Dynamic point/spot lights
+    vec3 dynamicLight = calculateAllDynamicLightsPBRNoShadow(
+        normal, V, worldPos, baseColor, roughness, metallic);
+
+    // Ambient (hemisphere approximation)
+    float NoUp = dot(normal, vec3(0.0, 1.0, 0.0)) * 0.5 + 0.5;
+    vec3 skyColor = mix(vec3(0.05, 0.05, 0.08), vec3(0.12, 0.15, 0.2), NoUp);
+    vec3 ambient = baseColor * skyColor * (1.0 - metallic);
+
+    vec3 finalColor = directLight + dynamicLight + ambient;
+
+    // Emissive
+    float emissiveIntensity = inst.materialParams.z;
+    if (emissiveIntensity > 0.0) {
+        finalColor += inst.emissiveColor.rgb * emissiveIntensity;
+    }
+
+    imageStore(hdrOutput, pixelCoord, vec4(finalColor, 1.0));
+}

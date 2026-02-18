@@ -160,7 +160,9 @@ void GPUCullPass::updateUniforms(uint32_t frameIndex,
                                   const glm::mat4& proj,
                                   const glm::vec3& cameraPos,
                                   uint32_t objectCount,
-                                  VkExtent2D screenExtent) {
+                                  VkExtent2D screenExtent,
+                                  float nearPlane,
+                                  float farPlane) {
     GPUCullUniforms uniforms{};
     uniforms.viewMatrix = view;
     uniforms.projMatrix = proj;
@@ -173,8 +175,9 @@ void GPUCullPass::updateUniforms(uint32_t frameIndex,
     } else {
         uniforms.screenParams = glm::vec4(0.0f);
     }
+    uniforms.depthParams = glm::vec4(nearPlane, farPlane, static_cast<float>(hiZMipLevels_), 0.0f);
     uniforms.objectCount = objectCount;
-    uniforms.enableHiZ = hiZEnabled_ ? 1 : 0;
+    uniforms.enableHiZ = (hiZEnabled_ && hiZPyramidView_ != VK_NULL_HANDLE) ? 1 : 0;
     uniforms.maxDrawCommands = MAX_OBJECTS;
     uniforms.padding = 0;
 
@@ -329,9 +332,10 @@ GPUCullPass::CullingStats GPUCullPass::getStats(uint32_t frameIndex) const {
     return stats;
 }
 
-void GPUCullPass::setHiZPyramid(VkImageView pyramidView, VkSampler sampler) {
+void GPUCullPass::setHiZPyramid(VkImageView pyramidView, VkSampler sampler, uint32_t mipLevels) {
     hiZPyramidView_ = pyramidView;
     hiZSampler_ = sampler;
+    hiZMipLevels_ = mipLevels;
 }
 
 void GPUCullPass::setPlaceholderImage(VkImageView view, VkSampler sampler) {

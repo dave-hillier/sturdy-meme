@@ -1,0 +1,219 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_ballot : require
+
+#include "bindings.glsl"
+#include "cull_compute_common.glsl"
+#include "hiz_occlusion_common.glsl"
+#include "instancing_common.glsl"
+
+// Cluster culling compute shader
+// Phase 4: Two-pass occlusion culling for mesh clusters
+//
+// Pass 1: Test clusters from previous frame's visible set (fast path)
+// Pass 2: Test remaining clusters against newly built Hi-Z (catch newly visible)
+//
+// Each thread processes one cluster. Visible clusters write indirect draw commands.
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Cluster metadata buffer (must match C++ MeshCluster layout)
+struct ClusterData {
+    vec4 boundingSphere;    // xyz = center (object space), w = radius
+    vec3 aabbMin;
+    float _pad0;
+    vec3 aabbMax;
+    float _pad1;
+    vec3 coneAxis;
+    float coneAngle;        // cos(half-angle)
+    uint firstIndex;
+    uint indexCount;
+    uint firstVertex;
+    uint meshId;
+    float parentError;      // object-space error of parent cluster
+    float error;            // object-space error of this cluster
+    uint lodLevel;
+    uint parentIndex;       // index of parent (0xFFFFFFFF for root)
+    uint firstChildIndex;   // index of first child
+    uint childCount;        // number of children (0 = leaf)
+    uint _pad2;
+    uint _pad3;
+};
+
+layout(std430, binding = 0) readonly buffer ClusterBuffer {
+    ClusterData clusters[];
+};
+
+// Per-instance transforms
+struct InstanceTransform {
+    mat4 model;
+    vec4 materialParams;
+    vec4 emissiveColor;
+    uint pbrFlags;
+    float alphaTestThreshold;
+    float hueShift;
+    float _pad;
+};
+
+layout(std430, binding = 1) readonly buffer InstanceBuffer {
+    InstanceTransform instances[];
+};
+
+// Output: indirect draw commands
+layout(std430, binding = 2) writeonly buffer IndirectBuffer {
+    DrawIndexedIndirectCommand commands[];
+};
+
+// Output: draw count (atomic)
+layout(std430, binding = 3) buffer DrawCountBuffer {
+    uint drawCount;
+};
+
+// Output: visible cluster IDs (for next frame's pass 1)
+layout(std430, binding = 4) writeonly buffer VisibleClusterBuffer {
+    uint visibleClusters[];
+};
+
+// Output: visible cluster count
+layout(std430, binding = 5) buffer VisibleCountBuffer {
+    uint visibleCount;
+};
+
+// Culling uniforms
+layout(std140, binding = 6) uniform CullUniforms {
+    mat4 viewMatrix;
+    mat4 projMatrix;
+    mat4 viewProjMatrix;
+    vec4 frustumPlanes[6];
+    vec4 cameraPosition;
+    vec4 screenParams;      // width, height, 1/width, 1/height
+    vec4 depthParams;       // near, far, numMipLevels, unused
+    uint clusterCount;
+    uint instanceCount;
+    uint enableHiZ;         // 0 = frustum only, 1 = frustum + Hi-Z
+    uint maxDrawCommands;
+    uint passIndex;         // 0 = pass 1 (previous visible), 1 = pass 2 (remaining)
+    uint _pad0, _pad1, _pad2;
+} cull;
+
+// Hi-Z pyramid for occlusion testing
+layout(binding = 7) uniform sampler2D hiZPyramid;
+
+// Previous frame's visibility (for pass 2: skip already-tested clusters)
+layout(std430, binding = 8) readonly buffer PrevVisibleBuffer {
+    uint prevVisibleClusters[];
+};
+
+layout(std430, binding = 9) readonly buffer PrevVisibleCountBuffer {
+    uint prevVisibleCount;
+};
+
+// Per-draw data output (parallel to indirect commands, indexed by gl_DrawID in raster shader)
+struct DrawData {
+    uint instanceId;
+    uint triangleOffset;    // firstIndex / 3 (global triangle index for resolve)
+};
+
+layout(std430, binding = BINDING_CLUSTER_CULL_DRAW_DATA) writeonly buffer DrawDataBuffer {
+    DrawData drawData[];
+};
+
+void main() {
+    uint threadIdx = gl_GlobalInvocationID.x;
+
+    // Determine which cluster to test based on pass
+    uint clusterIdx;
+    if (cull.passIndex == 0u) {
+        // Pass 1: test clusters that were visible last frame
+        if (threadIdx >= prevVisibleCount) return;
+        clusterIdx = prevVisibleClusters[threadIdx];
+        if (clusterIdx >= cull.clusterCount) return;
+    } else {
+        // Pass 2: test all clusters (skip previously tested in a full implementation)
+        if (threadIdx >= cull.clusterCount) return;
+        clusterIdx = threadIdx;
+    }
+
+    ClusterData cluster = clusters[clusterIdx];
+
+    // For now, use instance 0 transform (multi-instance would iterate)
+    // In a full implementation, each (cluster, instance) pair is a draw
+    uint instanceIdx = cluster.meshId;  // Use meshId as instance index for now
+    if (instanceIdx >= cull.instanceCount) return;
+
+    mat4 model = instances[instanceIdx].model;
+
+    // Transform bounding sphere to world space
+    vec3 worldCenter = (model * vec4(cluster.boundingSphere.xyz, 1.0)).xyz;
+    float worldRadius = cluster.boundingSphere.w * length(vec3(model[0][0], model[1][0], model[2][0]));
+
+    // Frustum culling (sphere test)
+    vec4 planes[6];
+    for (int i = 0; i < 6; i++) planes[i] = cull.frustumPlanes[i];
+
+    if (!isSphereInFrustum(worldCenter, worldRadius, planes)) {
+        return;
+    }
+
+    // Transform AABB to world space (handles rotation/non-uniform scale correctly)
+    vec3 aabbMin, aabbMax;
+    transformAABB(model, cluster.aabbMin, cluster.aabbMax, aabbMin, aabbMax);
+
+    if (!isAABBInFrustum(planes, aabbMin, aabbMax)) {
+        return;
+    }
+
+    // Hi-Z occlusion test
+    if (cull.enableHiZ != 0u) {
+        uint maxMip = uint(cull.depthParams.z);
+        if (!hizOcclusionTestAABB(aabbMin, aabbMax, hiZPyramid,
+                                   cull.viewProjMatrix, cull.screenParams, maxMip)) {
+            return;  // Occluded
+        }
+    }
+
+    // Backface cluster culling (optional, based on normal cone)
+    if (cluster.coneAngle > 0.0) {
+        vec3 worldConeAxis = normalize(mat3(model) * cluster.coneAxis);
+        vec3 viewDir = normalize(worldCenter - cull.cameraPosition.xyz);
+        // If all normals face away from the camera, skip the cluster
+        if (dot(viewDir, worldConeAxis) > cluster.coneAngle) {
+            return;
+        }
+    }
+
+    // Cluster is visible! Write indirect draw command using subgroup batched atomics
+    uvec4 activeMask = subgroupBallot(true);
+    uint activeCount = subgroupBallotBitCount(activeMask);
+    uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
+
+    uint baseIdx = 0;
+    if (subgroupElect()) {
+        baseIdx = atomicAdd(drawCount, activeCount);
+    }
+    baseIdx = subgroupBroadcastFirst(baseIdx);
+
+    uint drawIdx = baseIdx + laneOffset;
+    if (drawIdx < cull.maxDrawCommands) {
+        commands[drawIdx].indexCount = cluster.indexCount;
+        commands[drawIdx].instanceCount = 1;
+        commands[drawIdx].firstIndex = cluster.firstIndex;
+        commands[drawIdx].vertexOffset = int(cluster.firstVertex);
+        commands[drawIdx].firstInstance = 0;
+
+        // Per-draw data for raster shader (indexed by gl_DrawID)
+        drawData[drawIdx].instanceId = instanceIdx;
+        drawData[drawIdx].triangleOffset = cluster.firstIndex / 3u;
+    }
+
+    // Record as visible for next frame's pass 1
+    uint visBaseIdx = 0;
+    if (subgroupElect()) {
+        visBaseIdx = atomicAdd(visibleCount, activeCount);
+    }
+    visBaseIdx = subgroupBroadcastFirst(visBaseIdx);
+
+    uint visIdx = visBaseIdx + laneOffset;
+    visibleClusters[visIdx] = clusterIdx;
+}

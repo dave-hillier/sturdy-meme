@@ -136,8 +136,9 @@ public:
     // Release GPU resources without destroying CPU data (for dynamic meshes that need re-upload)
     void releaseGPUResources();
 
-    // Access to vertex data for physics collision shapes
+    // Access to vertex/index data for physics collision shapes and V-buffer global buffers
     const std::vector<Vertex>& getVertices() const { return vertices; }
+    const std::vector<uint32_t>& getIndices() const { return indices; }
 
     // Get local-space bounding box
     const AABB& getBounds() const { return bounds; }

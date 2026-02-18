@@ -238,12 +238,21 @@ bool PostProcessSystem::createHDRRenderTarget() {
 }
 
 bool PostProcessSystem::createHDRRenderPass() {
+    auto depthAttach = AttachmentBuilder::depth(static_cast<vk::Format>(DEPTH_FORMAT))
+        .storeOp(vk::AttachmentStoreOp::eStore)
+        .finalLayout(vk::ImageLayout::eDepthStencilReadOnlyOptimal);
+
+    // When V-buffer raster writes depth before HDR, load depth to preserve those writes
+    if (hdrDepthLoadOp_ == VK_ATTACHMENT_LOAD_OP_LOAD) {
+        depthAttach = depthAttach
+            .loadOp(vk::AttachmentLoadOp::eLoad)
+            .initialLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
+    }
+
     auto renderPassOpt = RenderPassBuilder()
         .addColorAttachment(AttachmentBuilder::color(static_cast<vk::Format>(HDR_FORMAT))
             .finalLayout(vk::ImageLayout::eShaderReadOnlyOptimal))
-        .setDepthAttachment(AttachmentBuilder::depth(static_cast<vk::Format>(DEPTH_FORMAT))
-            .storeOp(vk::AttachmentStoreOp::eStore)
-            .finalLayout(vk::ImageLayout::eDepthStencilReadOnlyOptimal))
+        .setDepthAttachment(depthAttach)
         .build(*raiiDevice_);
 
     if (!renderPassOpt) {
@@ -254,6 +263,29 @@ bool PostProcessSystem::createHDRRenderPass() {
     hdrRenderPass = **hdrRenderPass_;
 
     return true;
+}
+
+void PostProcessSystem::setDepthLoadOnHDRPass(bool load) {
+    auto newOp = load ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
+    if (newOp == hdrDepthLoadOp_) return;
+
+    hdrDepthLoadOp_ = newOp;
+
+    // Recreate render pass and framebuffer with new depth load op
+    vkDeviceWaitIdle(device);
+
+    if (hdrFramebuffer != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(device, hdrFramebuffer, nullptr);
+        hdrFramebuffer = VK_NULL_HANDLE;
+    }
+    hdrRenderPass_.reset();
+    hdrRenderPass = VK_NULL_HANDLE;
+
+    createHDRRenderPass();
+    createHDRFramebuffer();
+
+    SDL_Log("PostProcessSystem: HDR render pass depth loadOp = %s",
+            load ? "LOAD" : "CLEAR");
 }
 
 bool PostProcessSystem::createHDRFramebuffer() {

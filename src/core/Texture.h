@@ -33,6 +33,9 @@ public:
 
     VkImageView getImageView() const { return imageView; }
     VkSampler getSampler() const { return sampler; }
+    VkImage getImage() const { return image; }
+    int getWidth() const { return width; }
+    int getHeight() const { return height; }
 
 private:
     bool loadInternal(const std::string& path, VmaAllocator allocator, VkDevice device,

@@ -150,21 +150,19 @@ bool VulkanContext::selectPhysicalDevice() {
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_FALSE;
 
-    // Vulkan 1.2 features - timeline semaphores are core in 1.2
-    VkPhysicalDeviceVulkan12Features vulkan12Features{};
-    vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vulkan12Features.timelineSemaphore = VK_TRUE;  // Required for non-blocking GPU timeline queries
-
+    // Select a Vulkan 1.2 device. Don't use set_required_features_12() here —
+    // all Vulkan 1.1/1.2 features are enabled via a single add_pNext call in
+    // createLogicalDevice() to avoid duplicate pNext structs that vk-bootstrap
+    // would create (selector chain + add_pNext chain are concatenated, not merged).
     vkb::PhysicalDeviceSelector selector{vkbInstance};
     auto physRet = selector.set_minimum_version(1, 2)
         .set_surface(surface)
         .set_required_features(features)
-        .set_required_features_12(vulkan12Features)
         .select();
 
     if (!physRet) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-            "Failed to select physical device with Vulkan 1.2 and timeline semaphore support: %s",
+            "Failed to select physical device with Vulkan 1.2 support: %s",
             physRet.error().message().c_str());
         return false;
     }
@@ -187,13 +185,36 @@ bool VulkanContext::selectPhysicalDevice() {
     SDL_Log("Selected physical device: %s (Vulkan %u.%u.%u)",
         props.deviceName, major, minor, VK_API_VERSION_PATCH(props.apiVersion));
 
-    // Verify timeline semaphore support (should always be true if we got here)
+    // Query supported features for optional capabilities
+    VkPhysicalDeviceVulkan11Features supportedFeatures11{};
+    supportedFeatures11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     VkPhysicalDeviceVulkan12Features supportedFeatures12{};
     supportedFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    supportedFeatures11.pNext = &supportedFeatures12;
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    features2.pNext = &supportedFeatures12;
+    features2.pNext = &supportedFeatures11;
     vkGetPhysicalDeviceFeatures2(physicalDevice, &features2);
+
+    // Query driver properties separately (must use vkGetPhysicalDeviceProperties2, not Features2)
+    VkPhysicalDeviceDriverProperties driverProps{};
+    driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    VkPhysicalDeviceProperties2 props2{};
+    props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    props2.pNext = &driverProps;
+    vkGetPhysicalDeviceProperties2(physicalDevice, &props2);
+
+    // Detect MoltenVK/portability layer — reports shaderDrawParameters but can't
+    // compile SPIR-V DrawIndex to MSL
+    bool isMoltenVK = (driverProps.driverID == VK_DRIVER_ID_MOLTENVK);
+    if (!isMoltenVK) {
+        // Also check driver name string as fallback
+        std::string driverName(driverProps.driverName);
+        isMoltenVK = (driverName.find("MoltenVK") != std::string::npos);
+    }
+    if (isMoltenVK) {
+        SDL_Log("MoltenVK detected - disabling features not supported in MSL translation");
+    }
 
     hasTimelineSemaphores_ = supportedFeatures12.timelineSemaphore == VK_TRUE;
     if (hasTimelineSemaphores_) {
@@ -201,6 +222,23 @@ bool VulkanContext::selectPhysicalDevice() {
     } else {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
             "Timeline semaphores not supported - falling back to fences");
+    }
+
+    hasDrawIndirectCount_ = supportedFeatures12.drawIndirectCount == VK_TRUE && !isMoltenVK;
+    if (hasDrawIndirectCount_) {
+        SDL_Log("drawIndirectCount supported - GPU-driven indirect draw enabled");
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+            "drawIndirectCount not supported - using fixed max draw count fallback");
+    }
+
+    // MoltenVK reports shaderDrawParameters but can't translate DrawIndex to MSL
+    hasShaderDrawParameters_ = supportedFeatures11.shaderDrawParameters == VK_TRUE && !isMoltenVK;
+    if (hasShaderDrawParameters_) {
+        SDL_Log("shaderDrawParameters supported - gl_DrawID enabled");
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+            "shaderDrawParameters not supported - GPU-driven V-buffer rendering disabled");
     }
 
     // Create RAII wrapper for physical device (non-owning - physical devices aren't destroyed)
@@ -211,6 +249,26 @@ bool VulkanContext::selectPhysicalDevice() {
 
 bool VulkanContext::createLogicalDevice() {
     vkb::DeviceBuilder deviceBuilder{vkbPhysicalDevice};
+
+    // Enable Vulkan 1.1/1.2 features via single structs to avoid duplicate
+    // pNext entries (vk-bootstrap concatenates selector + add_pNext chains).
+    VkPhysicalDeviceVulkan11Features enabledFeatures11{};
+    enabledFeatures11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    if (hasShaderDrawParameters_) {
+        enabledFeatures11.shaderDrawParameters = VK_TRUE;
+    }
+    deviceBuilder.add_pNext(&enabledFeatures11);
+
+    VkPhysicalDeviceVulkan12Features enabledFeatures12{};
+    enabledFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    if (hasTimelineSemaphores_) {
+        enabledFeatures12.timelineSemaphore = VK_TRUE;
+    }
+    if (hasDrawIndirectCount_) {
+        enabledFeatures12.drawIndirectCount = VK_TRUE;
+    }
+    deviceBuilder.add_pNext(&enabledFeatures12);
+
     auto devRet = deviceBuilder.build();
 
     if (!devRet) {

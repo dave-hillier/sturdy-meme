@@ -5,10 +5,14 @@
 
 #include "bindings.glsl"
 #include "instancing_common.glsl"
+#include "hiz_occlusion_common.glsl"
 
 // Hi-Z Occlusion Culling Compute Shader
 // Performs frustum culling followed by hierarchical z-buffer occlusion culling
 // Outputs visible objects to an indirect draw buffer
+//
+// This shader is used by HiZSystem for its own culling pipeline.
+// The occlusion test logic is shared with scene_cull.comp via hiz_occlusion_common.glsl.
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -58,12 +62,6 @@ layout(std430, binding = BINDING_HIZ_CULL_COUNT) buffer DrawCountBuffer {
 // Hi-Z pyramid texture
 layout(binding = BINDING_HIZ_CULL_PYRAMID) uniform sampler2D hiZPyramid;
 
-// Frustum culling test for AABB using shared utility
-// Returns true if the AABB is completely outside the frustum (culled)
-bool frustumCullAABB(vec3 aabbMin, vec3 aabbMax) {
-    return !isAABBInFrustum(uniforms.frustumPlanes, aabbMin, aabbMax);
-}
-
 // Frustum culling test for bounding sphere (faster but less precise)
 bool frustumCullSphere(vec3 center, float radius) {
     for (int i = 0; i < 6; i++) {
@@ -73,114 +71,6 @@ bool frustumCullSphere(vec3 center, float radius) {
         }
     }
     return false;  // At least partially visible
-}
-
-// Project AABB to screen space and get bounding rectangle
-// Returns: xy = min screen coord, zw = max screen coord (in pixels)
-vec4 projectAABBToScreen(vec3 aabbMin, vec3 aabbMax) {
-    // Project all 8 corners
-    vec3 corners[8];
-    corners[0] = vec3(aabbMin.x, aabbMin.y, aabbMin.z);
-    corners[1] = vec3(aabbMax.x, aabbMin.y, aabbMin.z);
-    corners[2] = vec3(aabbMin.x, aabbMax.y, aabbMin.z);
-    corners[3] = vec3(aabbMax.x, aabbMax.y, aabbMin.z);
-    corners[4] = vec3(aabbMin.x, aabbMin.y, aabbMax.z);
-    corners[5] = vec3(aabbMax.x, aabbMin.y, aabbMax.z);
-    corners[6] = vec3(aabbMin.x, aabbMax.y, aabbMax.z);
-    corners[7] = vec3(aabbMax.x, aabbMax.y, aabbMax.z);
-
-    vec2 minScreen = vec2(1e10);
-    vec2 maxScreen = vec2(-1e10);
-    float closestZ = 1.0;  // Closest depth (largest value in reversed-Z)
-
-    for (int i = 0; i < 8; i++) {
-        vec4 clipPos = uniforms.viewProjMatrix * vec4(corners[i], 1.0);
-
-        // Handle behind camera
-        if (clipPos.w <= 0.0) {
-            // Corner is behind camera, expand to full screen
-            return vec4(0.0, 0.0, uniforms.screenParams.x, uniforms.screenParams.y);
-        }
-
-        // Perspective divide
-        vec3 ndc = clipPos.xyz / clipPos.w;
-
-        // Convert to screen coordinates
-        vec2 screen = (ndc.xy * 0.5 + 0.5) * uniforms.screenParams.xy;
-
-        minScreen = min(minScreen, screen);
-        maxScreen = max(maxScreen, screen);
-
-        // Track closest depth (for reversed-Z, closest = largest value)
-        closestZ = max(closestZ, ndc.z);
-    }
-
-    // Clamp to screen bounds
-    minScreen = max(minScreen, vec2(0.0));
-    maxScreen = min(maxScreen, uniforms.screenParams.xy);
-
-    return vec4(minScreen, maxScreen);
-}
-
-// Get the closest (maximum in reversed-Z) depth value of the AABB
-float getClosestDepth(vec3 aabbMin, vec3 aabbMax) {
-    // Project all 8 corners and find closest
-    vec3 corners[8];
-    corners[0] = vec3(aabbMin.x, aabbMin.y, aabbMin.z);
-    corners[1] = vec3(aabbMax.x, aabbMin.y, aabbMin.z);
-    corners[2] = vec3(aabbMin.x, aabbMax.y, aabbMin.z);
-    corners[3] = vec3(aabbMax.x, aabbMax.y, aabbMin.z);
-    corners[4] = vec3(aabbMin.x, aabbMin.y, aabbMax.z);
-    corners[5] = vec3(aabbMax.x, aabbMin.y, aabbMax.z);
-    corners[6] = vec3(aabbMin.x, aabbMax.y, aabbMax.z);
-    corners[7] = vec3(aabbMax.x, aabbMax.y, aabbMax.z);
-
-    float closestZ = 0.0;  // Farthest in reversed-Z
-
-    for (int i = 0; i < 8; i++) {
-        vec4 clipPos = uniforms.viewProjMatrix * vec4(corners[i], 1.0);
-        if (clipPos.w > 0.0) {
-            float ndcZ = clipPos.z / clipPos.w;
-            closestZ = max(closestZ, ndcZ);
-        }
-    }
-
-    return closestZ;
-}
-
-// Hi-Z occlusion test
-// Returns true if object is occluded (should be culled)
-bool hiZOcclusionTest(vec3 aabbMin, vec3 aabbMax) {
-    // Project AABB to screen
-    vec4 screenRect = projectAABBToScreen(aabbMin, aabbMax);
-
-    // Check if completely off screen
-    if (screenRect.x >= screenRect.z || screenRect.y >= screenRect.w) {
-        return true;  // Culled (off screen)
-    }
-
-    // Calculate the size of the projected rectangle
-    vec2 rectSize = screenRect.zw - screenRect.xy;
-
-    // Choose mip level based on rectangle size
-    // We want a mip where the rect covers roughly 2x2 texels
-    float maxDim = max(rectSize.x, rectSize.y);
-    float mipLevel = max(0.0, log2(maxDim) - 1.0);
-    mipLevel = min(mipLevel, uniforms.depthParams.z - 1.0);
-
-    // Sample Hi-Z at the center of the rectangle
-    vec2 centerUV = (screenRect.xy + screenRect.zw) * 0.5 * uniforms.screenParams.zw;
-
-    // Sample the Hi-Z pyramid
-    float hiZDepth = textureLod(hiZPyramid, centerUV, mipLevel).r;
-
-    // Get closest depth of the AABB
-    float objectDepth = getClosestDepth(aabbMin, aabbMax);
-
-    // In reversed-Z: larger depth = closer to camera
-    // Object is occluded if its closest point is farther than the Hi-Z depth
-    // (objectDepth < hiZDepth means object is behind what's in the depth buffer)
-    return objectDepth < hiZDepth;
 }
 
 void main() {
@@ -197,22 +87,23 @@ void main() {
     vec3 aabbMax = obj.aabbMax.xyz;
 
     // Step 1: Frustum culling (fast rejection)
-    // Use sphere test first for quick rejection
     vec3 sphereCenter = obj.boundingSphere.xyz;
     float sphereRadius = obj.boundingSphere.w;
 
     if (frustumCullSphere(sphereCenter, sphereRadius)) {
-        return;  // Culled by frustum (sphere)
+        return;
     }
 
-    // More precise AABB frustum test
-    if (frustumCullAABB(aabbMin, aabbMax)) {
-        return;  // Culled by frustum (AABB)
+    if (!isAABBInFrustum(uniforms.frustumPlanes, aabbMin, aabbMax)) {
+        return;
     }
 
     // Step 2: Hi-Z occlusion culling (if enabled)
     if (uniforms.enableHiZ != 0) {
-        if (hiZOcclusionTest(aabbMin, aabbMax)) {
+        float maxMip = uniforms.depthParams.z - 1.0;
+        if (hizOcclusionTestAABB(aabbMin, aabbMax, hiZPyramid,
+                                 uniforms.viewProjMatrix,
+                                 uniforms.screenParams, maxMip)) {
             return;  // Occluded
         }
     }
