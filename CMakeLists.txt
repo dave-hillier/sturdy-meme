@@ -659,6 +659,61 @@ if(SBSAR_MANIFESTS)
     add_dependencies(${PROJECT_NAME} sbsar_textures)
 endif()
 
+# ============================================================================
+# UNICON TRAINING PIPELINE
+# ============================================================================
+
+# Find Python for running training/export scripts
+find_package(Python3 COMPONENTS Interpreter QUIET)
+
+set(UNICON_WEIGHTS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/generated/unicon)
+set(UNICON_WEIGHTS_FILE ${UNICON_WEIGHTS_DIR}/policy_weights.bin)
+set(UNICON_TRAINING_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tools/unicon_training)
+
+if(Python3_FOUND)
+    # Export weights from a training checkpoint.
+    # Usage: cmake --build build --target unicon_export
+    # Requires: a checkpoint file at generated/unicon/checkpoint_latest.pt
+    add_custom_target(unicon_export
+        COMMAND ${Python3_EXECUTABLE} -m tools.unicon_training.export
+            --checkpoint ${UNICON_WEIGHTS_DIR}/checkpoint_latest.pt
+            --output ${UNICON_WEIGHTS_FILE}
+            --verify
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Exporting UniCon policy weights from checkpoint"
+    )
+
+    # Generate random weights for testing (no training required).
+    # Usage: cmake --build build --target unicon_random_weights
+    add_custom_command(
+        OUTPUT ${UNICON_WEIGHTS_FILE}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${UNICON_WEIGHTS_DIR}
+        COMMAND ${Python3_EXECUTABLE} -m tools.unicon_training.export
+            --random
+            --output ${UNICON_WEIGHTS_FILE}
+            --verify
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        DEPENDS
+            ${UNICON_TRAINING_DIR}/export.py
+            ${UNICON_TRAINING_DIR}/config.py
+        COMMENT "Generating random UniCon policy weights for testing"
+    )
+
+    add_custom_target(unicon_random_weights DEPENDS ${UNICON_WEIGHTS_FILE})
+
+    # Run training (offline, not part of default build).
+    # Usage: cmake --build build --target unicon_train
+    add_custom_target(unicon_train
+        COMMAND ${Python3_EXECUTABLE} -m tools.unicon_training.train
+            --output ${UNICON_WEIGHTS_DIR}
+            --motions ${CMAKE_CURRENT_SOURCE_DIR}/assets/motions
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Training UniCon policy (this may take hours)"
+    )
+else()
+    message(STATUS "Python3 not found - UniCon training/export targets disabled")
+endif()
+
 # Main target depends on preprocessing (unless skipped for faster builds)
 if(NOT SKIP_TERRAIN_PREPROCESSING)
     add_dependencies(${PROJECT_NAME} terrain_preprocessing)

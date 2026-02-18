@@ -224,7 +224,10 @@ bool Application::init(const std::string& title, int width, int height) {
 
         // Initialize UniCon ML controller for ragdoll physics
         uniconController_.init(20, 1); // 20-body humanoid, tau=1
-        uniconController_.initRandomPolicy();
+        if (!uniconController_.loadPolicy("generated/unicon/policy_weights.bin")) {
+            SDL_Log("No trained UniCon weights found, using random policy");
+            uniconController_.initRandomPolicy();
+        }
     }
 
     // Create terrain hole at well entrance location
