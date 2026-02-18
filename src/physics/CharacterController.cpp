@@ -70,19 +70,39 @@ void CharacterController::update(float deltaTime, JPH::PhysicsSystem* physicsSys
 
     JPH::Vec3 newVelocity;
 
-    // Horizontal velocity from input
-    newVelocity.SetX(desiredVelocity_.x);
-    newVelocity.SetZ(desiredVelocity_.z);
+    // Project desired horizontal velocity onto the ground plane when grounded.
+    // Without this, near the slope limit (45°) the character oscillates between
+    // OnGround and airborne because the input velocity has an uphill component.
+    if (onGround) {
+        JPH::Vec3 groundNormal = character_->GetGroundNormal();
+
+        // Project desiredVelocity onto the ground plane: v - (v·n)n
+        JPH::Vec3 desired(desiredVelocity_.x, desiredVelocity_.y, desiredVelocity_.z);
+        float dot = desired.Dot(groundNormal);
+        JPH::Vec3 projected = desired - groundNormal * dot;
+
+        newVelocity.SetX(projected.GetX());
+        newVelocity.SetZ(projected.GetZ());
+    } else {
+        newVelocity.SetX(desiredVelocity_.x);
+        newVelocity.SetZ(desiredVelocity_.z);
+    }
 
     // Vertical velocity per Jolt docs:
     // OnGround: groundVelocity + horizontal + optional jump + dt*gravity
     // Else: currentVertical + horizontal + dt*gravity
     if (onGround) {
         JPH::Vec3 groundVelocity = character_->GetGroundVelocity();
+
+        // Include horizontal ground velocity for moving platform support.
+        // Previously only the Y component was used, discarding platform horizontal motion.
+        newVelocity.SetX(newVelocity.GetX() + groundVelocity.GetX());
+        newVelocity.SetZ(newVelocity.GetZ() + groundVelocity.GetZ());
+
         float verticalVelocity = groundVelocity.GetY();
 
         if (wantsJump_) {
-            verticalVelocity += 5.0f;
+            verticalVelocity += jumpImpulse_;
             wantsJump_ = false;
         }
 
@@ -153,4 +173,18 @@ glm::vec3 CharacterController::getVelocity() const {
 bool CharacterController::isOnGround() const {
     if (!character_) return false;
     return character_->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
+}
+
+glm::vec3 CharacterController::getGroundNormal() const {
+    if (!character_) return glm::vec3(0.0f, 1.0f, 0.0f);
+    JPH::Vec3 n = character_->GetGroundNormal();
+    // Normalise defensively; Jolt should return a unit normal, but handle degenerate cases
+    float len = n.Length();
+    if (len < 1e-6f) return glm::vec3(0.0f, 1.0f, 0.0f);
+    return toGLM(n / len);
+}
+
+glm::vec3 CharacterController::getGroundVelocity() const {
+    if (!character_) return glm::vec3(0.0f);
+    return toGLM(character_->GetGroundVelocity());
 }

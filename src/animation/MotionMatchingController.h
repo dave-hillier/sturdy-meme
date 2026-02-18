@@ -42,6 +42,14 @@ struct ControllerConfig {
     float searchInterval = 0.1f;      // How often to search (seconds)
     float forceSearchThreshold = 2.0f; // Cost threshold to force immediate search
 
+    // Transition hysteresis – coherent policy replacing ad-hoc magic constants.
+    // A transition to a different clip is allowed when:
+    //   new_cost < current_cost * transitionCostRatio  AND  timeSinceMatch >= minDwellTime
+    // A transition is forced when timeSinceMatch >= maxDwellTime (different clip only).
+    float transitionCostRatio = 0.8f; // New cost must be this fraction of current to switch clips
+    float minDwellTime = 0.2f;        // Minimum time before allowing a clip switch
+    float maxDwellTime = 1.5f;        // Force clip switch after this long even if cost is equal
+
     // Blending
     float defaultBlendDuration = 0.2f;
     bool useInertialBlending = true;

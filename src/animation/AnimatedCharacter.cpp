@@ -572,7 +572,8 @@ void AnimatedCharacter::setupDefaultIKChains() {
     std::string rightToe = findBone({"RightToeBase", "RightToe", "R_Toe", "toe.R", "ball_r"});
 
     if (!leftThigh.empty() && !leftKnee.empty() && !leftFoot.empty()) {
-        if (ikSystem.addFootPlacement("LeftFoot", skeleton, leftThigh, leftKnee, leftFoot, leftToe)) {
+        if (ikSystem.addFootPlacement("LeftFoot", skeleton, leftThigh, leftKnee, leftFoot, leftToe,
+                                      /*isLeftFoot=*/true)) {
             // Set knee pole vector (forward)
             if (auto* foot = ikSystem.getFootPlacement("LeftFoot")) {
                 foot->poleVector = glm::vec3(0, 0, 1);
@@ -582,7 +583,8 @@ void AnimatedCharacter::setupDefaultIKChains() {
     }
 
     if (!rightThigh.empty() && !rightKnee.empty() && !rightFoot.empty()) {
-        if (ikSystem.addFootPlacement("RightFoot", skeleton, rightThigh, rightKnee, rightFoot, rightToe)) {
+        if (ikSystem.addFootPlacement("RightFoot", skeleton, rightThigh, rightKnee, rightFoot, rightToe,
+                                      /*isLeftFoot=*/false)) {
             // Set knee pole vector (forward)
             if (auto* foot = ikSystem.getFootPlacement("RightFoot")) {
                 foot->poleVector = glm::vec3(0, 0, 1);

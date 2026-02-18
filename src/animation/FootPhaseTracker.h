@@ -7,6 +7,7 @@
 
 struct AnimationClip;
 struct Skeleton;
+struct FootPlacementIK;  // Forward declared to avoid circular include with IKSolver.h
 
 // Foot contact event names
 namespace FootEvents {
@@ -80,6 +81,10 @@ public:
 
     // Get lock blend for foot based on phase (0 = no lock, 1 = full lock)
     float getLockBlend(bool isLeftFoot) const;
+
+    // Synchronise tracker phase data into the IK struct (single source of truth).
+    // Eliminates duplicate state between FootPhaseData and FootPlacementIK (bug #17).
+    void applyToFootIK(bool isLeftFoot, FootPlacementIK& foot) const;
 
     // Reset tracker state
     void reset();

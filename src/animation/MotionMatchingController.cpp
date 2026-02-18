@@ -212,34 +212,39 @@ void MotionMatchingController::performSearch() {
     MatchResult match = matcher_.findBestMatch(localTrajectory, localQueryPose, options);
 
     if (match.isValid()) {
-        // Check if this is a different clip
         bool isDifferentClip = (match.pose->clipIndex != playback_.clipIndex);
-
-        // Get current clip info
         const DatabaseClip& currentClip = database_.getClip(playback_.clipIndex);
 
-        // For looping clips we're already playing, don't allow same-clip time jumps
-        // Just let the animation play through naturally - only switch when going to different clip
+        // Coherent transition policy (replaces multiple interacting magic constants):
+        //
+        // Different clip:
+        //   Allow if new_cost < current_cost * transitionCostRatio
+        //       AND timeSinceMatch >= minDwellTime  (prevents thrashing)
+        //   Force if timeSinceMatch >= maxDwellTime (prevents getting stuck)
+        //
+        // Same non-looping clip (e.g. jump):
+        //   Allow time jumps only for substantial cost improvements.
+        //
+        // Same looping clip: never jump; let it play through naturally.
+
         bool shouldTransition = false;
 
         if (isDifferentClip) {
-            // Switching to different clip - allow if cost is better or we've been here a while
-            shouldTransition = (match.cost < stats_.lastMatchCost * 0.8f ||
-                               playback_.timeSinceMatch > 0.5f);
-        }
-        // For same clip: only transition if we're NOT in a looping clip
-        // Non-looping clips (like jumps) may need time jumps for responsiveness
-        else if (!currentClip.looping) {
+            bool costBetter = match.cost < stats_.lastMatchCost * config_.transitionCostRatio;
+            bool dwellSatisfied = playback_.timeSinceMatch >= config_.minDwellTime;
+            shouldTransition = costBetter && dwellSatisfied;
+        } else if (!currentClip.looping) {
+            // Same non-looping clip: only allow time jumps for clear cost improvements
             float timeDiff = std::abs(match.pose->time - playback_.time);
-            bool isSignificantTimeJump = timeDiff > 0.2f;
-            if (isSignificantTimeJump && match.cost < stats_.lastMatchCost * 0.5f) {
+            float strictRatio = config_.transitionCostRatio * 0.6f;
+            if (timeDiff > 0.2f && match.cost < stats_.lastMatchCost * strictRatio) {
                 shouldTransition = true;
             }
         }
-        // For looping clips in same clip: never jump, let it play naturally
+        // Same looping clip: never jump, let animation play naturally
 
-        // Force transition after 1.0s only if it's to a different clip
-        bool forceTransition = (playback_.timeSinceMatch > 1.0f) && isDifferentClip;
+        bool forceTransition = isDifferentClip &&
+                               (playback_.timeSinceMatch >= config_.maxDwellTime);
 
         if (shouldTransition || forceTransition) {
             transitionToPose(match);

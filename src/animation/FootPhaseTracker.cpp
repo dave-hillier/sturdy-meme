@@ -1,6 +1,7 @@
 #include "FootPhaseTracker.h"
 #include "Animation.h"
 #include "GLTFLoader.h"
+#include "../ik/IKSolver.h"
 #include <SDL3/SDL_log.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -114,9 +115,28 @@ float FootPhaseTracker::sampleFootHeight(const AnimationClip& clip, int32_t foot
     // Create a temporary skeleton copy for sampling
     Skeleton tempSkeleton = skeleton;
 
-    // Reset to bind pose
-    for (size_t i = 0; i < tempSkeleton.joints.size(); ++i) {
-        // Keep original local transform
+    // Reset to bind pose using inverseBindMatrix.
+    // Previously the loop body was empty (no-op), so foot height was sampled relative to
+    // whatever skeleton state existed at analysis time (bug #15).
+    // inverseBindMatrix stores the inverse of each joint's global bind pose, so
+    // globalBindPose[i] = inverse(inverseBindMatrix[i]).
+    // Local bind transform = inverse(parent_global_bind) * global_bind.
+    // Joints are assumed to be ordered parent-before-child (guaranteed by GLTF/FBX loaders).
+    {
+        const size_t n = tempSkeleton.joints.size();
+        std::vector<glm::mat4> globalBind(n);
+        for (size_t i = 0; i < n; ++i) {
+            globalBind[i] = glm::inverse(tempSkeleton.joints[i].inverseBindMatrix);
+        }
+        for (size_t i = 0; i < n; ++i) {
+            int32_t parent = tempSkeleton.joints[i].parentIndex;
+            if (parent < 0) {
+                tempSkeleton.joints[i].localTransform = globalBind[i];
+            } else {
+                tempSkeleton.joints[i].localTransform =
+                    glm::inverse(globalBind[parent]) * globalBind[i];
+            }
+        }
     }
 
     // Sample animation at this time
@@ -290,4 +310,21 @@ void FootPhaseTracker::reset() {
     leftFoot_ = FootPhaseData();
     rightFoot_ = FootPhaseData();
     prevNormalizedTime_ = 0.0f;
+}
+
+void FootPhaseTracker::applyToFootIK(bool isLeftFoot, FootPlacementIK& foot) const {
+    const FootPhaseData& data = isLeftFoot ? leftFoot_ : rightFoot_;
+
+    // Push phase and progress directly into the IK struct so there is a single
+    // source of truth (previously both FootPhaseData and FootPlacementIK maintained
+    // independent copies of phase/progress/lockBlend – bug #17).
+    foot.currentPhase = data.phase;
+    foot.phaseProgress = data.phaseProgress;
+    foot.lockBlend = getLockBlend(isLeftFoot);
+
+    // When the tracker says the foot should be unlocked (swing), clear the IK lock
+    // so it doesn't hold stale world-space position data.
+    if (data.phase == FootPhase::Swing) {
+        foot.isLocked = false;
+    }
 }
