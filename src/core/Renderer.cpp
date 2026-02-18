@@ -609,6 +609,7 @@ void Renderer::createHDRPassRecorder() {
         sceneRes.treeRenderer = systems_->treeRenderer();
         sceneRes.treeLOD = systems_->treeLOD();
         sceneRes.impostorCull = systems_->impostorCull();
+        sceneRes.visBufferActive = systems_->hasVisibilityBuffer();
 
         hdrPassRecorder_->registerDrawable(
             std::make_unique<SceneObjectsDrawable>(sceneRes),

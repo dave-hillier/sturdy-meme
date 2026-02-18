@@ -53,6 +53,7 @@ public:
         TreeRenderer* treeRenderer = nullptr;
         TreeLODSystem* treeLOD = nullptr;
         ImpostorCullSystem* impostorCull = nullptr;
+        bool visBufferActive = false;
     };
 
     explicit SceneObjectsDrawable(const Resources& resources);

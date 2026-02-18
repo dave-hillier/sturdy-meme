@@ -9,7 +9,6 @@
 #include "GlobalBufferManager.h"
 #include "SceneManager.h"
 #include "scene/SceneBuilder.h"
-#include "npc/NPCSimulation.h"
 #include "Mesh.h"
 #include "MaterialRegistry.h"
 #include "MeshClusterBuilder.h"
@@ -47,26 +46,12 @@ static bool buildClusterState(RendererSystems& systems) {
     if (!visBuf || !clusterBuf) return false;
 
     const auto& sceneObjects = systems.scene().getRenderables();
-    SceneBuilder& sceneBuilder = systems.scene().getSceneBuilder();
-    size_t playerIndex = sceneBuilder.getPlayerObjectIndex();
-    bool hasCharacter = sceneBuilder.hasCharacter();
-    const NPCSimulation* npcSim = sceneBuilder.getNPCSimulation();
 
-    // Collect unique meshes from renderable scene objects (excluding player/NPCs)
+    // Collect unique meshes from renderable scene objects
+    // (excluding GPU-skinned characters which are rendered via separate pipeline)
     std::unordered_set<const Mesh*> meshSet;
     for (size_t i = 0; i < sceneObjects.size(); ++i) {
-        if (hasCharacter && i == playerIndex) continue;
-        if (npcSim) {
-            bool isNPC = false;
-            const auto& npcData = npcSim->getData();
-            for (size_t npcIdx = 0; npcIdx < npcData.count(); ++npcIdx) {
-                if (i == npcData.renderableIndices[npcIdx]) {
-                    isNPC = true;
-                    break;
-                }
-            }
-            if (isNPC) continue;
-        }
+        if (sceneObjects[i].gpuSkinned) continue;
         if (sceneObjects[i].mesh) {
             meshSet.insert(sceneObjects[i].mesh);
         }
@@ -126,17 +111,8 @@ static bool buildClusterState(RendererSystems& systems) {
     // Count total draw commands (leaf clusters x instances)
     uint32_t totalDraws = 0;
     for (size_t i = 0; i < sceneObjects.size(); ++i) {
-        if (hasCharacter && i == playerIndex) continue;
-        if (npcSim) {
-            bool isNPC = false;
-            const auto& npcData = npcSim->getData();
-            for (size_t npcIdx = 0; npcIdx < npcData.count(); ++npcIdx) {
-                if (i == npcData.renderableIndices[npcIdx]) {
-                    isNPC = true;
-                    break;
-                }
-            }
-            if (isNPC) continue;
+        if (sceneObjects[i].gpuSkinned) continue;
+        {
         }
         const auto& obj = sceneObjects[i];
         if (!obj.mesh) continue;

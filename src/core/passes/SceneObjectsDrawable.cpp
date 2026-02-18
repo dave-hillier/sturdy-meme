@@ -36,7 +36,108 @@ void SceneObjectsDrawable::recordHDRDraw(VkCommandBuffer cmd, uint32_t frameInde
     if (params.sceneObjectsPipeline) {
         vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, *params.sceneObjectsPipeline);
     }
-    recordSceneObjects(cmd, frameIndex, params);
+
+    // When V-buffer is active, skip scene objects (they're rendered via V-buffer raster/resolve).
+    // Still render vegetation subsystems (rocks, detritus, trees) which aren't in the V-buffer.
+    if (resources_.visBufferActive) {
+        // Skip ECS/legacy scene object rendering
+        // But still render procedural vegetation and trees below
+    } else {
+        recordSceneObjects(cmd, frameIndex, params);
+        return;
+    }
+
+    // Render procedural rocks (ScatterSystem owns its own descriptor sets)
+    if (resources_.rocks && resources_.rocks->hasDescriptorSets()) {
+        auto renderObject = [&](const Renderable& obj, VkDescriptorSet descSet) {
+            PushConstants push{};
+            push.model = obj.transform;
+            push.roughness = obj.roughness;
+            push.metallic = obj.metallic;
+            push.emissiveIntensity = obj.emissiveIntensity;
+            push.opacity = obj.opacity;
+            push.emissiveColor = glm::vec4(obj.emissiveColor, 1.0f);
+            push.pbrFlags = obj.pbrFlags;
+            push.alphaTestThreshold = obj.alphaTestThreshold;
+
+            vkCmd.pushConstants<PushConstants>(
+                *params.pipelineLayout,
+                vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+                0, push);
+            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                     *params.pipelineLayout, 0, vk::DescriptorSet(descSet), {});
+
+            vk::Buffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
+            vk::DeviceSize offsets[] = {0};
+            vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
+            vkCmd.bindIndexBuffer(obj.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+            vkCmd.drawIndexed(obj.mesh->getIndexCount(), 1, 0, 0, 0);
+        };
+
+        VkDescriptorSet rockDescSet = resources_.rocks->getDescriptorSet(frameIndex);
+        for (const auto& rock : resources_.rocks->getSceneObjects()) {
+            renderObject(rock, rockDescSet);
+        }
+    }
+
+    if (resources_.detritus && resources_.detritus->hasDescriptorSets()) {
+        auto renderObject = [&](const Renderable& obj, VkDescriptorSet descSet) {
+            PushConstants push{};
+            push.model = obj.transform;
+            push.roughness = obj.roughness;
+            push.metallic = obj.metallic;
+            push.emissiveIntensity = obj.emissiveIntensity;
+            push.opacity = obj.opacity;
+            push.emissiveColor = glm::vec4(obj.emissiveColor, 1.0f);
+            push.pbrFlags = obj.pbrFlags;
+            push.alphaTestThreshold = obj.alphaTestThreshold;
+
+            vkCmd.pushConstants<PushConstants>(
+                *params.pipelineLayout,
+                vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+                0, push);
+            vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                     *params.pipelineLayout, 0, vk::DescriptorSet(descSet), {});
+
+            vk::Buffer vertexBuffers[] = {obj.mesh->getVertexBuffer()};
+            vk::DeviceSize offsets[] = {0};
+            vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
+            vkCmd.bindIndexBuffer(obj.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+            vkCmd.drawIndexed(obj.mesh->getIndexCount(), 1, 0, 0, 0);
+        };
+
+        VkDescriptorSet detritusDescSet = resources_.detritus->getDescriptorSet(frameIndex);
+        for (const auto& detritus : resources_.detritus->getSceneObjects()) {
+            renderObject(detritus, detritusDescSet);
+        }
+    }
+
+    // Render trees
+    if (resources_.tree && resources_.treeRenderer) {
+        resources_.treeRenderer->render(vk::CommandBuffer(cmd), frameIndex,
+                                        resources_.wind->getTime(),
+                                        *resources_.tree, resources_.treeLOD);
+    }
+
+    if (resources_.treeLOD) {
+        if (resources_.impostorCull && resources_.impostorCull->getTreeCount() > 0) {
+            resources_.treeLOD->renderImpostorsGPUCulled(
+                cmd, frameIndex,
+                resources_.globalBuffers->uniformBuffers.buffers[frameIndex],
+                resources_.shadow->getShadowImageView(),
+                resources_.shadow->getShadowSampler(),
+                resources_.impostorCull->getVisibleImpostorBuffer(),
+                resources_.impostorCull->getIndirectDrawBuffer()
+            );
+        } else {
+            resources_.treeLOD->renderImpostors(
+                cmd, frameIndex,
+                resources_.globalBuffers->uniformBuffers.buffers[frameIndex],
+                resources_.shadow->getShadowImageView(),
+                resources_.shadow->getShadowSampler()
+            );
+        }
+    }
 }
 
 void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t frameIndex,
