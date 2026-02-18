@@ -759,7 +759,10 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
             }
 
             // Debug line system
-            auto debugLineSystem = DebugLineSystem::create(*ctxPtr, core.hdr.renderPass);
+            // Use fresh render pass — core.hdr.renderPass may be stale if
+            // setDepthLoadOnHDRPass() recreated the HDR render pass above.
+            VkRenderPass currentHDRRenderPass = systems_->postProcess().getHDRRenderPass();
+            auto debugLineSystem = DebugLineSystem::create(*ctxPtr, currentHDRRenderPass);
             if (!debugLineSystem) return false;
             systems_->setDebugLineSystem(std::move(debugLineSystem));
 

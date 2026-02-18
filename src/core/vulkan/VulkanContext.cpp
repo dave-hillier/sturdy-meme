@@ -150,21 +150,19 @@ bool VulkanContext::selectPhysicalDevice() {
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_FALSE;
 
-    // Vulkan 1.2 features - timeline semaphores are core in 1.2
-    VkPhysicalDeviceVulkan12Features vulkan12Features{};
-    vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    vulkan12Features.timelineSemaphore = VK_TRUE;  // Required for non-blocking GPU timeline queries
-
+    // Select a Vulkan 1.2 device. Don't use set_required_features_12() here —
+    // all Vulkan 1.1/1.2 features are enabled via a single add_pNext call in
+    // createLogicalDevice() to avoid duplicate pNext structs that vk-bootstrap
+    // would create (selector chain + add_pNext chain are concatenated, not merged).
     vkb::PhysicalDeviceSelector selector{vkbInstance};
     auto physRet = selector.set_minimum_version(1, 2)
         .set_surface(surface)
         .set_required_features(features)
-        .set_required_features_12(vulkan12Features)
         .select();
 
     if (!physRet) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-            "Failed to select physical device with Vulkan 1.2 and timeline semaphore support: %s",
+            "Failed to select physical device with Vulkan 1.2 support: %s",
             physRet.error().message().c_str());
         return false;
     }
@@ -252,20 +250,24 @@ bool VulkanContext::selectPhysicalDevice() {
 bool VulkanContext::createLogicalDevice() {
     vkb::DeviceBuilder deviceBuilder{vkbPhysicalDevice};
 
-    // Enable optional features that were detected during physical device selection
+    // Enable Vulkan 1.1/1.2 features via single structs to avoid duplicate
+    // pNext entries (vk-bootstrap concatenates selector + add_pNext chains).
     VkPhysicalDeviceVulkan11Features enabledFeatures11{};
     enabledFeatures11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     if (hasShaderDrawParameters_) {
         enabledFeatures11.shaderDrawParameters = VK_TRUE;
-        deviceBuilder.add_pNext(&enabledFeatures11);
     }
+    deviceBuilder.add_pNext(&enabledFeatures11);
 
     VkPhysicalDeviceVulkan12Features enabledFeatures12{};
     enabledFeatures12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    if (hasTimelineSemaphores_) {
+        enabledFeatures12.timelineSemaphore = VK_TRUE;
+    }
     if (hasDrawIndirectCount_) {
         enabledFeatures12.drawIndirectCount = VK_TRUE;
-        deviceBuilder.add_pNext(&enabledFeatures12);
     }
+    deviceBuilder.add_pNext(&enabledFeatures12);
 
     auto devRet = deviceBuilder.build();
 
