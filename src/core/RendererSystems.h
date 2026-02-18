@@ -70,6 +70,8 @@ class CloudShadowSystem;
 class HiZSystem;
 class GPUSceneBuffer;
 class GPUCullPass;
+class GPUClusterBuffer;
+class TwoPassCuller;
 class WaterSystem;
 class WaterDisplacement;
 class FlowMapGenerator;
@@ -94,6 +96,8 @@ class BilateralGridSystem;
 class ScreenSpaceShadowSystem;
 class GodRaysSystem;
 class DeferredTerrainObjects;
+class VisibilityBuffer;
+class GPUMaterialBuffer;
 struct EnvironmentSettings;
 struct TerrainConfig;
 
@@ -285,12 +289,32 @@ public:
     const GPUCullPass& gpuCullPass() const { return *gpuCullPass_; }
     bool hasGPUCullPass() const { return gpuCullPass_ != nullptr; }
     void setGPUCullPass(std::unique_ptr<GPUCullPass> pass);
+    GPUClusterBuffer* gpuClusterBuffer() { return gpuClusterBuffer_.get(); }
+    const GPUClusterBuffer* gpuClusterBuffer() const { return gpuClusterBuffer_.get(); }
+    bool hasGPUClusterBuffer() const { return gpuClusterBuffer_ != nullptr; }
+    void setGPUClusterBuffer(std::unique_ptr<GPUClusterBuffer> buffer);
+    TwoPassCuller* twoPassCuller() { return twoPassCuller_.get(); }
+    const TwoPassCuller* twoPassCuller() const { return twoPassCuller_.get(); }
+    bool hasTwoPassCuller() const { return twoPassCuller_ != nullptr; }
+    void setTwoPassCuller(std::unique_ptr<TwoPassCuller> culler);
 
     // Screen-space shadow buffer
     ScreenSpaceShadowSystem* screenSpaceShadow() { return screenSpaceShadowSystem_.get(); }
     const ScreenSpaceShadowSystem* screenSpaceShadow() const { return screenSpaceShadowSystem_.get(); }
     bool hasScreenSpaceShadow() const { return screenSpaceShadowSystem_ != nullptr; }
     void setScreenSpaceShadow(std::unique_ptr<ScreenSpaceShadowSystem> system);
+
+    // Visibility buffer
+    VisibilityBuffer* visibilityBuffer() { return visibilityBuffer_.get(); }
+    const VisibilityBuffer* visibilityBuffer() const { return visibilityBuffer_.get(); }
+    bool hasVisibilityBuffer() const { return visibilityBuffer_ != nullptr; }
+    void setVisibilityBuffer(std::unique_ptr<VisibilityBuffer> system);
+
+    // GPU material buffer
+    GPUMaterialBuffer* gpuMaterialBuffer() { return gpuMaterialBuffer_.get(); }
+    const GPUMaterialBuffer* gpuMaterialBuffer() const { return gpuMaterialBuffer_.get(); }
+    bool hasGPUMaterialBuffer() const { return gpuMaterialBuffer_ != nullptr; }
+    void setGPUMaterialBuffer(std::unique_ptr<GPUMaterialBuffer> buffer);
 
     // Scene and resources
     SceneManager& scene() { return *sceneManager_; }
@@ -562,9 +586,15 @@ private:
     std::unique_ptr<HiZSystem> hiZSystem_;
     std::unique_ptr<GPUSceneBuffer> gpuSceneBuffer_;
     std::unique_ptr<GPUCullPass> gpuCullPass_;
+    std::unique_ptr<GPUClusterBuffer> gpuClusterBuffer_;
+    std::unique_ptr<TwoPassCuller> twoPassCuller_;
 
     // Screen-space shadow buffer
     std::unique_ptr<ScreenSpaceShadowSystem> screenSpaceShadowSystem_;
+
+    // Visibility buffer rendering
+    std::unique_ptr<VisibilityBuffer> visibilityBuffer_;
+    std::unique_ptr<GPUMaterialBuffer> gpuMaterialBuffer_;
 
     // Infrastructure (needed throughout)
     std::unique_ptr<SceneManager> sceneManager_;

@@ -81,6 +81,59 @@ bool isAABBInRange(vec3 boundsMin, vec3 boundsMax, vec3 cameraPos, float maxDist
 }
 
 // ============================================================================
+// AABB Transform (Arvo's method from Graphics Gems)
+// ============================================================================
+
+// Transform an object-space AABB through a model matrix to get a world-space AABB.
+// Uses the separating axis approach: for each output axis, compute the contribution
+// of each input axis via the matrix column, taking min/max of the two endpoints.
+// This is exact (no over-estimation beyond the oriented bounding box) and O(1).
+void transformAABB(mat4 m, vec3 localMin, vec3 localMax,
+                   out vec3 outMin, out vec3 outMax) {
+    // Start with translation component
+    outMin = m[3].xyz;
+    outMax = m[3].xyz;
+
+    // Add contribution from each input axis
+    for (int j = 0; j < 3; j++) {
+        vec3 a = m[j].xyz * localMin[j];
+        vec3 b = m[j].xyz * localMax[j];
+        outMin += min(a, b);
+        outMax += max(a, b);
+    }
+}
+
+// ============================================================================
+// Screen-Space Error Projection
+// ============================================================================
+
+// Project an object-space error metric to screen-space pixels.
+// Used by the cluster DAG LOD selection to decide which LOD level to render.
+//
+// objectError: object-space simplification error (from meshoptimizer)
+// boundingSphere: xyz = world-space center, w = world-space radius
+// viewProjMatrix: current frame's view-projection matrix
+// screenHeight: viewport height in pixels
+//
+// Returns: approximate screen-space error in pixels
+float projectErrorToScreen(float objectError, vec4 boundingSphere,
+                            mat4 viewProjMatrix, float screenHeight) {
+    // Project the sphere center to get clip-space W (distance from camera)
+    vec4 clipCenter = viewProjMatrix * vec4(boundingSphere.xyz, 1.0);
+
+    // Behind the camera - return large error to force rendering
+    if (clipCenter.w <= 0.0) {
+        return 1e6;
+    }
+
+    // Projected size is proportional to world-space size / distance (clip W).
+    // Scale by half screen height because clip Y range is [-1,1].
+    float projectedError = (objectError * screenHeight * 0.5) / clipCenter.w;
+
+    return projectedError;
+}
+
+// ============================================================================
 // Distance Bucketing
 // ============================================================================
 

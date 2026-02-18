@@ -105,13 +105,20 @@ public:
 
     // Render target accessors (vulkan-hpp)
     vk::ImageView getHDRColorView() const { return vk::ImageView(hdrColorView); }
+    vk::Image getHDRColorImage() const { return vk::Image(hdrColorImage); }
     vk::ImageView getHDRDepthView() const { return vk::ImageView(hdrDepthView); }
+    vk::Image getHDRDepthImage() const { return vk::Image(hdrDepthImage); }
     vk::RenderPass getHDRRenderPass() const { return vk::RenderPass(hdrRenderPass); }
     vk::Framebuffer getHDRFramebuffer() const { return vk::Framebuffer(hdrFramebuffer); }
     vk::Extent2D getRenderExtent() const { return vk::Extent2D{}.setWidth(extent.width).setHeight(extent.height); }
 
     // Legacy raw handle accessors (for existing code)
     VkExtent2D getExtent() const { return extent; }
+
+    // Shared depth: when V-buffer raster writes to the HDR depth before the HDR pass,
+    // the HDR render pass must load depth (not clear) to preserve V-buffer depth writes.
+    void setDepthLoadOnHDRPass(bool load);
+    bool getDepthLoadOnHDRPass() const { return hdrDepthLoadOp_ == VK_ATTACHMENT_LOAD_OP_LOAD; }
 
     // Pre-end callback is called after post-process draw but before ending render pass (for GUI overlay)
     using PreEndCallback = std::function<void(VkCommandBuffer)>;
@@ -287,6 +294,7 @@ private:
     std::optional<vk::raii::RenderPass> hdrRenderPass_;
     VkRenderPass hdrRenderPass = VK_NULL_HANDLE;  // Raw handle for compatibility
     VkFramebuffer hdrFramebuffer = VK_NULL_HANDLE;
+    VkAttachmentLoadOp hdrDepthLoadOp_ = VK_ATTACHMENT_LOAD_OP_CLEAR;
 
     // Final composite pipeline
     VkDescriptorSetLayout compositeDescriptorSetLayout = VK_NULL_HANDLE;

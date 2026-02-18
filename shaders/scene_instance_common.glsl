@@ -20,8 +20,8 @@ struct SceneInstance {
     vec4 emissiveColor;      // rgb=emissive color, a=unused
     uint pbrFlags;           // PBR texture flags bitmask
     float alphaTestThreshold;
-    float _pad0;
-    float _pad1;
+    float hueShift;
+    uint materialId;         // Index into material buffer
 };
 
 // Instance buffer (readonly for vertex/fragment shaders)

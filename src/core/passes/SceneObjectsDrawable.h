@@ -46,6 +46,9 @@ public:
         WindSystem* wind = nullptr;
         ecs::World* ecsWorld = nullptr;
 
+        // When true, scene objects are rendered by V-buffer; skip them in HDR
+        bool visBufferActive = false;
+
         // Vegetation subsystems (optional)
         ScatterSystem* rocks = nullptr;
         ScatterSystem* detritus = nullptr;

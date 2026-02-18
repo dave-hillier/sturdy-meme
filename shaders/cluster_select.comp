@@ -1,0 +1,181 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
+
+#include "bindings.glsl"
+#include "cull_compute_common.glsl"
+
+// Cluster DAG LOD selection compute shader — top-down traversal
+//
+// Processes one level of the DAG per dispatch. The CPU dispatches once per
+// DAG level, ping-ponging between input/output node buffers:
+//
+//   Pass 0: evaluate root clusters (CPU-seeded)
+//   Pass 1: evaluate children from pass 0
+//   Pass N: evaluate children from pass N-1
+//
+// For each input node:
+//   - If screen error <= threshold (or leaf): SELECT for rendering
+//   - If screen error > threshold: PUSH children into next-pass buffer
+//
+// This avoids the flat dispatch problem where every cluster in the DAG is
+// evaluated even if its ancestors already pass the error test.
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Cluster metadata (must match C++ MeshCluster and cluster_cull.comp ClusterData)
+struct ClusterData {
+    vec4 boundingSphere;    // xyz = center (object space), w = radius
+    vec3 aabbMin;
+    float _pad0;
+    vec3 aabbMax;
+    float _pad1;
+    vec3 coneAxis;
+    float coneAngle;
+    uint firstIndex;
+    uint indexCount;
+    uint firstVertex;
+    uint meshId;
+    float parentError;      // object-space error of parent cluster
+    float error;            // object-space error of this cluster
+    uint lodLevel;
+    uint parentIndex;       // index of parent (0xFFFFFFFF for root)
+    uint firstChildIndex;
+    uint childCount;        // 0 = leaf
+    uint _pad2;
+    uint _pad3;
+};
+
+layout(std430, binding = 0) readonly buffer ClusterBuffer {
+    ClusterData clusters[];
+};
+
+// Per-instance transforms (same as cluster_cull.comp)
+struct InstanceTransform {
+    mat4 model;
+    vec4 materialParams;
+    vec4 emissiveColor;
+    uint pbrFlags;
+    float alphaTestThreshold;
+    float hueShift;
+    float _pad;
+};
+
+layout(std430, binding = 1) readonly buffer InstanceBuffer {
+    InstanceTransform instances[];
+};
+
+// Output: selected cluster indices for culling (accumulated across all passes)
+layout(std430, binding = 2) writeonly buffer SelectedClusterBuffer {
+    uint selectedClusters[];
+};
+
+// Output: selected cluster count (atomic, accumulated across all passes)
+layout(std430, binding = 3) buffer SelectedCountBuffer {
+    uint selectedCount;
+};
+
+// Selection uniforms
+layout(std140, binding = 4) uniform SelectUniforms {
+    mat4 viewProjMatrix;
+    vec4 screenParams;      // width, height, 1/width, 1/height
+    uint totalClusterCount; // total clusters in the DAG (for bounds checking)
+    uint instanceCount;
+    float errorThreshold;   // max acceptable screen-space error in pixels (e.g. 1.0)
+    uint maxSelectedClusters;
+} sel;
+
+// Input: cluster indices to evaluate this pass
+layout(std430, binding = 5) readonly buffer InputNodeBuffer {
+    uint inputNodes[];
+};
+
+// Input: number of nodes to evaluate this pass
+layout(std430, binding = 6) readonly buffer InputNodeCountBuffer {
+    uint inputNodeCount;
+};
+
+// Output: child cluster indices for the next pass
+layout(std430, binding = 7) writeonly buffer OutputNodeBuffer {
+    uint outputNodes[];
+};
+
+// Output: count of child nodes for the next pass (atomic)
+layout(std430, binding = 8) buffer OutputNodeCountBuffer {
+    uint outputNodeCount;
+};
+
+void main() {
+    uint threadIdx = gl_GlobalInvocationID.x;
+
+    // Read node count from SSBO (set by CPU for first pass, by prev pass otherwise)
+    if (threadIdx >= inputNodeCount) return;
+
+    uint clusterIdx = inputNodes[threadIdx];
+    if (clusterIdx >= sel.totalClusterCount) return;
+
+    ClusterData cluster = clusters[clusterIdx];
+
+    // Use meshId as instance index
+    uint instanceIdx = cluster.meshId;
+    if (instanceIdx >= sel.instanceCount) return;
+
+    mat4 model = instances[instanceIdx].model;
+
+    // Transform bounding sphere to world space for error projection
+    vec3 worldCenter = (model * vec4(cluster.boundingSphere.xyz, 1.0)).xyz;
+    float scaleApprox = length(vec3(model[0][0], model[1][0], model[2][0]));
+    float worldRadius = cluster.boundingSphere.w * scaleApprox;
+    float worldError = cluster.error * scaleApprox;
+
+    vec4 worldSphere = vec4(worldCenter, worldRadius);
+    float screenHeight = sel.screenParams.y;
+
+    // Project this cluster's error to screen space
+    float myScreenError = projectErrorToScreen(worldError, worldSphere,
+                                                sel.viewProjMatrix, screenHeight);
+
+    bool isLeaf = (cluster.childCount == 0);
+    bool errorOk = (myScreenError <= sel.errorThreshold);
+
+    if (errorOk || isLeaf) {
+        // This cluster is detailed enough (or finest available) — select it
+        uvec4 selectMask = subgroupBallot(true);
+        uint selectCount = subgroupBallotBitCount(selectMask);
+        uint selectOffset = subgroupBallotExclusiveBitCount(selectMask);
+
+        uint selectBase = 0;
+        if (subgroupElect()) {
+            selectBase = atomicAdd(selectedCount, selectCount);
+        }
+        selectBase = subgroupBroadcastFirst(selectBase);
+
+        uint outIdx = selectBase + selectOffset;
+        if (outIdx < sel.maxSelectedClusters) {
+            selectedClusters[outIdx] = clusterIdx;
+        }
+    } else {
+        // Error too large — push children for next pass
+        // Each thread may push a different number of children, so we can't
+        // use the simple subgroup ballot pattern. Use per-thread atomics,
+        // but batch the total across the subgroup for efficiency.
+        uint myChildCount = cluster.childCount;
+        uint totalChildren = subgroupAdd(myChildCount);
+
+        uint subgroupBase = 0;
+        if (subgroupElect()) {
+            subgroupBase = atomicAdd(outputNodeCount, totalChildren);
+        }
+        subgroupBase = subgroupBroadcastFirst(subgroupBase);
+
+        // Compute this thread's offset within the subgroup allocation
+        uint myOffset = subgroupExclusiveAdd(myChildCount);
+        uint writePos = subgroupBase + myOffset;
+
+        for (uint c = 0; c < myChildCount; c++) {
+            outputNodes[writePos + c] = cluster.firstChildIndex + c;
+        }
+    }
+}

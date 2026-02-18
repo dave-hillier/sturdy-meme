@@ -1,11 +1,16 @@
 #version 450
 
 #extension GL_GOOGLE_include_directive : require
+#extension GL_KHR_shader_subgroup_ballot : require
+#extension GL_KHR_shader_subgroup_arithmetic : require
 
 // Scene Object GPU Culling Compute Shader
-// Performs frustum culling on scene objects and generates indirect draw commands
+// Performs frustum culling + Hi-Z occlusion culling on scene objects
+// and generates indirect draw commands via subgroup-batched atomics.
 
 #include "bindings.glsl"
+#include "instancing_common.glsl"
+#include "hiz_occlusion_common.glsl"
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
@@ -20,15 +25,6 @@ struct CullObjectData {
     int vertexOffset;      // Vertex offset
 };
 
-// Output: Indirect draw command
-struct DrawIndexedIndirectCommand {
-    uint indexCount;
-    uint instanceCount;
-    uint firstIndex;
-    int vertexOffset;
-    uint firstInstance;
-};
-
 // Culling uniforms
 layout(std140, binding = BINDING_SCENE_CULL_UNIFORMS) uniform CullUniforms {
     mat4 viewMatrix;
@@ -37,8 +33,9 @@ layout(std140, binding = BINDING_SCENE_CULL_UNIFORMS) uniform CullUniforms {
     vec4 frustumPlanes[6];     // Frustum planes (xyz=normal, w=distance)
     vec4 cameraPosition;       // xyz = camera pos, w = unused
     vec4 screenParams;         // x = width, y = height, z = 1/width, w = 1/height
+    vec4 depthParams;          // x = near, y = far, z = numMipLevels, w = unused
     uint objectCount;          // Number of objects to cull
-    uint enableHiZ;            // 1 = use Hi-Z (future), 0 = frustum only
+    uint enableHiZ;            // 1 = use Hi-Z occlusion, 0 = frustum only
     uint maxDrawCommands;      // Output buffer capacity
     uint padding;
 } cullUniforms;
@@ -58,33 +55,14 @@ layout(std430, binding = BINDING_SCENE_CULL_COUNT) buffer DrawCountBuffer {
     uint drawCount;
 };
 
-// Optional: Hi-Z pyramid for occlusion culling (future)
+// Hi-Z pyramid for occlusion culling
 layout(binding = BINDING_SCENE_CULL_HIZ) uniform sampler2D hiZPyramid;
 
-// Test if sphere is inside frustum
+// Frustum test using bounding sphere (fast early rejection)
 bool frustumCullSphere(vec3 center, float radius) {
     for (int i = 0; i < 6; ++i) {
         float dist = dot(cullUniforms.frustumPlanes[i].xyz, center) + cullUniforms.frustumPlanes[i].w;
         if (dist < -radius) {
-            return true;  // Culled
-        }
-    }
-    return false;  // Visible
-}
-
-// Test if AABB is inside frustum (more precise than sphere test)
-bool frustumCullAABB(vec3 aabbMin, vec3 aabbMax) {
-    for (int i = 0; i < 6; ++i) {
-        vec4 plane = cullUniforms.frustumPlanes[i];
-
-        // Find the positive vertex (furthest along plane normal)
-        vec3 pVertex = vec3(
-            plane.x >= 0.0 ? aabbMax.x : aabbMin.x,
-            plane.y >= 0.0 ? aabbMax.y : aabbMin.y,
-            plane.z >= 0.0 ? aabbMax.z : aabbMin.z
-        );
-
-        if (dot(plane.xyz, pVertex) + plane.w < 0.0) {
             return true;  // Culled
         }
     }
@@ -100,33 +78,72 @@ void main() {
 
     CullObjectData obj = objects[objectIdx];
 
-    // Frustum culling using sphere first (fast rejection)
+    // Step 1: Frustum culling — sphere test (fast rejection)
     vec3 sphereCenter = obj.boundingSphere.xyz;
     float sphereRadius = obj.boundingSphere.w;
 
     if (frustumCullSphere(sphereCenter, sphereRadius)) {
-        return;  // Culled by sphere test
+        return;
     }
 
-    // Optional: More precise AABB test for objects that passed sphere test
+    // Step 2: Frustum culling — precise AABB test
     vec3 aabbMin = obj.aabbMin.xyz;
     vec3 aabbMax = obj.aabbMax.xyz;
 
-    if (frustumCullAABB(aabbMin, aabbMax)) {
-        return;  // Culled by AABB test
+    if (!isAABBInFrustum(cullUniforms.frustumPlanes, aabbMin, aabbMax)) {
+        return;
     }
 
-    // Object is visible - add to indirect draw buffer
-    uint drawIdx = atomicAdd(drawCount, 1);
-
-    if (drawIdx < cullUniforms.maxDrawCommands) {
-        DrawIndexedIndirectCommand cmd;
-        cmd.indexCount = obj.indexCount;
-        cmd.instanceCount = 1;
-        cmd.firstIndex = obj.firstIndex;
-        cmd.vertexOffset = obj.vertexOffset;
-        cmd.firstInstance = obj.objectIndex;  // gl_InstanceIndex in vertex shader
-
-        commands[drawIdx] = cmd;
+    // Step 3: Hi-Z occlusion culling
+    if (cullUniforms.enableHiZ != 0u) {
+        float maxMip = cullUniforms.depthParams.z - 1.0;
+        if (hizOcclusionTestAABB(aabbMin, aabbMax, hiZPyramid,
+                                 cullUniforms.viewProjMatrix,
+                                 cullUniforms.screenParams, maxMip)) {
+            return;  // Occluded
+        }
     }
+
+    // Object is visible — use subgroup operations to batch atomic updates
+    uvec4 activeMask = subgroupBallot(true);
+    uint activeCount = subgroupBallotBitCount(activeMask);
+    uint laneOffset = subgroupBallotExclusiveBitCount(activeMask);
+
+    uint baseIdx = 0;
+    uint slotsAllocated = 0;
+    if (subgroupElect()) {
+        uint expected = drawCount;
+        while (true) {
+            uint available = (expected >= cullUniforms.maxDrawCommands)
+                ? 0
+                : cullUniforms.maxDrawCommands - expected;
+            slotsAllocated = min(activeCount, available);
+            if (slotsAllocated == 0) {
+                baseIdx = expected;
+                break;
+            }
+            uint desired = expected + slotsAllocated;
+            uint actual = atomicCompSwap(drawCount, expected, desired);
+            if (actual == expected) {
+                baseIdx = expected;
+                break;
+            }
+            expected = actual;
+        }
+    }
+    baseIdx = subgroupBroadcastFirst(baseIdx);
+    slotsAllocated = subgroupBroadcastFirst(slotsAllocated);
+    uint drawIdx = baseIdx + laneOffset;
+
+    // Only write if we got a valid slot within bounds
+    if (laneOffset >= slotsAllocated) {
+        return;
+    }
+
+    // Write indirect draw command
+    commands[drawIdx].indexCount = obj.indexCount;
+    commands[drawIdx].instanceCount = 1;
+    commands[drawIdx].firstIndex = obj.firstIndex;
+    commands[drawIdx].vertexOffset = obj.vertexOffset;
+    commands[drawIdx].firstInstance = obj.objectIndex;  // gl_InstanceIndex in vertex shader
 }

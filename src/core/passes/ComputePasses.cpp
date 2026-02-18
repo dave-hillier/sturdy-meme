@@ -259,7 +259,9 @@ PassIds addPasses(FrameGraph& graph, RendererSystems& systems, const Config& con
                     renderCtx->frame.projection,
                     renderCtx->frame.cameraPosition,
                     sceneBuffer.getObjectCount(),
-                    renderCtx->resources.hdrExtent
+                    renderCtx->resources.hdrExtent,
+                    renderCtx->frame.nearPlane,
+                    renderCtx->frame.farPlane
                 );
 
                 // Bind scene buffer

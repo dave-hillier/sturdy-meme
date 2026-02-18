@@ -115,8 +115,9 @@ void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t fram
         vkCmd.drawIndexed(obj.mesh->getIndexCount(), 1, 0, 0, 0);
     };
 
-    // Phase 6: Use ECS if available, otherwise fall back to legacy renderables
-    if (resources_.ecsWorld) {
+    // When V-buffer is active, scene objects are rendered by the V-buffer resolve pass.
+    // Skip them here but still render rocks, detritus, trees below.
+    if (!resources_.visBufferActive && resources_.ecsWorld) {
         ecs::World& world = *resources_.ecsWorld;
 
         // Collect entities to render (those with MeshRef and MaterialRef, excluding special entities)
@@ -158,7 +159,7 @@ void SceneObjectsDrawable::recordSceneObjects(VkCommandBuffer cmd, uint32_t fram
             }
             renderWithRenderData(data, currentDescSet);
         }
-    } else {
+    } else if (!resources_.visBufferActive) {
         // Legacy path: Use Renderable vector
         const auto& sceneObjects = resources_.scene->getRenderables();
 

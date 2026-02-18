@@ -17,7 +17,7 @@
 // Forward declarations
 class GPUSceneBuffer;
 
-// GPU Culling uniforms (matches shader struct)
+// GPU Culling uniforms (matches shader struct in scene_cull.comp)
 struct alignas(16) GPUCullUniforms {
     glm::mat4 viewMatrix;
     glm::mat4 projMatrix;
@@ -25,8 +25,9 @@ struct alignas(16) GPUCullUniforms {
     glm::vec4 frustumPlanes[6];     // xyz = normal, w = distance
     glm::vec4 cameraPosition;       // xyz = camera pos, w = unused
     glm::vec4 screenParams;         // x = width, y = height, z = 1/width, w = 1/height
+    glm::vec4 depthParams;          // x = near, y = far, z = numMipLevels, w = unused
     uint32_t objectCount;           // Number of objects to cull
-    uint32_t enableHiZ;             // 1 = use Hi-Z, 0 = frustum only
+    uint32_t enableHiZ;             // 1 = use Hi-Z occlusion, 0 = frustum only
     uint32_t maxDrawCommands;       // Output buffer capacity
     uint32_t padding;
 };
@@ -78,7 +79,9 @@ public:
                         const glm::mat4& proj,
                         const glm::vec3& cameraPos,
                         uint32_t objectCount,
-                        VkExtent2D screenExtent);
+                        VkExtent2D screenExtent,
+                        float nearPlane = 0.1f,
+                        float farPlane = 1000.0f);
 
     // Bind scene buffer for culling
     void bindSceneBuffer(GPUSceneBuffer* sceneBuffer, uint32_t frameIndex);
@@ -102,7 +105,7 @@ public:
     bool isHiZEnabled() const { return hiZEnabled_; }
 
     // Set Hi-Z pyramid for occlusion culling (optional)
-    void setHiZPyramid(VkImageView pyramidView, VkSampler sampler);
+    void setHiZPyramid(VkImageView pyramidView, VkSampler sampler, uint32_t mipLevels = 0);
 
     // Set placeholder image for when Hi-Z is not available (required for MoltenVK)
     void setPlaceholderImage(VkImageView view, VkSampler sampler);
@@ -146,7 +149,8 @@ private:
     // Hi-Z pyramid reference (optional)
     VkImageView hiZPyramidView_ = VK_NULL_HANDLE;
     VkSampler hiZSampler_ = VK_NULL_HANDLE;
-    bool hiZEnabled_ = false;
+    uint32_t hiZMipLevels_ = 0;
+    bool hiZEnabled_ = true;
 
     // Placeholder image for descriptor binding when Hi-Z is unavailable
     VkImageView placeholderImageView_ = VK_NULL_HANDLE;
