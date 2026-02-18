@@ -1,6 +1,7 @@
 #include "CALMObservation.h"
 #include "GLTFLoader.h"
 #include "CharacterController.h"
+#include "RagdollInstance.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <cmath>
 #include <cassert>
@@ -269,6 +270,130 @@ glm::vec3 CALMObservationExtractor::matrixToEulerXYZ(const glm::mat4& m) {
         euler.z = 0.0f;
     }
     return euler;
+}
+
+// ---- Ragdoll-based observation extraction ----
+
+void CALMObservationExtractor::extractFrameFromRagdoll(
+    const Skeleton& skeleton,
+    const physics::RagdollInstance& ragdoll,
+    float deltaTime) {
+
+    auto& frame = history_[historyIndex_];
+    frame.clear();
+    frame.reserve(config_.observationDim);
+
+    extractRootFeaturesFromRagdoll(skeleton, ragdoll, deltaTime, frame);
+    extractDOFFeaturesFromRagdoll(skeleton, ragdoll, deltaTime, frame);
+    extractKeyBodyFeatures(skeleton, frame);  // Reuse — works from skeleton global transforms
+
+    assert(static_cast<int>(frame.size()) == config_.observationDim);
+
+    historyIndex_ = (historyIndex_ + 1) % MAX_OBS_HISTORY;
+    if (historyCount_ < MAX_OBS_HISTORY) {
+        ++historyCount_;
+    }
+
+    hasPreviousFrame_ = true;
+}
+
+void CALMObservationExtractor::extractRootFeaturesFromRagdoll(
+    const Skeleton& skeleton,
+    const physics::RagdollInstance& ragdoll,
+    float deltaTime,
+    std::vector<float>& obs) {
+
+    // Root position and rotation from ragdoll physics body
+    glm::vec3 rootPos = ragdoll.getRootPosition();
+    glm::quat rootRot = ragdoll.getRootRotation();
+
+    // 1) Root height (1D)
+    obs.push_back(rootPos.y);
+
+    // 2) Root rotation — heading-invariant 6D (6D)
+    glm::quat headingFree = removeHeading(rootRot);
+    float rot6d[6];
+    quatToTanNorm6D(headingFree, rot6d);
+    for (int i = 0; i < 6; ++i) {
+        obs.push_back(rot6d[i]);
+    }
+
+    // 3) Local root velocity in heading frame (3D)
+    float headingAngle = getHeadingAngle(rootRot);
+    float cosH = std::cos(-headingAngle);
+    float sinH = std::sin(-headingAngle);
+
+    // Exact velocity from physics instead of finite differences
+    glm::vec3 worldVel = ragdoll.getRootLinearVelocity();
+    glm::vec3 localVel;
+    localVel.x = cosH * worldVel.x + sinH * worldVel.z;
+    localVel.y = worldVel.y;
+    localVel.z = -sinH * worldVel.x + cosH * worldVel.z;
+    obs.push_back(localVel.x);
+    obs.push_back(localVel.y);
+    obs.push_back(localVel.z);
+
+    // 4) Local root angular velocity (3D)
+    // Exact angular velocity from physics — much more accurate than finite differences
+    glm::vec3 angVel = ragdoll.getRootAngularVelocity();
+    glm::vec3 localAngVel;
+    localAngVel.x = cosH * angVel.x + sinH * angVel.z;
+    localAngVel.y = angVel.y;
+    localAngVel.z = -sinH * angVel.x + cosH * angVel.z;
+    obs.push_back(localAngVel.x);
+    obs.push_back(localAngVel.y);
+    obs.push_back(localAngVel.z);
+
+    prevRootRotation_ = rootRot;
+}
+
+void CALMObservationExtractor::extractDOFFeaturesFromRagdoll(
+    const Skeleton& skeleton,
+    const physics::RagdollInstance& ragdoll,
+    float deltaTime,
+    std::vector<float>& obs) {
+
+    // Read current pose from ragdoll
+    SkeletonPose ragdollPose;
+    ragdoll.readPose(ragdollPose, skeleton);
+
+    // Extract DOF positions from ragdoll pose
+    std::vector<float> currentDOFs(config_.actionDim, 0.0f);
+
+    for (int d = 0; d < config_.actionDim; ++d) {
+        const auto& mapping = config_.dofMappings[d];
+        if (mapping.jointIndex >= 0 &&
+            static_cast<size_t>(mapping.jointIndex) < ragdollPose.size()) {
+            const auto& bp = ragdollPose[mapping.jointIndex];
+            // Convert rotation to Euler angles
+            glm::mat4 rotMat = glm::mat4_cast(bp.rotation);
+            glm::vec3 euler = matrixToEulerXYZ(rotMat);
+            currentDOFs[d] = euler[mapping.axis];
+        }
+    }
+
+    // DOF positions
+    for (int d = 0; d < config_.actionDim; ++d) {
+        obs.push_back(currentDOFs[d]);
+    }
+
+    // DOF velocities — use per-body angular velocities from physics
+    // This is more accurate than finite differences
+    std::vector<glm::vec3> angVels;
+    ragdoll.readBodyAngularVelocities(angVels);
+
+    for (int d = 0; d < config_.actionDim; ++d) {
+        const auto& mapping = config_.dofMappings[d];
+        if (mapping.jointIndex >= 0 &&
+            static_cast<size_t>(mapping.jointIndex) < angVels.size()) {
+            // Project angular velocity onto the DOF axis
+            obs.push_back(angVels[mapping.jointIndex][mapping.axis]);
+        } else {
+            obs.push_back(0.0f);
+        }
+    }
+
+    prevDOFPositions_ = currentDOFs;
 }
 
 } // namespace ml

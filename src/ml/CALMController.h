@@ -10,6 +10,10 @@
 struct Skeleton;
 class CharacterController;
 
+namespace physics {
+    class RagdollInstance;
+}
+
 namespace ml {
 
 struct CALMControllerConfig {
@@ -54,6 +58,15 @@ public:
                        const CharacterController& physics,
                        const SkeletonPose& basePose,
                        float blendWeight,
+                       SkeletonPose& outPose);
+
+    // Physics-driven update: read ragdoll state → observe → infer → drive motors.
+    // Instead of setting joint transforms directly, this converts actions to a
+    // target pose and feeds it to the ragdoll's motor system.
+    // outPose receives the current physics-resolved pose for rendering.
+    void updatePhysics(float deltaTime,
+                       Skeleton& skeleton,
+                       physics::RagdollInstance& ragdoll,
                        SkeletonPose& outPose);
 
     // --- Latent control ---

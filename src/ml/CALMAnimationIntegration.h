@@ -7,12 +7,21 @@
 #include "../animation/AnimationArchetypeManager.h"
 #include "../animation/CharacterLOD.h"
 #include "../npc/NPCData.h"
+#include "../physics/RagdollBuilder.h"
+#include "../physics/RagdollInstance.h"
 #include <memory>
 #include <vector>
 #include <unordered_map>
 
+#include <Jolt/Jolt.h>
+#include <Jolt/Physics/Ragdoll/Ragdoll.h>
+
 struct Skeleton;
 class CharacterController;
+
+namespace JPH {
+    class PhysicsSystem;
+}
 
 namespace ml {
 
@@ -30,6 +39,10 @@ struct CALMArchetype {
     CALMLowLevelController llc;
     CALMLatentSpace latentSpace;
     CALMCharacterConfig config;
+
+    // Shared ragdoll settings (ref-counted, built once per archetype)
+    JPH::Ref<JPH::RagdollSettings> ragdollSettings;
+    physics::RagdollConfig ragdollConfig;
 };
 
 // Per-NPC CALM instance state — lightweight data owned by each NPC.
@@ -47,6 +60,10 @@ struct CALMNPCInstance {
     std::vector<glm::mat4> cachedBoneMatrices;
 
     bool initialized = false;
+
+    // Ragdoll physics (nullptr when in kinematic mode)
+    std::unique_ptr<physics::RagdollInstance> ragdoll;
+    bool usePhysics = false;  // Toggle kinematic vs physics-driven mode
 };
 
 // CALMArchetypeManager — manages CALM character types and per-NPC instances.
@@ -111,6 +128,28 @@ public:
                         float deltaTime,
                         Skeleton& skeleton,
                         const CharacterController& physics);
+
+    // --- Ragdoll physics ---
+
+    // Build ragdoll settings for an archetype from its skeleton's bind pose.
+    // Must be called after the archetype is created and skeleton is available.
+    void buildArchetypeRagdoll(uint32_t archetypeId,
+                                const Skeleton& skeleton,
+                                const physics::RagdollConfig& config = {});
+
+    // Create and activate a ragdoll for a specific NPC instance.
+    // Requires that the archetype has ragdoll settings built.
+    void enableInstanceRagdoll(size_t instanceIdx,
+                                Skeleton& skeleton,
+                                JPH::PhysicsSystem* physicsSystem);
+
+    // Deactivate and destroy the ragdoll for an instance (switch back to kinematic).
+    void disableInstanceRagdoll(size_t instanceIdx);
+
+    // Update a single instance in physics mode.
+    void updateInstancePhysics(size_t instanceIdx,
+                                float deltaTime,
+                                Skeleton& skeleton);
 
     // --- LOD control ---
 

@@ -59,6 +59,15 @@ void CALMActionApplier::applyToSkeleton(const Tensor& actions,
     }
 }
 
+void CALMActionApplier::actionsToTargetPose(const Tensor& actions,
+                                             const Skeleton& skeleton,
+                                             SkeletonPose& outPose) const {
+    // Same as applyToSkeleton — builds the target pose from actions.
+    // This is a separate method for clarity: the caller feeds this to
+    // RagdollInstance::driveToTargetPose() instead of setting it on the skeleton.
+    applyToSkeleton(actions, skeleton, outPose);
+}
+
 void CALMActionApplier::applyBlended(const Tensor& actions,
                                       const Skeleton& skeleton,
                                       const SkeletonPose& basePose,

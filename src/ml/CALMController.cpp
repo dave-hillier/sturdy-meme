@@ -1,6 +1,7 @@
 #include "CALMController.h"
 #include "GLTFLoader.h"
 #include "CharacterController.h"
+#include "RagdollInstance.h"
 #include <SDL3/SDL_log.h>
 
 namespace ml {
@@ -78,6 +79,46 @@ void CALMController::updateBlended(float deltaTime,
     // 4. Clamp and apply blended
     actionApplier_.clampActions(actions);
     actionApplier_.applyBlended(actions, skeleton, basePose, blendWeight, outPose);
+}
+
+void CALMController::updatePhysics(float deltaTime,
+                                    Skeleton& skeleton,
+                                    physics::RagdollInstance& ragdoll,
+                                    SkeletonPose& outPose) {
+    if (!initialized_) return;
+
+    // 1. Read current pose from ragdoll for observation
+    SkeletonPose ragdollPose;
+    ragdoll.readPose(ragdollPose, skeleton);
+
+    // Update skeleton joint transforms from ragdoll pose so key body
+    // positions are computed correctly in extractKeyBodyFeatures
+    for (size_t j = 0; j < ragdollPose.size() && j < skeleton.joints.size(); ++j) {
+        skeleton.joints[j].localTransform = ragdollPose[j].toMatrix(skeleton.joints[j].preRotation);
+    }
+
+    // 2. Extract observation from ragdoll state
+    obsExtractor_.extractFrameFromRagdoll(skeleton, ragdoll, deltaTime);
+
+    // 3. Step latent
+    stepLatent();
+
+    // 4. Run LLC policy
+    Tensor obs = obsExtractor_.getCurrentObs();
+    Tensor actions;
+    llc_.evaluate(currentLatent_, obs, actions);
+
+    // 5. Clamp actions and convert to target pose
+    actionApplier_.clampActions(actions);
+
+    SkeletonPose targetPose;
+    actionApplier_.actionsToTargetPose(actions, skeleton, targetPose);
+
+    // 6. Drive ragdoll motors toward target pose
+    ragdoll.driveToTargetPose(targetPose);
+
+    // 7. Output the current physics-resolved pose for rendering
+    outPose = ragdollPose;
 }
 
 // --- Latent control ---

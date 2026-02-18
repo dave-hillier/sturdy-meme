@@ -18,7 +18,7 @@ namespace ml {
 //
 // Two modes:
 //   Kinematic — directly set joint rotations from action targets (default)
-//   PD torque — compute PD controller torques for physics-based application (future)
+//   Physics   — convert actions to a target SkeletonPose for ragdoll motor driving
 class CALMActionApplier {
 public:
     CALMActionApplier() = default;
@@ -40,6 +40,13 @@ public:
                       const SkeletonPose& basePose,
                       float blendWeight,
                       SkeletonPose& outPose) const;
+
+    // Convert CALM actions to a target SkeletonPose without applying to skeleton.
+    // Used for ragdoll motor driving — the returned pose is fed to
+    // RagdollInstance::driveToTargetPose().
+    void actionsToTargetPose(const Tensor& actions,
+                             const Skeleton& skeleton,
+                             SkeletonPose& outPose) const;
 
     // Clamp action values to joint limits.
     void clampActions(Tensor& actions) const;

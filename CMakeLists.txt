@@ -188,6 +188,8 @@ set(SOURCES
     src/physics/ClothSimulation.cpp
     src/physics/PlayerCape.cpp
     src/physics/PhysicsDebugRenderer.cpp
+    src/physics/RagdollBuilder.cpp
+    src/physics/RagdollInstance.cpp
     # Terrain
     src/terrain/TerrainSystem.cpp
     src/terrain/TerrainFactory.cpp

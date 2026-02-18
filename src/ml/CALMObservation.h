@@ -10,6 +10,10 @@
 struct Skeleton;
 class CharacterController;
 
+namespace physics {
+    class RagdollInstance;
+}
+
 namespace ml {
 
 // Extracts CALM-compatible observations from the engine's Skeleton and CharacterController.
@@ -37,6 +41,13 @@ public:
     void extractFrame(const Skeleton& skeleton,
                       const CharacterController& controller,
                       float deltaTime);
+
+    // Extract one frame of observations from a ragdoll instance.
+    // Uses physics body positions/velocities instead of CharacterController.
+    // Provides exact angular velocities from physics rather than finite differences.
+    void extractFrameFromRagdoll(const Skeleton& skeleton,
+                                  const physics::RagdollInstance& ragdoll,
+                                  float deltaTime);
 
     // Get the most recent single-frame observation as a Tensor.
     Tensor getCurrentObs() const;
@@ -85,6 +96,17 @@ private:
 
     void extractKeyBodyFeatures(const Skeleton& skeleton,
                                 std::vector<float>& obs);
+
+    // Ragdoll-specific feature extractors
+    void extractRootFeaturesFromRagdoll(const Skeleton& skeleton,
+                                         const physics::RagdollInstance& ragdoll,
+                                         float deltaTime,
+                                         std::vector<float>& obs);
+
+    void extractDOFFeaturesFromRagdoll(const Skeleton& skeleton,
+                                        const physics::RagdollInstance& ragdoll,
+                                        float deltaTime,
+                                        std::vector<float>& obs);
 
     // Convert quaternion to heading-invariant 6D representation
     // (tan-normalized: first two columns of rotation matrix)

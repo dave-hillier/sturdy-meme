@@ -88,6 +88,92 @@ const CALMNPCInstance* CALMArchetypeManager::getInstance(size_t index) const {
     return index < instances_.size() ? &instances_[index] : nullptr;
 }
 
+// --- Ragdoll physics ---
+
+void CALMArchetypeManager::buildArchetypeRagdoll(uint32_t archetypeId,
+                                                   const Skeleton& skeleton,
+                                                   const physics::RagdollConfig& config) {
+    CALMArchetype* archetype = nullptr;
+    for (auto& a : archetypes_) {
+        if (a->id == archetypeId) { archetype = a.get(); break; }
+    }
+    if (!archetype) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "CALMArchetypeManager: buildArchetypeRagdoll: invalid archetype %u", archetypeId);
+        return;
+    }
+
+    std::vector<glm::mat4> globalBindPose;
+    skeleton.computeGlobalTransforms(globalBindPose);
+
+    archetype->ragdollConfig = config;
+    archetype->ragdollSettings = physics::RagdollBuilder::build(skeleton, globalBindPose, config);
+
+    if (archetype->ragdollSettings) {
+        SDL_Log("CALMArchetypeManager: built ragdoll settings for archetype '%s'",
+                archetype->name.c_str());
+    } else {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "CALMArchetypeManager: failed to build ragdoll for archetype '%s'",
+                     archetype->name.c_str());
+    }
+}
+
+void CALMArchetypeManager::enableInstanceRagdoll(size_t instanceIdx,
+                                                   Skeleton& skeleton,
+                                                   JPH::PhysicsSystem* physicsSystem) {
+    if (instanceIdx >= instances_.size()) return;
+    auto& inst = instances_[instanceIdx];
+    if (!inst.initialized) return;
+
+    const CALMArchetype* archetype = getArchetype(inst.archetypeId);
+    if (!archetype || !archetype->ragdollSettings) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "CALMArchetypeManager: enableInstanceRagdoll: no ragdoll settings for archetype %u",
+                     inst.archetypeId);
+        return;
+    }
+
+    // Create ragdoll instance
+    inst.ragdoll = std::make_unique<physics::RagdollInstance>(
+        archetype->ragdollSettings, skeleton, physicsSystem);
+
+    // Initialize to current cached pose
+    if (!inst.cachedPose.empty()) {
+        inst.ragdoll->setPoseImmediate(inst.cachedPose, skeleton);
+    }
+
+    // Activate and enable motors
+    inst.ragdoll->activate();
+    inst.ragdoll->setMotorsEnabled(true);
+    inst.usePhysics = true;
+
+    SDL_Log("CALMArchetypeManager: enabled ragdoll for instance %zu", instanceIdx);
+}
+
+void CALMArchetypeManager::disableInstanceRagdoll(size_t instanceIdx) {
+    if (instanceIdx >= instances_.size()) return;
+    auto& inst = instances_[instanceIdx];
+
+    if (inst.ragdoll) {
+        inst.ragdoll->deactivate();
+        inst.ragdoll.reset();
+    }
+    inst.usePhysics = false;
+
+    SDL_Log("CALMArchetypeManager: disabled ragdoll for instance %zu", instanceIdx);
+}
+
+void CALMArchetypeManager::updateInstancePhysics(size_t instanceIdx,
+                                                   float deltaTime,
+                                                   Skeleton& skeleton) {
+    if (instanceIdx >= instances_.size()) return;
+    auto& inst = instances_[instanceIdx];
+    if (!inst.initialized || !inst.ragdoll || !inst.usePhysics) return;
+
+    inst.controller.updatePhysics(deltaTime, skeleton, *inst.ragdoll, inst.cachedPose);
+}
+
 // --- Per-frame update ---
 
 void CALMArchetypeManager::updateAll(float deltaTime,
@@ -103,7 +189,11 @@ void CALMArchetypeManager::updateAll(float deltaTime,
         if (!inst.initialized) continue;
 
         if (shouldUpdateInstance(i, currentFrame, lodConfig)) {
-            updateInstance(i, deltaTime, skeletons[i], physics[i]);
+            if (inst.usePhysics && inst.ragdoll) {
+                updateInstancePhysics(i, deltaTime, skeletons[i]);
+            } else {
+                updateInstance(i, deltaTime, skeletons[i], physics[i]);
+            }
             computeBoneMatrices(i, skeletons[i]);
             inst.lastUpdateFrame = currentFrame;
             inst.framesSinceUpdate = 0;
