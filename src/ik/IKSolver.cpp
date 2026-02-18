@@ -479,6 +479,12 @@ void IKSystem::solve(Skeleton& skeleton, const glm::mat4& characterTransform, fl
             if (nfp.foot.enabled && nfp.foot.weight > 0.0f) {
                 FootPlacementIKSolver::queryGround(nfp.foot, cachedGlobalTransforms,
                                                     groundQuery, characterTransform);
+                // Multi-point ground query: fit a plane from heel/ball/toe contacts
+                if (nfp.foot.useMultiPointGround && (nfp.foot.heelBoneIndex >= 0 ||
+                    nfp.foot.ballBoneIndex >= 0 || nfp.foot.toeBoneIndex >= 0)) {
+                    nfp.foot.groundPlaneNormal = FootPlacementIKSolver::queryMultiPointGround(
+                        nfp.foot, cachedGlobalTransforms, groundQuery, characterTransform);
+                }
             }
         }
     }
@@ -495,6 +501,13 @@ void IKSystem::solve(Skeleton& skeleton, const glm::mat4& characterTransform, fl
         }
     }
 
+    // 3b. Slope compensation: shift pelvis forward/back and lean into slopes
+    if (pelvisAdjustment.enabled && groundQuery) {
+        glm::vec3 charForward = glm::vec3(characterTransform[2]); // Z column = forward
+        FootPlacementIKSolver::applySlopeCompensation(
+            skeleton, pelvisAdjustment, groundQuery, characterTransform, charForward, deltaTime);
+    }
+
     // 4. Recompute globals after pelvis adjustment
     skeleton.computeGlobalTransforms(cachedGlobalTransforms);
 
@@ -506,7 +519,22 @@ void IKSystem::solve(Skeleton& skeleton, const glm::mat4& characterTransform, fl
         }
     }
 
-    // 6. Recompute globals after foot IK
+    // 5b. Recompute globals, then apply foot roll and toe IK
+    skeleton.computeGlobalTransforms(cachedGlobalTransforms);
+    for (auto& nfp : footPlacements) {
+        if (nfp.foot.enabled && nfp.foot.weight > 0.0f) {
+            // Foot roll: heel strike → flat → heel off → toe off
+            FootPlacementIKSolver::applyFootRoll(skeleton, nfp.foot,
+                                                  cachedGlobalTransforms, characterTransform);
+            // Toe IK: bend toes to match ground
+            if (groundQuery) {
+                FootPlacementIKSolver::solveToeIK(skeleton, nfp.foot, cachedGlobalTransforms,
+                                                   groundQuery, characterTransform, deltaTime);
+            }
+        }
+    }
+
+    // 6. Recompute globals after foot IK + roll + toe
     skeleton.computeGlobalTransforms(cachedGlobalTransforms);
 
     // 7. Solve straddling IK (hip tilt for different foot heights)
