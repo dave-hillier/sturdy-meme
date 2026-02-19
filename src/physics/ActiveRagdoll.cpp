@@ -1,4 +1,5 @@
 #include "ActiveRagdoll.h"
+#include "PhysicsSystem.h"
 #include "PhysicsConversions.h"
 #include "JoltLayerConfig.h"
 
@@ -237,10 +238,12 @@ bool ActiveRagdoll::createBodies(
         // Offset by character position
         glm::vec3 worldPos = characterPosition + bonePos;
 
-        // Create a dynamic capsule body for this bone
-        state.bodyId = physicsWorld.createSphere(
+        // Create a dynamic sphere body for this bone on the RAGDOLL layer
+        // RAGDOLL layer avoids collision with CHARACTER and other ragdoll bones
+        state.bodyId = physicsWorld.createSphereOnLayer(
             worldPos,
             mapping.capsuleRadius + mapping.capsuleHalfHeight,
+            PhysicsLayers::RAGDOLL,
             mapping.mass,
             0.3f,  // friction
             0.1f   // restitution

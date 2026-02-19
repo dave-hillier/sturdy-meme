@@ -99,6 +99,9 @@ public:
                             float mass = 1.0f, float friction = 0.5f, float restitution = 0.3f);
     PhysicsBodyID createSphere(const glm::vec3& position, float radius,
                                float mass = 1.0f, float friction = 0.5f, float restitution = 0.3f);
+    // Create sphere on a specific collision layer (e.g. RAGDOLL)
+    PhysicsBodyID createSphereOnLayer(const glm::vec3& position, float radius, uint8_t layer,
+                                      float mass = 1.0f, float friction = 0.5f, float restitution = 0.3f);
 
     // Static rigid bodies
     PhysicsBodyID createStaticBox(const glm::vec3& position, const glm::vec3& halfExtents,

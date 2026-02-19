@@ -71,6 +71,9 @@ void CombatAnimationController::update(
                 break;
         }
 
+        // Apply computed motor strength to ragdoll
+        ragdoll_->setMotorStrength(motorStrength);
+
         // Drive ragdoll bodies toward animation targets
         ragdoll_->driveToAnimationPose(animationBoneMatrices_, characterTransform, deltaTime);
 

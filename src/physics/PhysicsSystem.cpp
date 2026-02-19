@@ -97,10 +97,11 @@ bool PhysicsWorld::initInternal() {
     );
 
     // Create physics system
-    const uint32_t maxBodies = 1024;
+    // Increased limits to accommodate ragdoll bodies (~15 per character)
+    const uint32_t maxBodies = 2048;
     const uint32_t numBodyMutexes = 0; // Use default
-    const uint32_t maxBodyPairs = 1024;
-    const uint32_t maxContactConstraints = 1024;
+    const uint32_t maxBodyPairs = 2048;
+    const uint32_t maxContactConstraints = 2048;
 
     physicsSystem_ = std::make_unique<JPH::PhysicsSystem>();
     physicsSystem_->Init(
@@ -352,6 +353,41 @@ PhysicsBodyID PhysicsWorld::createSphere(const glm::vec3& position, float radius
     JPH::Body* body = bodyInterface.CreateBody(bodySettings);
     if (!body) {
         SDL_Log("Failed to create sphere body");
+        return INVALID_BODY_ID;
+    }
+
+    bodyInterface.AddBody(body->GetID(), JPH::EActivation::Activate);
+    return body->GetID().GetIndexAndSequenceNumber();
+}
+
+PhysicsBodyID PhysicsWorld::createSphereOnLayer(const glm::vec3& position, float radius, uint8_t layer,
+                                                 float mass, float friction, float restitution) {
+    JPH::BodyInterface& bodyInterface = physicsSystem_->GetBodyInterface();
+
+    JPH::SphereShapeSettings sphereSettings(radius);
+    JPH::ShapeSettings::ShapeResult shapeResult = sphereSettings.Create();
+    if (!shapeResult.IsValid()) {
+        SDL_Log("Failed to create sphere shape");
+        return INVALID_BODY_ID;
+    }
+
+    JPH::BodyCreationSettings bodySettings(
+        shapeResult.Get(),
+        JPH::RVec3(position.x, position.y, position.z),
+        JPH::Quat::sIdentity(),
+        JPH::EMotionType::Dynamic,
+        layer
+    );
+    bodySettings.mFriction = friction;
+    bodySettings.mRestitution = restitution;
+    bodySettings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+    bodySettings.mMassPropertiesOverride.mMass = mass;
+    bodySettings.mLinearDamping = 0.5f;    // Higher damping for ragdoll stability
+    bodySettings.mAngularDamping = 0.5f;
+
+    JPH::Body* body = bodyInterface.CreateBody(bodySettings);
+    if (!body) {
+        SDL_Log("Failed to create sphere body on layer %u", layer);
         return INVALID_BODY_ID;
     }
 

@@ -860,6 +860,11 @@ void Application::shutdown() {
     renderer_->waitIdle();
     gui_.reset();  // RAII cleanup via destructor
     // InputSystem cleanup handled by destructor (RAII)
+
+    // Destroy ragdoll BEFORE physics (ragdoll destructor removes bodies from physics world)
+    playerRagdoll_.reset();
+    combatInitialized_ = false;
+
     physicsTerrainManager_.cleanup();
     physics_.reset();  // RAII cleanup via optional reset
     renderer_.reset();  // RAII cleanup via unique_ptr reset

@@ -10,7 +10,8 @@ namespace PhysicsLayers {
     constexpr uint8_t NON_MOVING = 0;
     constexpr uint8_t MOVING = 1;
     constexpr uint8_t CHARACTER = 2;
-    constexpr uint8_t NUM_LAYERS = 3;
+    constexpr uint8_t RAGDOLL = 3;      // Ragdoll bones: collide with NON_MOVING/MOVING, NOT with CHARACTER or self
+    constexpr uint8_t NUM_LAYERS = 4;
 }
 
 // Broad phase layers
@@ -27,6 +28,7 @@ public:
         objectToBroadPhase_[PhysicsLayers::NON_MOVING] = JPH::BroadPhaseLayer(BroadPhaseLayers::NON_MOVING);
         objectToBroadPhase_[PhysicsLayers::MOVING] = JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
         objectToBroadPhase_[PhysicsLayers::CHARACTER] = JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
+        objectToBroadPhase_[PhysicsLayers::RAGDOLL] = JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
     }
 
     uint32_t GetNumBroadPhaseLayers() const override {
@@ -58,11 +60,20 @@ public:
     bool ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const override {
         switch (inObject1) {
             case PhysicsLayers::NON_MOVING:
-                return inObject2 == PhysicsLayers::MOVING || inObject2 == PhysicsLayers::CHARACTER;
+                return inObject2 == PhysicsLayers::MOVING ||
+                       inObject2 == PhysicsLayers::CHARACTER ||
+                       inObject2 == PhysicsLayers::RAGDOLL;
             case PhysicsLayers::MOVING:
                 return true; // Moving objects collide with everything
             case PhysicsLayers::CHARACTER:
-                return true; // Character collides with everything
+                // Character collides with NON_MOVING and MOVING, but NOT ragdoll
+                // (ragdoll bones are inside the character capsule)
+                return inObject2 != PhysicsLayers::RAGDOLL;
+            case PhysicsLayers::RAGDOLL:
+                // Ragdoll collides with NON_MOVING and MOVING only
+                // No self-collision, no character collision
+                return inObject2 == PhysicsLayers::NON_MOVING ||
+                       inObject2 == PhysicsLayers::MOVING;
             default:
                 JPH_ASSERT(false);
                 return false;
@@ -79,6 +90,7 @@ public:
                 return inLayer2 == JPH::BroadPhaseLayer(BroadPhaseLayers::MOVING);
             case PhysicsLayers::MOVING:
             case PhysicsLayers::CHARACTER:
+            case PhysicsLayers::RAGDOLL:
                 return true;
             default:
                 JPH_ASSERT(false);
