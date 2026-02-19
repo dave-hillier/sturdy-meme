@@ -628,17 +628,15 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 vbInfo.raiiDevice = ctxPtr->raiiDevice;
                 vbInfo.graphicsQueue = ctxPtr->graphicsQueue;
                 vbInfo.commandPool = ctxPtr->commandPool;
-                // Share HDR depth buffer — V-buffer raster writes depth first,
-                // HDR pass loads it (loadOp=eLoad) to preserve V-buffer depth writes
-                vbInfo.sharedDepthImage = systems_->postProcess().getHDRDepthImage();
-                vbInfo.sharedDepthView = systems_->postProcess().getHDRDepthView();
+                // Use own depth buffer for now — depth sharing requires
+                // a working V-buffer pipeline (culler bootstrap + fallback draws).
+                // Once the V-buffer reliably produces output, enable shared depth
+                // via setDepthLoadOnHDRPass(true) and pass sharedDepthImage/View.
                 vbInfo.hasShaderDrawParameters = vulkanContext_->hasShaderDrawParameters();
                 auto visBuf = VisibilityBuffer::create(vbInfo);
                 if (visBuf) {
                     systems_->setVisibilityBuffer(std::move(visBuf));
-                    // Tell PostProcessSystem to load depth (not clear) in HDR pass
-                    systems_->postProcess().setDepthLoadOnHDRPass(true);
-                    SDL_Log("VisibilityBuffer: Initialized with shared HDR depth buffer");
+                    SDL_Log("VisibilityBuffer: Initialized (own depth buffer, non-interfering)");
                 }
             }
 

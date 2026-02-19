@@ -86,10 +86,12 @@ bool FrameGraphBuilder::build(
         frameGraph.addDependency(computeIds.gpuCull, hdr);
     }
 
-    // V-buffer cull pass depends on Compute (needs UBO/scene data uploaded)
-    // V-buffer raster depends on cull (needs indirect draw commands ready)
-    // HDR depends on V-buffer raster (shared depth buffer — V-buffer writes depth first,
-    // HDR loads it with loadOp=eLoad to preserve V-buffer depth writes)
+    // V-buffer runs alongside (not blocking) the traditional HDR path for now.
+    // Cull depends on Compute (needs UBO/scene data uploaded).
+    // Raster depends on cull (needs indirect draw commands).
+    // Resolve depends on raster + HDR (reads V-buffer, writes to HDR color).
+    // Post passes depend on HDR only — V-buffer is non-interfering until
+    // depth sharing and visBufferActive are enabled.
     if (visBufferIds.cull != FrameGraph::INVALID_PASS) {
         frameGraph.addDependency(computeIds.compute, visBufferIds.cull);
         if (visBufferIds.raster != FrameGraph::INVALID_PASS) {
@@ -100,11 +102,7 @@ bool FrameGraphBuilder::build(
         if (visBufferIds.cull == FrameGraph::INVALID_PASS) {
             frameGraph.addDependency(computeIds.compute, visBufferIds.raster);
         }
-        frameGraph.addDependency(visBufferIds.raster, hdr);
     }
-
-    // V-buffer resolve depends on both raster (needs V-buffer populated)
-    // and HDR (resolve writes resolved materials into HDR color via imageStore)
     if (visBufferIds.resolve != FrameGraph::INVALID_PASS) {
         if (visBufferIds.raster != FrameGraph::INVALID_PASS) {
             frameGraph.addDependency(visBufferIds.raster, visBufferIds.resolve);
@@ -112,14 +110,12 @@ bool FrameGraphBuilder::build(
         frameGraph.addDependency(hdr, visBufferIds.resolve);
     }
 
-    // Post-HDR passes depend on HDR (and VisBuffer resolve if active)
-    FrameGraph::PassId postDep = (visBufferIds.resolve != FrameGraph::INVALID_PASS)
-        ? visBufferIds.resolve : hdr;
-    frameGraph.addDependency(postDep, waterIds.ssr);
-    frameGraph.addDependency(postDep, waterIds.waterTileCull);
-    frameGraph.addDependency(postDep, postIds.hiZ);
-    frameGraph.addDependency(postDep, postIds.bilateralGrid);
-    frameGraph.addDependency(postDep, postIds.godRays);
+    // Post-HDR passes depend on HDR
+    frameGraph.addDependency(hdr, waterIds.ssr);
+    frameGraph.addDependency(hdr, waterIds.waterTileCull);
+    frameGraph.addDependency(hdr, postIds.hiZ);
+    frameGraph.addDependency(hdr, postIds.bilateralGrid);
+    frameGraph.addDependency(hdr, postIds.godRays);
 
     // Bloom depends on HiZ
     frameGraph.addDependency(postIds.hiZ, postIds.bloom);

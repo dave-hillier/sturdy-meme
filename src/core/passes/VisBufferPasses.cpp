@@ -24,6 +24,12 @@ namespace VisBufferPasses {
 // Persistent cluster state (survives across frames)
 // ============================================================================
 
+// CPU-side draw data matching shader's DrawData struct: {instanceId, triangleOffset}
+struct CPUDrawData {
+    uint32_t instanceId;
+    uint32_t triangleOffset;
+};
+
 struct ClusterState {
     bool built = false;
 
@@ -31,6 +37,12 @@ struct ClusterState {
     std::unordered_map<const Mesh*, ClusteredMesh> clusteredMeshes;
 
     uint32_t totalDrawCommands = 0;
+
+    // CPU fallback: pre-built indirect commands and draw data for all leaf clusters
+    // Used when TwoPassCuller hasn't bootstrapped yet
+    std::vector<VkDrawIndexedIndirectCommand> fallbackIndirectCmds;
+    std::vector<CPUDrawData> fallbackDrawData;
+    bool fallbackUploaded = false;
 };
 
 // Static cluster state - persists across frames
@@ -108,26 +120,44 @@ static bool buildClusterState(RendererSystems& systems) {
     // This ensures triangleIds in the raster output match the resolve buffer
     visBuf->buildGlobalBuffersFromClusters(meshClusterPairs);
 
-    // Count total draw commands (leaf clusters x instances)
-    uint32_t totalDraws = 0;
+    // Build CPU fallback indirect commands and draw data for all leaf clusters.
+    // Each (instance, leaf cluster) pair gets one draw command.
+    // This is used when TwoPassCuller hasn't bootstrapped yet.
+    s_clusterState.fallbackIndirectCmds.clear();
+    s_clusterState.fallbackDrawData.clear();
+
+    uint32_t instanceId = 0;
     for (size_t i = 0; i < sceneObjects.size(); ++i) {
         if (sceneObjects[i].gpuSkinned) continue;
-        {
-        }
         const auto& obj = sceneObjects[i];
-        if (!obj.mesh) continue;
+        if (!obj.mesh) { instanceId++; continue; }
         auto it = s_clusterState.clusteredMeshes.find(obj.mesh);
-        if (it == s_clusterState.clusteredMeshes.end()) continue;
+        if (it == s_clusterState.clusteredMeshes.end()) { instanceId++; continue; }
+
         for (const auto& cluster : it->second.clusters) {
-            if (cluster.lodLevel == 0) totalDraws++;
+            if (cluster.lodLevel != 0) continue;  // Only leaf clusters
+
+            VkDrawIndexedIndirectCommand indirectCmd{};
+            indirectCmd.indexCount = cluster.indexCount;
+            indirectCmd.instanceCount = 1;
+            indirectCmd.firstIndex = cluster.firstIndex;
+            indirectCmd.vertexOffset = static_cast<int32_t>(cluster.firstVertex);
+            indirectCmd.firstInstance = 0;
+            s_clusterState.fallbackIndirectCmds.push_back(indirectCmd);
+
+            CPUDrawData dd{};
+            dd.instanceId = instanceId;
+            dd.triangleOffset = cluster.firstIndex / 3;  // Triangle offset for V-buffer ID
+            s_clusterState.fallbackDrawData.push_back(dd);
         }
+        instanceId++;
     }
 
-    s_clusterState.totalDrawCommands = totalDraws;
+    s_clusterState.totalDrawCommands = static_cast<uint32_t>(s_clusterState.fallbackIndirectCmds.size());
     s_clusterState.built = true;
 
     SDL_Log("VisBufferPasses: Cluster state built: %u draw commands from %zu meshes",
-            totalDraws, meshClusterPairs.size());
+            s_clusterState.totalDrawCommands, meshClusterPairs.size());
     return true;
 }
 
@@ -279,6 +309,50 @@ static void executeRasterPass(FrameGraph::RenderContext& ctx, RendererSystems& s
 
     vk::CommandBuffer vkCmd(cmd);
 
+    // Determine draw source: GPU culler or CPU fallback
+    bool useGPUCulling = (culler && culler->hasDescriptorSets());
+
+    // CPU fallback: upload indirect commands + draw data BEFORE the render pass
+    // (vkCmdUpdateBuffer cannot be called inside a render pass)
+    if (!useGPUCulling && s_clusterState.built
+        && s_clusterState.totalDrawCommands > 0 && culler) {
+
+        uint32_t drawCount = std::min(s_clusterState.totalDrawCommands,
+                                       culler->getMaxDrawCommands());
+
+        constexpr VkDeviceSize UPDATE_LIMIT = 65536;
+
+        VkBuffer indirectBuf = culler->getPass1IndirectBuffer(frameIndex);
+        VkDeviceSize indirectSize = drawCount * sizeof(VkDrawIndexedIndirectCommand);
+        for (VkDeviceSize off = 0; off < indirectSize; off += UPDATE_LIMIT) {
+            VkDeviceSize chunk = std::min(UPDATE_LIMIT, indirectSize - off);
+            vkCmdUpdateBuffer(cmd, indirectBuf, off, chunk,
+                reinterpret_cast<const char*>(s_clusterState.fallbackIndirectCmds.data()) + off);
+        }
+
+        VkBuffer drawDataBuf = culler->getPass1DrawDataBuffer(frameIndex);
+        VkDeviceSize drawDataSize = drawCount * sizeof(CPUDrawData);
+        for (VkDeviceSize off = 0; off < drawDataSize; off += UPDATE_LIMIT) {
+            VkDeviceSize chunk = std::min(UPDATE_LIMIT, drawDataSize - off);
+            vkCmdUpdateBuffer(cmd, drawDataBuf, off, chunk,
+                reinterpret_cast<const char*>(s_clusterState.fallbackDrawData.data()) + off);
+        }
+
+        VkBuffer drawCountBuf = culler->getPass1DrawCountBuffer(frameIndex);
+        vkCmdUpdateBuffer(cmd, drawCountBuf, 0, sizeof(uint32_t), &drawCount);
+
+        // Barrier: transfer → indirect read + shader read
+        VkMemoryBarrier memBarrier{};
+        memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        memBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        memBarrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT
+                                 | VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+    }
+
     // Begin V-buffer render pass
     VkExtent2D extent = visBuf->getExtent();
 
@@ -323,20 +397,23 @@ static void executeRasterPass(FrameGraph::RenderContext& ctx, RendererSystems& s
     vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
     vkCmd.bindIndexBuffer(vk::Buffer(clusterBuf->getIndexBuffer()), 0, vk::IndexType::eUint32);
 
-    // GPU-driven indirect draw from TwoPassCuller pass 1 output
-    if (culler && culler->hasDescriptorSets()) {
+    // Issue draws — either from GPU culler or CPU-uploaded fallback
+    // Both paths use the same indirect buffers (culler wrote them, or we uploaded above)
+    if (culler && (useGPUCulling || s_clusterState.totalDrawCommands > 0)) {
+        uint32_t maxDraws = useGPUCulling
+            ? culler->getMaxDrawCommands()
+            : std::min(s_clusterState.totalDrawCommands, culler->getMaxDrawCommands());
+
         if (culler->supportsDrawIndirectCount()) {
-            // GPU-driven draw count: only draws commands actually written by cull shader
             vkCmdDrawIndexedIndirectCount(cmd,
                 culler->getPass1IndirectBuffer(frameIndex), 0,
                 culler->getPass1DrawCountBuffer(frameIndex), 0,
-                culler->getMaxDrawCommands(),
+                maxDraws,
                 sizeof(VkDrawIndexedIndirectCommand));
         } else {
-            // Fallback: draw all slots (unused slots zeroed by cull pass clear)
             vkCmdDrawIndexedIndirect(cmd,
                 culler->getPass1IndirectBuffer(frameIndex), 0,
-                culler->getMaxDrawCommands(),
+                maxDraws,
                 sizeof(VkDrawIndexedIndirectCommand));
         }
     }
