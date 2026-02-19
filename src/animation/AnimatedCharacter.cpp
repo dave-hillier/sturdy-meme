@@ -448,7 +448,24 @@ void AnimatedCharacter::update(float deltaTime, VmaAllocator allocator, VkDevice
     // No mesh re-upload needed - the vertex shader applies skinning
 }
 
+void AnimatedCharacter::setBoneMatrixOverride(const std::vector<glm::mat4>& matrices) {
+    boneMatrixOverride_ = matrices;
+    hasBoneMatrixOverride_ = true;
+}
+
+void AnimatedCharacter::clearBoneMatrixOverride() {
+    hasBoneMatrixOverride_ = false;
+}
+
 void AnimatedCharacter::computeBoneMatrices(std::vector<glm::mat4>& outBoneMatrices) const {
+    // If combat/ragdoll override is set, use those matrices and consume the override
+    if (hasBoneMatrixOverride_ && !boneMatrixOverride_.empty()) {
+        outBoneMatrices = boneMatrixOverride_;
+        cachedBoneMatrices_ = outBoneMatrices;
+        hasBoneMatrixOverride_ = false;
+        return;
+    }
+
     // If animation update was skipped and we have cached matrices, use those
     if (skipAnimationUpdate_ && !cachedBoneMatrices_.empty()) {
         outBoneMatrices = cachedBoneMatrices_;

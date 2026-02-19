@@ -1585,4 +1585,12 @@ void Application::updateCombatSystem(float deltaTime) {
 
     // Update combat animation controller (drives ragdoll, blends poses)
     combatAnimController_.update(deltaTime, combatState, charTransform, movementSpeed, isGrounded);
+
+    // Feed combat-influenced bone matrices back to the character for rendering.
+    // The override is consumed on the next computeBoneMatrices call (during buildFrame).
+    auto& character = sceneBuilder.getAnimatedCharacter();
+    const auto& finalMatrices = combatAnimController_.getFinalBoneMatrices();
+    if (!finalMatrices.empty()) {
+        character.setBoneMatrixOverride(finalMatrices);
+    }
 }

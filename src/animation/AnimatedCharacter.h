@@ -112,6 +112,11 @@ public:
     // Get bone matrices for GPU skinning
     void computeBoneMatrices(std::vector<glm::mat4>& outBoneMatrices) const;
 
+    // Override bone matrices for this frame (e.g. from combat ragdoll blending).
+    // The override is consumed on the next computeBoneMatrices call.
+    void setBoneMatrixOverride(const std::vector<glm::mat4>& matrices);
+    void clearBoneMatrixOverride();
+
     // LOD support - animation update control
     // When skipAnimation is true, reuses cached bone matrices from last frame
     void setSkipAnimationUpdate(bool skip) { skipAnimationUpdate_ = skip; }
@@ -259,6 +264,10 @@ private:
     bool skipAnimationUpdate_ = false;
     uint32_t lodLevel_ = 0;
     mutable std::vector<glm::mat4> cachedBoneMatrices_;
+
+    // Combat/ragdoll bone matrix override
+    mutable std::vector<glm::mat4> boneMatrixOverride_;
+    mutable bool hasBoneMatrixOverride_ = false;
 
     // Bone LOD support
     std::vector<BoneCategory> boneCategories_;  // Category for each bone
