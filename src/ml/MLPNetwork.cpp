@@ -66,6 +66,9 @@ void MLPNetwork::forward(const Tensor& input, Tensor& output) const {
             case Activation::Tanh:
                 Tensor::tanh(dest);
                 break;
+            case Activation::ELU:
+                Tensor::elu(dest);
+                break;
             case Activation::None:
                 break;
         }

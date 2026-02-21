@@ -20,7 +20,7 @@
 #include "ecs/Systems.h"
 #include "ecs/EntityFactory.h"
 #include "ecs/ECSMaterialDemo.h"
-#include "unicon/UniConController.h"
+#include "ml/unicon/Controller.h"
 
 class Application {
 public:
@@ -85,7 +85,7 @@ private:
     std::vector<ArticulatedBody> ragdolls_;
 
     // UniCon ML policy controller for ragdolls
-    UniConController uniconController_;
+    ml::unicon::Controller uniconController_;
 
     bool running = false;
     // Walk speed matches animation root motion: 158.42 cm / 1.10s * 0.01 scale = 1.44 m/s

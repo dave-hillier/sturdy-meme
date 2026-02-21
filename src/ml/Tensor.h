@@ -86,6 +86,15 @@ public:
         }
     }
 
+    // ELU activation in-place: f(x) = x if x > 0, else alpha * (exp(x) - 1)
+    static void elu(Tensor& t, float alpha = 1.0f) {
+        for (float& v : t.data_) {
+            if (v < 0.0f) {
+                v = alpha * (std::exp(v) - 1.0f);
+            }
+        }
+    }
+
     // L2 normalize in-place
     static void l2Normalize(Tensor& t) {
         float norm = 0.0f;

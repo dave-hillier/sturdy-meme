@@ -1,10 +1,12 @@
 #pragma once
 
-#include "ArticulatedBody.h"
+#include "../../physics/ArticulatedBody.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <vector>
+
+namespace ml::unicon {
 
 // A single future target pose for the executor to track.
 // All positions/rotations are in world space; the encoder transforms them
@@ -43,16 +45,8 @@ struct TargetFrame {
 // Full observation: (1 + tau) * (11 + 10J) + tau * 7
 class StateEncoder {
 public:
-    // Configure for a specific humanoid.
-    // numJoints: number of body parts (e.g. 20 for UniCon humanoid)
-    // targetFrameCount: tau, number of future target frames (paper uses 1-5)
     void configure(size_t numJoints, size_t targetFrameCount);
 
-    // Build the full observation vector from current physics state + target frames.
-    // body: the articulated body to read current state from
-    // physics: physics world for state queries
-    // targetFrames: tau future target poses (must have targetFrameCount entries)
-    // observation: output vector, resized to getObservationDim()
     void encode(const ArticulatedBody& body,
                 const PhysicsWorld& physics,
                 const std::vector<TargetFrame>& targetFrames,
@@ -61,17 +55,11 @@ public:
     size_t getObservationDim() const;
     size_t getNumJoints() const { return numJoints_; }
     size_t getTargetFrameCount() const { return tau_; }
-
-    // Dimension of a single frame encoding o(X): 11 + 10J
     size_t getFrameEncodingDim() const;
 
-    // Dimension of a single root offset encoding y(X, X~): 7
     static constexpr size_t ROOT_OFFSET_DIM = 7;
 
 private:
-    // Encode a single character state into the observation vector at the given offset.
-    // All values are transformed into rootLocalFrame coordinates.
-    // Returns the number of floats written.
     size_t encodeFrame(const glm::vec3& rootPos, const glm::quat& rootRot,
                        const glm::vec3& rootLinVel, const glm::vec3& rootAngVel,
                        const std::vector<glm::vec3>& jointPositions,
@@ -79,8 +67,6 @@ private:
                        const std::vector<glm::vec3>& jointAngVels,
                        float* out) const;
 
-    // Encode root offset y(X_actual, X_target) at the given output pointer.
-    // Returns the number of floats written (always ROOT_OFFSET_DIM = 7).
     size_t encodeRootOffset(const glm::vec3& actualRootPos, const glm::quat& actualRootRot,
                             const glm::vec3& targetRootPos, const glm::quat& targetRootRot,
                             float* out) const;
@@ -88,3 +74,5 @@ private:
     size_t numJoints_ = 0;
     size_t tau_ = 1;
 };
+
+} // namespace ml::unicon

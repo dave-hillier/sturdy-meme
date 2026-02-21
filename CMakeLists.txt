@@ -192,11 +192,9 @@ set(SOURCES
     src/physics/PhysicsDebugRenderer.cpp
     src/physics/RagdollBuilder.cpp
     src/physics/RagdollInstance.cpp
-    # ML inference
-    src/core/ml/MLPPolicy.cpp
-    # UniCon
-    src/unicon/StateEncoder.cpp
-    src/unicon/UniConController.cpp
+    # UniCon (target-frame tracking controller)
+    src/ml/unicon/Controller.cpp
+    src/ml/unicon/StateEncoder.cpp
     # Terrain
     src/terrain/TerrainSystem.cpp
     src/terrain/TerrainDescriptorSets.cpp
@@ -330,7 +328,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core/pipeline
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core/material
     ${CMAKE_CURRENT_SOURCE_DIR}/src/core/asset
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/ml
     ${CMAKE_CURRENT_SOURCE_DIR}/src/debug
     ${CMAKE_CURRENT_SOURCE_DIR}/src/gui
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ik
@@ -345,7 +342,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture
     ${CMAKE_CURRENT_SOURCE_DIR}/src/training
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/unicon
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ml/unicon
     ${CMAKE_CURRENT_SOURCE_DIR}/src/vegetation
     ${CMAKE_CURRENT_SOURCE_DIR}/src/water
     ${CMAKE_CURRENT_SOURCE_DIR}/generated
@@ -663,51 +660,7 @@ if(SBSAR_MANIFESTS)
 endif()
 
 # ============================================================================
-# UNICON C++ TRAINING EXECUTABLE
-# ============================================================================
-
-add_executable(train_unicon
-    src/training/main.cpp
-    src/training/Trainer.cpp
-    src/training/TrainingMLP.cpp
-    src/training/TrainingEnv.cpp
-    src/training/MotionClip.cpp
-    src/training/RewardFunction.cpp
-    src/training/RolloutBuffer.cpp
-    src/training/TrainingVisualizer.cpp
-    # Shared physics (no Vulkan deps after HumanoidConfig extraction)
-    src/physics/PhysicsSystem.cpp
-    src/physics/ArticulatedBody.cpp
-    src/physics/JoltLayerConfig.cpp
-    src/physics/JoltRuntime.cpp
-    src/physics/CharacterController.cpp
-    # UniCon state encoder
-    src/unicon/StateEncoder.cpp
-)
-
-target_include_directories(train_unicon PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/training
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/physics
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/unicon
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/scene
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain
-)
-
-target_link_libraries(train_unicon PRIVATE
-    SDL3::SDL3
-    glm::glm
-    Jolt::Jolt
-    nlohmann_json::nlohmann_json
-)
-
-target_compile_definitions(train_unicon PRIVATE
-    GLM_FORCE_RADIANS
-    GLM_FORCE_DEPTH_ZERO_TO_ONE
-)
-
-# ============================================================================
-# UNICON TRAINING PIPELINE (Python)
+# ML TRAINING PIPELINE (Python)
 # ============================================================================
 
 # Find Python for running training/export scripts

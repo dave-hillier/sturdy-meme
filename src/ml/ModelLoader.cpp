@@ -30,6 +30,7 @@ static Activation uint32ToActivation(uint32_t v) {
     switch (v) {
         case 1: return Activation::ReLU;
         case 2: return Activation::Tanh;
+        case 3: return Activation::ELU;
         default: return Activation::None;
     }
 }
@@ -38,6 +39,7 @@ static uint32_t activationToUint32(Activation a) {
     switch (a) {
         case Activation::ReLU: return 1;
         case Activation::Tanh: return 2;
+        case Activation::ELU:  return 3;
         case Activation::None: return 0;
     }
     return 0;

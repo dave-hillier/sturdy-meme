@@ -11,7 +11,8 @@ namespace ml {
 enum class Activation {
     None,
     ReLU,
-    Tanh
+    Tanh,
+    ELU
 };
 
 // A single fully-connected layer: output = activation(W * input + bias)

@@ -34,7 +34,7 @@
 #include "core/interfaces/IPlayerControl.h"
 #include "DebugLineSystem.h"
 #include "npc/NPCSimulation.h"
-#include "unicon/UniConController.h"
+#include "ml/unicon/Controller.h"
 #include "Texture.h"
 
 #ifdef JPH_DEBUG_RENDERER
