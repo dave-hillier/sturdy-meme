@@ -1,10 +1,12 @@
 #include "GuiGrassTab.h"
 #include "core/interfaces/IGrassControl.h"
+#include "core/interfaces/IEnvironmentControl.h"
+#include "EnvironmentSettings.h"
 #include "vegetation/GrassConstants.h"
 #include <imgui.h>
 #include <cmath>
 
-void GuiGrassTab::render(IGrassControl& grass) {
+void GuiGrassTab::render(IGrassControl& grass, IEnvironmentControl& envControl) {
     // System Overview
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.9f, 0.5f, 1.0f));
     ImGui::Text("GRASS SYSTEM");
@@ -115,4 +117,17 @@ void GuiGrassTab::render(IGrassControl& grass) {
     if (ImGui::Checkbox("Show Tile Boundaries", &tileBoundsEnabled)) {
         grass.setTileBoundsVisualizationEnabled(tileBoundsEnabled);
     }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+
+    // Player Interaction (moved from Atmosphere window)
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.9f, 0.5f, 1.0f));
+    ImGui::Text("PLAYER INTERACTION");
+    ImGui::PopStyleColor();
+    ImGui::Separator();
+
+    auto& env = envControl.getEnvironmentSettings();
+    ImGui::SliderFloat("Displacement Decay", &env.grassDisplacementDecay, 0.1f, 5.0f);
+    ImGui::SliderFloat("Max Displacement", &env.grassMaxDisplacement, 0.0f, 2.0f);
 }

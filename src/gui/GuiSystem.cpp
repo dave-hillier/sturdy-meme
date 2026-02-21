@@ -449,7 +449,7 @@ void GuiSystem::renderGrassWindow(GuiInterfaces& ui) {
     ImGui::SetNextWindowSize(ImVec2(320, 450), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Grass", &windowStates.showGrass)) {
-        GuiGrassTab::render(ui.grass);
+        GuiGrassTab::render(ui.grass, ui.environment);
     }
     ImGui::End();
 }

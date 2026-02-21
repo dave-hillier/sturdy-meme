@@ -1,6 +1,7 @@
 #pragma once
 
 class IGrassControl;
+class IEnvironmentControl;
 
 /**
  * GUI tab for grass system controls.
@@ -9,5 +10,5 @@ class IGrassControl;
  */
 class GuiGrassTab {
 public:
-    static void render(IGrassControl& grass);
+    static void render(IGrassControl& grass, IEnvironmentControl& envControl);
 };
