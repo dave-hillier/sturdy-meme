@@ -82,6 +82,7 @@ set(SOURCES
     src/core/passes/WaterPasses.cpp
     src/core/passes/HDRPass.cpp
     src/core/passes/HDRPassRecorder.cpp
+    src/core/passes/HDRDrawableFactory.cpp
     src/core/passes/HDRPassResources.cpp
     src/core/passes/SceneObjectsDrawable.cpp
     src/core/passes/SkinnedCharDrawable.cpp

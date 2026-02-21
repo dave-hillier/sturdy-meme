@@ -5,6 +5,7 @@
 #include "MaterialDescriptorFactory.h"
 #include "passes/ShadowPassRecorder.h"
 #include "passes/HDRPassRecorder.h"
+#include "passes/HDRDrawableFactory.h"
 #include "InitProfiler.h"
 #include "QueueSubmitDiagnostics.h"
 #include "core/pipeline/FrameGraphBuilder.h"
@@ -29,7 +30,6 @@
 #include "SceneBuilder.h"
 #include "Mesh.h"
 // Time and environment
-#include "WindSystem.h"
 #include "TimeSystem.h"
 #include "CelestialCalculator.h"
 #include "EnvironmentSettings.h"
@@ -42,7 +42,6 @@
 #include "CloudShadowSystem.h"
 #include "AtmosphereLUTSystem.h"
 #include "FroxelSystem.h"
-#include "SkySystem.h"
 // Animation and debug
 #include "SkinnedMeshRenderer.h"
 #include "npc/NPCRenderer.h"
@@ -55,36 +54,11 @@
 #include "interfaces/IDebugControl.h"
 #include "controls/DebugControlSubsystem.h"
 #include "threading/TaskScheduler.h"
-// Vegetation
+// Vegetation and weather (advanceBufferSet / endFrame in buildFrame)
 #include "GrassSystem.h"
-#include "ScatterSystem.h"
-#include "TreeSystem.h"
-#include "TreeRenderer.h"
-#include "TreeLODSystem.h"
-#include "ImpostorCullSystem.h"
-#include "DisplacementSystem.h"
-#include "CullCommon.h"  // For extractFrustumPlanes
-// Water
-#include "WaterSystem.h"
-#include "WaterTileCull.h"
-#include "WaterGBuffer.h"
-#include "WaterDisplacement.h"
-#include "FlowMapGenerator.h"
-#include "FoamBuffer.h"
-#include "SSRSystem.h"
-// Post-processing
-#include "BilateralGridSystem.h"
-// Geometry
-#include "CatmullClarkSystem.h"
-// Weather
 #include "WeatherSystem.h"
 #include "LeafSystem.h"
-// HDR drawable registration
-#include "passes/HDRDrawableAdapters.h"
-#include "passes/SceneObjectsDrawable.h"
-#include "passes/SkinnedCharDrawable.h"
-#include "passes/DebugLinesDrawable.h"
-#include "passes/WaterDrawable.h"
+#include "WaterTileCull.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -577,77 +551,7 @@ void Renderer::recordShadowPass(VkCommandBuffer cmd, uint32_t frameIndex, float 
 void Renderer::createHDRPassRecorder() {
     hdrPassRecorder_ = std::make_unique<HDRPassRecorder>(
         systems_->profiler(), systems_->postProcess());
-
-    // Draw order constants - controls rendering sequence within the HDR pass.
-    // Slot assignment groups drawables for parallel secondary command buffer recording.
-    // Slot 0: geometry base, Slot 1: scene meshes, Slot 2: effects/vegetation/debug
-
-    // Slot 0: Sky + Terrain + Catmull-Clark (geometry base)
-    hdrPassRecorder_->registerDrawable(
-        std::make_unique<RecordableDrawable>(systems_->sky()),
-        0, 0, "HDR:Sky");
-
-    hdrPassRecorder_->registerDrawable(
-        std::make_unique<TerrainDrawable>(systems_->terrain()),
-        100, 0, "HDR:Terrain");
-
-    hdrPassRecorder_->registerDrawable(
-        std::make_unique<RecordableDrawable>(systems_->catmullClark()),
-        200, 0, "HDR:CatmullClark");
-
-    // Slot 1: Scene Objects + Skinned Characters (scene meshes)
-    {
-        SceneObjectsDrawable::Resources sceneRes;
-        sceneRes.scene = &systems_->scene();
-        sceneRes.globalBuffers = &systems_->globalBuffers();
-        sceneRes.shadow = &systems_->shadow();
-        sceneRes.wind = &systems_->wind();
-        sceneRes.ecsWorld = systems_->ecsWorld();
-        sceneRes.rocks = &systems_->rocks();
-        sceneRes.detritus = systems_->detritus();
-        sceneRes.tree = systems_->tree();
-        sceneRes.treeRenderer = systems_->treeRenderer();
-        sceneRes.treeLOD = systems_->treeLOD();
-        sceneRes.impostorCull = systems_->impostorCull();
-
-        hdrPassRecorder_->registerDrawable(
-            std::make_unique<SceneObjectsDrawable>(sceneRes),
-            300, 1, "HDR:SceneObjects");
-    }
-
-    {
-        SkinnedCharDrawable::Resources charRes;
-        charRes.scene = &systems_->scene();
-        charRes.skinnedMesh = &systems_->skinnedMesh();
-        charRes.npcRenderer = systems_->npcRenderer();
-
-        hdrPassRecorder_->registerDrawable(
-            std::make_unique<SkinnedCharDrawable>(charRes),
-            400, 1, "HDR:SkinnedChar");
-    }
-
-    // Slot 2: Grass + Water + Leaves + Weather + Debug (effects/vegetation)
-    hdrPassRecorder_->registerDrawable(
-        std::make_unique<AnimatedRecordableDrawable>(systems_->grass()),
-        500, 2, "HDR:Grass");
-
-    hdrPassRecorder_->registerDrawable(
-        std::make_unique<WaterDrawable>(
-            systems_->water(),
-            systems_->hasWaterTileCull() ? &systems_->waterTileCull() : nullptr),
-        600, 2, "HDR:Water");
-
-    hdrPassRecorder_->registerDrawable(
-        std::make_unique<AnimatedRecordableDrawable>(systems_->leaf()),
-        700, 2, "HDR:Leaves");
-
-    hdrPassRecorder_->registerDrawable(
-        std::make_unique<AnimatedRecordableDrawable>(systems_->weather()),
-        800, 2, "HDR:Weather");
-
-    hdrPassRecorder_->registerDrawable(
-        std::make_unique<DebugLinesDrawable>(systems_->debugLine(), systems_->postProcess()),
-        900, 2, "HDR:DebugLines");
+    HDRDrawableFactory::registerAll(*hdrPassRecorder_, *systems_);
 }
 
 void Renderer::recordHDRPass(VkCommandBuffer cmd, uint32_t frameIndex, float grassTime) {
