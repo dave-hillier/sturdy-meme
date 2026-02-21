@@ -759,7 +759,6 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf_shadow.frag.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_geometry.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf.comp.spv
-    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf_cull.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_filter.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf_cull_phase3.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_impostor_cull.comp.spv
@@ -876,7 +875,7 @@ if(SHADER_COMPILE_CMD)
         shadow_instanced.vert
         tree_branch_shadow_cull.comp
         tree_leaf_shadow.vert tree_leaf_shadow.frag
-        tree_geometry.comp tree_leaf.comp tree_leaf_cull.comp tree_filter.comp tree_leaf_cull_phase3.comp tree_impostor_cull.comp tree_cell_cull.comp
+        tree_geometry.comp tree_leaf.comp tree_filter.comp tree_leaf_cull_phase3.comp tree_impostor_cull.comp tree_cell_cull.comp
         tree_impostor.vert tree_impostor.frag
         tree_impostor_capture.vert tree_impostor_capture.frag
         tree_impostor_capture_leaf.vert
@@ -1185,7 +1184,6 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf_shadow.frag.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_geometry.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf.comp.spv
-        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf_cull.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_filter.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_leaf_cull_phase3.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/tree_impostor_cull.comp.spv

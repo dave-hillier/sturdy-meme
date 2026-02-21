@@ -566,16 +566,6 @@ bool TreeRenderer::isSpatialIndexEnabled() const {
     return leafCulling_ && leafCulling_->isSpatialIndexEnabled();
 }
 
-void TreeRenderer::setTwoPhaseLeafCulling(bool enabled) {
-    if (leafCulling_) {
-        leafCulling_->setTwoPhaseEnabled(enabled);
-    }
-}
-
-bool TreeRenderer::isTwoPhaseLeafCullingEnabled() const {
-    return leafCulling_ && leafCulling_->isTwoPhaseEnabled();
-}
-
 void TreeRenderer::recordBranchShadowCulling(vk::CommandBuffer cmd, uint32_t frameIndex,
                                               uint32_t cascadeIndex,
                                               const glm::vec4* cascadeFrustumPlanes,

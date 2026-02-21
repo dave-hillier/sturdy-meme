@@ -222,20 +222,6 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
             }
             ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.5f, 1.0f), "  8x8 grid = 64 views");
 
-            // Two-phase leaf culling toggle
-            auto* treeRenderer = treeControl.getSystems().treeRenderer();
-            if (treeRenderer) {
-                bool twoPhase = treeRenderer->isTwoPhaseLeafCullingEnabled();
-                if (ImGui::Checkbox("Two-Phase Leaf Culling", &twoPhase)) {
-                    treeRenderer->setTwoPhaseLeafCulling(twoPhase);
-                }
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Use efficient two-phase culling:\n"
-                                      "1. Filter visible trees from cells\n"
-                                      "2. Cull leaves only for visible trees");
-                }
-            }
-
             // Temporal coherence toggle (Phase 5)
             auto* impostorCull = treeControl.getSystems().impostorCull();
             if (impostorCull) {
@@ -325,6 +311,7 @@ void GuiTreeTab::render(ITreeControl& treeControl) {
             }
 
             // GPU Branch Shadow Culling toggle
+            auto* treeRenderer = treeControl.getSystems().treeRenderer();
             if (treeRenderer && treeRenderer->isBranchShadowCullingAvailable()) {
                 ImGui::Spacing();
                 bool gpuCulling = treeRenderer->isBranchShadowCullingEnabled();

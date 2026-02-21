@@ -181,10 +181,6 @@ public:
     // Check if leaf culling is enabled
     bool isLeafCullingEnabled() const;
 
-    // Enable/disable two-phase culling
-    void setTwoPhaseLeafCulling(bool enabled);
-    bool isTwoPhaseLeafCullingEnabled() const;
-
     // ECS integration
     void setECSWorld(ecs::World* world) { ecsWorld_ = world; }
     ecs::World* getECSWorld() const { return ecsWorld_; }

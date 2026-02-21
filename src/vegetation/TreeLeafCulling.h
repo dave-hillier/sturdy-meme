@@ -21,20 +21,6 @@
 class TreeSystem;
 class TreeLODSystem;
 
-// Uniforms for tree leaf culling compute shader (must match shader layout)
-struct TreeLeafCullUniforms {
-    glm::vec4 cameraPosition;
-    glm::vec4 frustumPlanes[6];
-    float maxDrawDistance;
-    float lodTransitionStart;
-    float lodTransitionEnd;
-    float maxLodDropRate;
-    uint32_t numTrees;
-    uint32_t totalLeafInstances;
-    uint32_t maxLeavesPerType;
-    uint32_t _pad1;
-};
-
 // Uniforms for cell culling compute shader
 struct TreeCellCullUniforms {
     glm::vec4 cameraPosition;
@@ -56,13 +42,6 @@ struct TreeFilterUniforms {
 };
 
 // Params structs for shader-specific data (separate from shared CullingUniforms)
-struct LeafCullParams {
-    uint32_t numTrees;
-    uint32_t totalLeafInstances;
-    uint32_t maxLeavesPerType;
-    uint32_t _pad1;
-};
-
 struct CellCullParams {
     uint32_t numCells;
     uint32_t treesPerWorkgroup;
@@ -177,12 +156,8 @@ public:
                        const glm::vec4* frustumPlanes);
 
     // Check if culling is enabled
-    bool isEnabled() const { return cullPipeline_.has_value(); }
+    bool isEnabled() const { return cellCullPipeline_.has_value(); }
     bool isSpatialIndexEnabled() const { return spatialIndex_ != nullptr && spatialIndex_->isValid(); }
-
-    // Enable/disable two-phase culling
-    void setTwoPhaseEnabled(bool enabled) { twoPhaseEnabled_ = enabled; }
-    bool isTwoPhaseEnabled() const { return twoPhaseEnabled_; }
 
     // Set culling parameters
     void setParams(const CullingParams& params) { params_ = params; }
@@ -209,16 +184,13 @@ public:
 private:
     bool init(const InitInfo& info);
 
-    bool createLeafCullPipeline();
-    bool createLeafCullBuffers(uint32_t maxLeafInstances, uint32_t numTrees);
+    bool createSharedOutputBuffers(uint32_t numTrees);
     bool createCellCullPipeline();
     bool createCellCullBuffers();
     bool createTreeFilterPipeline();
     bool createTreeFilterBuffers(uint32_t maxTrees);
     bool createTwoPhaseLeafCullPipeline();
     bool createTwoPhaseLeafCullDescriptorSets();
-
-    void updateCullDescriptorSets(const TreeSystem& treeSystem);
 
     const vk::raii::Device* raiiDevice_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
@@ -232,26 +204,14 @@ private:
     CullingParams params_;
 
     // =========================================================================
-    // Single-phase Leaf Culling Pipeline
+    // Shared Output Buffers
     // =========================================================================
-    std::optional<vk::raii::Pipeline> cullPipeline_;
-    std::optional<vk::raii::PipelineLayout> cullPipelineLayout_;
-    std::optional<vk::raii::DescriptorSetLayout> cullDescriptorSetLayout_;
-    std::vector<VkDescriptorSet> cullDescriptorSets_;
-
     // Triple-buffered output buffers using FrameIndexedBuffers for type-safe access.
-    // This enforces that buffer access always uses frameIndex, preventing the common
-    // desync bug where a separate counter gets out of sync with frameIndex.
     BufferUtils::FrameIndexedBuffers cullOutputBuffers_;
     BufferUtils::FrameIndexedBuffers cullIndirectBuffers_;
     vk::DeviceSize cullOutputBufferSize_ = 0;
 
-    BufferUtils::PerFrameBufferSet cullUniformBuffers_;  // CullingUniforms at binding 3
-    BufferUtils::PerFrameBufferSet leafCullParamsBuffers_;  // LeafCullParams at binding 8
-
     // Triple-buffered tree data buffers to prevent race conditions.
-    // These are updated every frame via vkCmdUpdateBuffer, so they must be
-    // triple-buffered to avoid overwriting data that in-flight frames are reading.
     BufferUtils::FrameIndexedBuffers treeDataBuffers_;
     BufferUtils::FrameIndexedBuffers treeRenderDataBuffers_;
     VkDeviceSize treeDataBufferSize_ = 0;
@@ -297,6 +257,7 @@ private:
     std::optional<vk::raii::DescriptorSetLayout> twoPhaseLeafCullDescriptorSetLayout_;
     std::vector<VkDescriptorSet> twoPhaseLeafCullDescriptorSets_;
 
+    BufferUtils::PerFrameBufferSet leafCullP3UniformBuffers_;  // CullingUniforms at binding 5
     BufferUtils::PerFrameBufferSet leafCullP3ParamsBuffers_;  // LeafCullP3Params at binding 6
 
     // Triple-buffered intermediate buffers for two-phase culling
@@ -306,6 +267,4 @@ private:
 
     BufferUtils::FrameIndexedBuffers leafCullIndirectDispatchBuffers_;
 
-    bool twoPhaseEnabled_ = true;
-    bool descriptorSetsInitialized_ = false;
 };
