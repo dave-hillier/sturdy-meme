@@ -674,6 +674,11 @@ void TreeRenderer::render(vk::CommandBuffer cmd, uint32_t frameIndex, float time
                 continue;
             }
 
+            // Skip meshes with invalid GPU buffers (not yet uploaded or released)
+            if (!meshRef.mesh->getVertexBuffer() || !meshRef.mesh->getIndexBuffer()) {
+                continue;
+            }
+
             if (bark.typeName != lastBarkType) {
                 vk::DescriptorSet descriptorSet = getBranchDescriptorSet(frameIndex, bark.typeName);
                 vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **branchPipelineLayout_,
@@ -885,6 +890,7 @@ void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
                     }
 
                     if (!meshRef.mesh || meshRef.mesh->getIndexCount() == 0) continue;
+                    if (!meshRef.mesh->getVertexBuffer() || !meshRef.mesh->getIndexBuffer()) continue;
 
                     if (bark.typeName != lastBarkType) {
                         vk::DescriptorSet branchSet = getBranchDescriptorSet(frameIndex, bark.typeName);

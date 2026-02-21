@@ -117,6 +117,20 @@ void TreeSystem::destroyTreeEntity(uint32_t index) {
     }
 }
 
+void TreeSystem::refreshMeshRefs() {
+    if (!world_) return;
+    for (size_t i = 0; i < treeEntities_.size() && i < treeInstances_.size(); ++i) {
+        ecs::Entity e = treeEntities_[i];
+        if (e == ecs::NullEntity) continue;
+        uint32_t meshIndex = treeInstances_[i].meshIndex;
+        if (meshIndex < branchMeshes_.size()) {
+            if (auto* ref = world_->tryGet<ecs::MeshRef>(e)) {
+                ref->mesh = &branchMeshes_[meshIndex];
+            }
+        }
+    }
+}
+
 void TreeSystem::cleanup() {
     if (storedDevice_ == VK_NULL_HANDLE) return;
 
@@ -584,6 +598,7 @@ void TreeSystem::createSceneObjects() {
 }
 
 void TreeSystem::rebuildSceneObjects() {
+    refreshMeshRefs();
     createSceneObjects();
 }
 

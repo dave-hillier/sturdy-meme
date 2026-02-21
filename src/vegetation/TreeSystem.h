@@ -227,6 +227,7 @@ private:
     // ECS entity creation/destruction for trees
     ecs::Entity createTreeEntity(uint32_t treeIdx, const TreeInstanceData& instance, const TreeOptions& opts, const AABB& bounds);
     void destroyTreeEntity(uint32_t index);
+    void refreshMeshRefs();  // Update MeshRef pointers after branchMeshes_ reallocation
 
     // ECS world reference (not owned)
     ecs::World* world_ = nullptr;
