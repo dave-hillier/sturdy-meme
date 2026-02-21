@@ -295,6 +295,7 @@ set(SOURCES
     src/ml/calm/ModelLoader.cpp
     # Training
     src/training/CharacterEnv.cpp
+    src/training/MotionLibrary.cpp
     src/training/RewardComputer.cpp
     src/training/VecEnv.cpp
 )

@@ -148,6 +148,26 @@ PYBIND11_MODULE(jolt_training, m) {
             self.setTask(task, glm::vec3(t(0), t(1), t(2)));
         }, py::arg("task"), py::arg("target"))
 
+        // Motion library: load FBX animations for training
+        .def("load_motions", &training::VecEnv::loadMotions,
+             py::arg("directory"),
+             "Load all FBX animation files from a directory. Returns number of clips loaded.")
+
+        .def("load_motion_file", &training::VecEnv::loadMotionFile,
+             py::arg("path"),
+             "Load animations from a single FBX file. Returns number of clips loaded.")
+
+        .def("reset_done_with_motions", &training::VecEnv::resetDoneWithMotions,
+             "Reset done environments using random frames from loaded motion library.")
+
+        .def_property_readonly("num_motions", [](const training::VecEnv& self) {
+            return self.motionLibrary().numClips();
+        }, "Number of loaded motion clips.")
+
+        .def_property_readonly("motion_duration", [](const training::VecEnv& self) {
+            return self.motionLibrary().totalDuration();
+        }, "Total duration of all loaded motion clips in seconds.")
+
         .def_property_readonly("num_envs", &training::VecEnv::numEnvs)
         .def_property_readonly("policy_obs_dim", &training::VecEnv::policyObsDim)
         .def_property_readonly("amp_obs_dim", &training::VecEnv::ampObsDim)

@@ -5,11 +5,15 @@ training. Falls back to a DummyVecEnv with random observations when the
 C++ module is not available, enabling testing of the training loop without
 a compiled physics backend.
 
-The C++ module ``jolt_training`` is expected to expose:
-  - ``JoltVecEnv(num_envs, skeleton_path)``: Constructor
+The C++ module ``jolt_training`` exposes:
+  - ``VecEnv(num_envs, skeleton_path, config=EnvConfig())``: Constructor
   - ``reset() -> np.ndarray``: Reset all envs, return obs (num_envs, obs_dim)
-  - ``step(actions: np.ndarray) -> tuple``: Step all envs, return (obs, rewards, dones, infos)
-  - ``obs_dim``, ``action_dim``: Property accessors
+  - ``step(actions) -> (obs, rewards, dones)``: Step all envs
+  - ``load_motions(directory) -> int``: Load FBX animations for resets
+  - ``load_motion_file(path) -> int``: Load single FBX animation
+  - ``reset_done_with_motions()``: Reset done envs with random motion frames
+  - ``amp_observations() -> np.ndarray``: Get AMP observations
+  - ``set_task(task_type, target)``: Set task goal
 """
 
 import logging
@@ -57,44 +61,28 @@ class DummyVecEnv:
         self.num_envs = num_envs
         self.obs_dim = obs_dim
         self.action_dim = action_dim
+        self.amp_obs_dim = obs_dim
+        self.policy_obs_dim = obs_dim
         self.episode_length = episode_length
+        self.num_motions = 0
+        self.motion_duration = 0.0
 
         self._step_counts = np.zeros(num_envs, dtype=np.int32)
         self._rng = np.random.default_rng(seed=42)
 
     def reset(self) -> np.ndarray:
-        """Reset all environments and return initial observations.
-
-        Returns:
-            Observations array, shape (num_envs, obs_dim), float32.
-        """
+        """Reset all environments and return initial observations."""
         self._step_counts[:] = 0
         return self._random_obs()
 
     def step(
         self, actions: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict]]:
-        """Step all environments with the given actions.
-
-        Args:
-            actions: Action array, shape (num_envs, action_dim), float32.
-
-        Returns:
-            Tuple of (obs, rewards, dones, infos):
-                obs: shape (num_envs, obs_dim)
-                rewards: shape (num_envs,)
-                dones: shape (num_envs,) boolean
-                infos: list of dicts (one per env), may contain "episode" key
-                    with "r" (total reward) and "l" (episode length) on termination
-        """
+        """Step all environments with the given actions."""
         self._step_counts += 1
 
         obs = self._random_obs()
-
-        # Small random rewards simulating a sparse task reward
         rewards = self._rng.standard_normal(self.num_envs).astype(np.float32) * 0.1
-
-        # Episodes terminate after fixed length
         dones = self._step_counts >= self.episode_length
 
         infos: list[dict] = []
@@ -107,7 +95,6 @@ class DummyVecEnv:
                 }
             infos.append(info)
 
-        # Auto-reset terminated envs
         terminated = np.where(dones)[0]
         if len(terminated) > 0:
             self._step_counts[terminated] = 0
@@ -115,14 +102,34 @@ class DummyVecEnv:
 
         return obs, rewards, dones.astype(np.float32), infos
 
+    def load_motions(self, directory: str) -> int:
+        """No-op for dummy env. Returns 0."""
+        logger.info("DummyVecEnv: load_motions('%s') — no-op", directory)
+        return 0
+
+    def load_motion_file(self, path: str) -> int:
+        """No-op for dummy env. Returns 0."""
+        logger.info("DummyVecEnv: load_motion_file('%s') — no-op", path)
+        return 0
+
+    def reset_done_with_motions(self):
+        """Reset done envs (same as step auto-reset for dummy env)."""
+        pass
+
+    def amp_observations(self) -> np.ndarray:
+        """Return random AMP observations."""
+        return self._random_obs()
+
+    def set_task(self, task_type, target):
+        """No-op for dummy env."""
+        pass
+
     def _random_obs(self) -> np.ndarray:
-        """Generate random observation for all envs."""
         return self._rng.standard_normal(
             (self.num_envs, self.obs_dim)
         ).astype(np.float32) * 0.1
 
     def _random_obs_subset(self, count: int) -> np.ndarray:
-        """Generate random observation for a subset of envs."""
         return self._rng.standard_normal(
             (count, self.obs_dim)
         ).astype(np.float32) * 0.1
@@ -137,6 +144,7 @@ class VecEnvWrapper:
     Args:
         num_envs: Number of parallel environments.
         skeleton_path: Path to the character skeleton .glb file (for C++ env).
+        motions_dir: Optional path to FBX animation directory for episode resets.
         obs_dim: Observation dimension (used by DummyVecEnv fallback).
         action_dim: Action dimension (used by DummyVecEnv fallback).
     """
@@ -145,6 +153,7 @@ class VecEnvWrapper:
         self,
         num_envs: int = 4096,
         skeleton_path: Optional[str] = None,
+        motions_dir: Optional[str] = None,
         obs_dim: int = 102,
         action_dim: int = 37,
     ):
@@ -153,20 +162,28 @@ class VecEnvWrapper:
 
         if _has_cpp_env and skeleton_path is not None:
             try:
-                self._env = jolt_training.JoltVecEnv(num_envs, skeleton_path)
-                self.obs_dim = self._env.obs_dim
+                self._env = jolt_training.VecEnv(num_envs, skeleton_path)
+                self.obs_dim = self._env.policy_obs_dim
                 self.action_dim = self._env.action_dim
+                self.amp_obs_dim = self._env.amp_obs_dim
                 self.using_cpp = True
                 logger.info(
-                    "Using C++ JoltVecEnv: %d envs, obs_dim=%d, action_dim=%d",
+                    "Using C++ VecEnv: %d envs, obs_dim=%d, amp_obs_dim=%d, action_dim=%d",
                     num_envs,
                     self.obs_dim,
+                    self.amp_obs_dim,
                     self.action_dim,
                 )
+
+                # Load motions if directory provided
+                if motions_dir:
+                    n = self._env.load_motions(motions_dir)
+                    logger.info("Loaded %d motion clips from %s", n, motions_dir)
+
                 return
             except Exception as e:
                 logger.warning(
-                    "Failed to create C++ JoltVecEnv, falling back to DummyVecEnv: %s",
+                    "Failed to create C++ VecEnv, falling back to DummyVecEnv: %s",
                     e,
                 )
 
@@ -178,6 +195,12 @@ class VecEnvWrapper:
         )
         self.obs_dim = obs_dim
         self.action_dim = action_dim
+        self.amp_obs_dim = obs_dim
+
+        # Load motions (no-op for dummy)
+        if motions_dir:
+            self._env.load_motions(motions_dir)
+
         logger.info(
             "Using DummyVecEnv: %d envs, obs_dim=%d, action_dim=%d",
             num_envs,
@@ -186,22 +209,36 @@ class VecEnvWrapper:
         )
 
     def reset(self) -> np.ndarray:
-        """Reset all environments.
-
-        Returns:
-            Initial observations, shape (num_envs, obs_dim), float32.
-        """
+        """Reset all environments."""
         return self._env.reset()
 
     def step(
         self, actions: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[dict]]:
-        """Step all environments with the given actions.
-
-        Args:
-            actions: Action array, shape (num_envs, action_dim), float32.
-
-        Returns:
-            Tuple of (obs, rewards, dones, infos).
-        """
+        """Step all environments with the given actions."""
+        if self.using_cpp:
+            obs, rewards, dones = self._env.step(actions)
+            # Build infos list (C++ env doesn't provide episode stats yet)
+            infos = [{} for _ in range(self.num_envs)]
+            return obs, rewards, dones.astype(np.float32), infos
         return self._env.step(actions)
+
+    def reset_done_with_motions(self):
+        """Reset done environments using random motion frames from loaded clips."""
+        self._env.reset_done_with_motions()
+
+    def amp_observations(self) -> np.ndarray:
+        """Get current AMP observations for discriminator training."""
+        return self._env.amp_observations()
+
+    def load_motions(self, directory: str) -> int:
+        """Load FBX animation files from a directory."""
+        return self._env.load_motions(directory)
+
+    def load_motion_file(self, path: str) -> int:
+        """Load animations from a single FBX file."""
+        return self._env.load_motion_file(path)
+
+    def set_task(self, task_type, target):
+        """Set the task goal for all environments."""
+        self._env.set_task(task_type, target)

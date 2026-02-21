@@ -2,6 +2,7 @@
 
 #include "CharacterEnv.h"
 #include "MotionFrame.h"
+#include "MotionLibrary.h"
 #include "RewardComputer.h"
 #include "CharacterConfig.h"
 #include "PhysicsSystem.h"
@@ -9,6 +10,7 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
+#include <random>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Ragdoll/Ragdoll.h>
@@ -72,6 +74,21 @@ public:
     // Set a single task goal applied to all environments.
     void setTask(TaskType task, const glm::vec3& target);
 
+    // --- Motion Library ---
+
+    // Load FBX animations from a directory for episode resets.
+    int loadMotions(const std::string& directory);
+
+    // Load a single FBX animation file.
+    int loadMotionFile(const std::string& path);
+
+    // Reset done environments using random frames from the motion library.
+    // Falls back to default standing pose if no motions are loaded.
+    void resetDoneWithMotions();
+
+    // Access the motion library directly.
+    const MotionLibrary& motionLibrary() const { return motionLibrary_; }
+
     // --- Batched output buffers (contiguous, for zero-copy to Python) ---
 
     const float* observations() const { return observations_.data(); }
@@ -99,6 +116,11 @@ private:
 
     // Current task goal (applied to all envs when using the single-goal step)
     TaskGoal currentGoal_;
+
+    // Motion library for episode resets
+    MotionLibrary motionLibrary_;
+    std::mt19937 rng_{42};
+    std::unique_ptr<Skeleton> ownedSkeleton_;  // Owned copy for MotionLibrary sampling
 
     // Contiguous output buffers
     // dones_ uses uint8_t because std::vector<bool> is bit-packed and does

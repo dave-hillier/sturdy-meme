@@ -46,6 +46,7 @@ VecEnv::VecEnv(int numEnvs,
     : numEnvs_(numEnvs)
     , config_(config)
     , physicsWorld_(PhysicsWorld::create().value())
+    , ownedSkeleton_(std::make_unique<Skeleton>(skeleton))
 {
     SDL_Log("VecEnv: creating %d environments", numEnvs);
 
@@ -222,6 +223,55 @@ int VecEnv::ampObsDim() const {
 
 int VecEnv::actionDim() const {
     return envs_.empty() ? 0 : envs_[0].actionDim();
+}
+
+int VecEnv::loadMotions(const std::string& directory) {
+    if (!ownedSkeleton_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VecEnv::loadMotions: no skeleton available");
+        return 0;
+    }
+    return motionLibrary_.loadFromDirectory(directory, *ownedSkeleton_);
+}
+
+int VecEnv::loadMotionFile(const std::string& path) {
+    if (!ownedSkeleton_) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "VecEnv::loadMotionFile: no skeleton available");
+        return 0;
+    }
+    return motionLibrary_.loadFile(path, *ownedSkeleton_);
+}
+
+void VecEnv::resetDoneWithMotions() {
+    if (motionLibrary_.empty() || !ownedSkeleton_) {
+        // No motions loaded — use default standing pose
+        for (int i = 0; i < numEnvs_; ++i) {
+            if (envs_[i].isDone()) {
+                MotionFrame defaultFrame;
+                glm::vec3 gridPos = envGridPosition(i);
+                defaultFrame.rootPosition = glm::vec3(gridPos.x, 1.0f, gridPos.z);
+                defaultFrame.rootRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+                envs_[i].reset(defaultFrame);
+                dones_[i] = 0;
+            }
+        }
+        return;
+    }
+
+    for (int i = 0; i < numEnvs_; ++i) {
+        if (envs_[i].isDone()) {
+            MotionFrame frame = motionLibrary_.sampleRandomFrame(rng_, *ownedSkeleton_);
+
+            // Offset to this env's grid position
+            glm::vec3 gridPos = envGridPosition(i);
+            frame.rootPosition.x += gridPos.x;
+            frame.rootPosition.z += gridPos.z;
+
+            envs_[i].reset(frame);
+            dones_[i] = 0;
+        }
+    }
 }
 
 } // namespace training

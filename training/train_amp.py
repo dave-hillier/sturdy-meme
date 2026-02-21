@@ -112,7 +112,13 @@ def parse_args() -> argparse.Namespace:
         "--motions",
         type=str,
         default=None,
-        help="Path to motion manifest YAML or directory of .npz files",
+        help="Path to motion manifest YAML, .npy directory, or FBX directory",
+    )
+    parser.add_argument(
+        "--motions-fbx",
+        type=str,
+        default=None,
+        help="Path to FBX animation directory (loaded via C++ FBXLoader in VecEnv)",
     )
 
     # Training mode
@@ -509,9 +515,12 @@ def train(args: argparse.Namespace) -> None:
     )
 
     # Create vectorized environment
+    # When --motions-fbx is provided, FBX animations are loaded directly via
+    # the C++ FBXLoader inside VecEnv (no Python FBX parsing needed).
     env = VecEnvWrapper(
         num_envs=args.num_envs,
         skeleton_path=args.skeleton,
+        motions_dir=args.motions_fbx,
         obs_dim=DEFAULT_OBS_DIM,
         action_dim=DEFAULT_ACTION_DIM,
     )
@@ -634,6 +643,10 @@ def train(args: argparse.Namespace) -> None:
             # Step environment
             actions_np = actions.cpu().numpy()
             obs_np, rewards_np, dones_np, infos = env.step(actions_np)
+
+            # Reset done environments using random motion frames from FBX library.
+            # This snaps ragdolls to reference animation poses instead of default standing.
+            env.reset_done_with_motions()
 
             # Store AMP observations for discriminator training
             amp_obs_buffer.append(obs_np.copy())
