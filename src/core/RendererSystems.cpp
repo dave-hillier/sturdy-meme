@@ -1,10 +1,11 @@
 // RendererSystems.cpp - Subsystem lifecycle management
-// Groups all rendering subsystems with automatic lifecycle via unique_ptr
+// All subsystems are stored in SystemRegistry (type-indexed via EnTT ctx).
+// Setters delegate to registry_.add<T>(), getters are inline in the header.
 
 #include "RendererSystems.h"
 #include "CoreResources.h"
 
-// Include all subsystem headers
+// Include all subsystem headers (needed for complete types in setter implementations)
 #include "SkySystem.h"
 #include "GrassSystem.h"
 #include "WindSystem.h"
@@ -57,7 +58,7 @@
 #include "VulkanContext.h"
 #include "PerformanceToggles.h"
 
-// Include control subsystem headers (only those that coordinate multiple systems)
+// Include control subsystem headers
 #include "controls/EnvironmentControlSubsystem.h"
 #include "controls/WaterControlSubsystem.h"
 #include "controls/TreeControlSubsystem.h"
@@ -66,10 +67,6 @@
 #include "controls/PerformanceControlSubsystem.h"
 #include "controls/SceneControlSubsystem.h"
 #include "controls/PlayerControlSubsystem.h"
-// Note: ILocationControl -> CelestialCalculator, ITerrainControl -> TerrainSystem,
-//       IProfilerControl -> Profiler, IWeatherState -> WeatherSystem,
-//       IPostProcessState -> PostProcessSystem, ICloudShadowControl -> CloudShadowSystem
-//       implement their interfaces directly
 
 #ifdef JPH_DEBUG_RENDERER
 #include "PhysicsDebugRenderer.h"
@@ -77,245 +74,206 @@
 
 #include <SDL3/SDL_log.h>
 
-RendererSystems::RendererSystems()
-    // Tier 1
-    // postProcessSystem_ created via factory in RendererInitPhases
-    // bloomSystem_ created via factory in RendererInitPhases
-    // shadowSystem_ created via factory in RendererInitPhases
-    // terrainSystem_ created via factory in RendererInitPhases
-    // Tier 2 - Sky/Atmosphere
-    // skySystem_ created via factory in RendererInitPhases
-    // atmosphereLUTSystem_ created via factory in RendererInitPhases
-    // froxelSystem_ created via factory in RendererInitPhases
-    // cloudShadowSystem_ created via factory in RendererInitPhases
-    // Tier 2 - Environment
-    // grassSystem_ created via factory in RendererInitPhases
-    // windSystem_ created via factory in RendererInitPhases
-    // weatherSystem_ created via factory in RendererInitPhases
-    // leafSystem_ created via factory in RendererInitPhases
-    // Tier 2 - Snow
-    // snowMaskSystem_ created via factory in RendererInitPhases
-    // volumetricSnowSystem_ created via factory in RendererInitPhases
-    // Tier 2 - Water
-    // waterSystem_ created via factory in RendererInitPhases
-    // waterDisplacement_ created via factory in RendererInitPhases
-    // flowMapGenerator_ created via factory in RendererInitPhases
-    // foamBuffer_ created via factory in RendererInitPhases
-    // ssrSystem_ created via factory in RendererInit
-    // waterTileCull_ created via factory in RendererInitPhases
-    // waterGBuffer_ created via factory in RendererInitPhases
-    // Tier 2 - Geometry
-    // catmullClarkSystem_ created via factory in RendererInitPhases
-    // rocksSystem_ created via factory in RendererInitPhases
-    // Tier 2 - Culling
-    // hiZSystem_ created via factory in RendererInit
-    // Infrastructure
-    // sceneManager_ created via factory in RendererInitPhases
-    // globalBufferManager_ created via factory in RendererInitPhases
-    : erosionDataLoader_(std::make_unique<ErosionDataLoader>())
-    , roadNetworkLoader_(std::make_unique<RoadNetworkLoader>())
-    , roadRiverVisualization_(std::make_unique<RoadRiverVisualization>())
-    // skinnedMeshRenderer_ created via factory in RendererInitPhases
-    // Tools
-    // debugLineSystem_ created via factory in RendererInit
-    // profiler_ created via Profiler::create() factory in RendererInitPhases
-    // Coordination
-    , uboBuilder_(std::make_unique<UBOBuilder>())
-    // Time
-    , timeSystem_(std::make_unique<TimeSystem>())
-    , celestialCalculator_(std::make_unique<CelestialCalculator>())
-    , environmentSettings_(std::make_unique<EnvironmentSettings>())
-{
+RendererSystems::RendererSystems() {
+    // Pre-register always-present infrastructure systems
+    registry_.emplace<ErosionDataLoader>();
+    registry_.emplace<RoadNetworkLoader>();
+    registry_.emplace<RoadRiverVisualization>();
+    registry_.emplace<UBOBuilder>();
+    registry_.emplace<TimeSystem>();
+    registry_.emplace<CelestialCalculator>();
+    registry_.emplace<EnvironmentSettings>();
 }
 
 RendererSystems::~RendererSystems() {
-    // unique_ptrs handle destruction automatically in reverse order
-    // No manual cleanup needed - this is the benefit of RAII
+    // SystemRegistry destructor handles reverse-order cleanup
 }
 
-void RendererSystems::setDebugLineSystem(std::unique_ptr<DebugLineSystem> system) {
-    debugLineSystem_ = std::move(system);
-}
-
-void RendererSystems::setProfiler(std::unique_ptr<Profiler> profiler) {
-    profiler_ = std::move(profiler);
-}
-
-void RendererSystems::setGlobalBuffers(std::unique_ptr<GlobalBufferManager> buffers) {
-    globalBufferManager_ = std::move(buffers);
-}
-
-void RendererSystems::setShadow(std::unique_ptr<ShadowSystem> system) {
-    shadowSystem_ = std::move(system);
-}
-
-void RendererSystems::setTerrain(std::unique_ptr<TerrainSystem> system) {
-    terrainSystem_ = std::move(system);
-}
+// ============================================================================
+// Setters - delegate to SystemRegistry
+// ============================================================================
 
 void RendererSystems::setPostProcess(std::unique_ptr<PostProcessSystem> system) {
-    postProcessSystem_ = std::move(system);
+    registry_.add<PostProcessSystem>(std::move(system));
 }
 
 void RendererSystems::setBloom(std::unique_ptr<BloomSystem> system) {
-    bloomSystem_ = std::move(system);
+    registry_.add<BloomSystem>(std::move(system));
 }
 
 void RendererSystems::setBilateralGrid(std::unique_ptr<BilateralGridSystem> system) {
-    bilateralGridSystem_ = std::move(system);
+    registry_.add<BilateralGridSystem>(std::move(system));
 }
 
 void RendererSystems::setGodRays(std::unique_ptr<GodRaysSystem> system) {
-    godRaysSystem_ = std::move(system);
+    registry_.add<GodRaysSystem>(std::move(system));
 }
 
-void RendererSystems::setSSR(std::unique_ptr<SSRSystem> system) {
-    ssrSystem_ = std::move(system);
+void RendererSystems::setShadow(std::unique_ptr<ShadowSystem> system) {
+    registry_.add<ShadowSystem>(std::move(system));
 }
 
-void RendererSystems::setHiZ(std::unique_ptr<HiZSystem> system) {
-    hiZSystem_ = std::move(system);
-}
-
-void RendererSystems::setGPUSceneBuffer(std::unique_ptr<GPUSceneBuffer> buffer) {
-    gpuSceneBuffer_ = std::move(buffer);
-}
-
-void RendererSystems::setGPUCullPass(std::unique_ptr<GPUCullPass> pass) {
-    gpuCullPass_ = std::move(pass);
-}
-
-void RendererSystems::setScreenSpaceShadow(std::unique_ptr<ScreenSpaceShadowSystem> system) {
-    screenSpaceShadowSystem_ = std::move(system);
+void RendererSystems::setTerrain(std::unique_ptr<TerrainSystem> system) {
+    registry_.add<TerrainSystem>(std::move(system));
 }
 
 void RendererSystems::setSky(std::unique_ptr<SkySystem> system) {
-    skySystem_ = std::move(system);
-}
-
-void RendererSystems::setWind(std::unique_ptr<WindSystem> system) {
-    windSystem_ = std::move(system);
-}
-
-void RendererSystems::setDisplacement(std::unique_ptr<DisplacementSystem> system) {
-    displacementSystem_ = std::move(system);
-}
-
-void RendererSystems::setWeather(std::unique_ptr<WeatherSystem> system) {
-    weatherSystem_ = std::move(system);
-}
-
-void RendererSystems::setGrass(std::unique_ptr<GrassSystem> system) {
-    grassSystem_ = std::move(system);
-}
-
-void RendererSystems::setFroxel(std::unique_ptr<FroxelSystem> system) {
-    froxelSystem_ = std::move(system);
+    registry_.add<SkySystem>(std::move(system));
 }
 
 void RendererSystems::setAtmosphereLUT(std::unique_ptr<AtmosphereLUTSystem> system) {
-    atmosphereLUTSystem_ = std::move(system);
+    registry_.add<AtmosphereLUTSystem>(std::move(system));
+}
+
+void RendererSystems::setFroxel(std::unique_ptr<FroxelSystem> system) {
+    registry_.add<FroxelSystem>(std::move(system));
 }
 
 void RendererSystems::setCloudShadow(std::unique_ptr<CloudShadowSystem> system) {
-    cloudShadowSystem_ = std::move(system);
+    registry_.add<CloudShadowSystem>(std::move(system));
 }
 
-void RendererSystems::setSnowMask(std::unique_ptr<SnowMaskSystem> system) {
-    snowMaskSystem_ = std::move(system);
+void RendererSystems::setGrass(std::unique_ptr<GrassSystem> system) {
+    registry_.add<GrassSystem>(std::move(system));
 }
 
-void RendererSystems::setVolumetricSnow(std::unique_ptr<VolumetricSnowSystem> system) {
-    volumetricSnowSystem_ = std::move(system);
+void RendererSystems::setWind(std::unique_ptr<WindSystem> system) {
+    registry_.add<WindSystem>(std::move(system));
+}
+
+void RendererSystems::setDisplacement(std::unique_ptr<DisplacementSystem> system) {
+    registry_.add<DisplacementSystem>(std::move(system));
+}
+
+void RendererSystems::setWeather(std::unique_ptr<WeatherSystem> system) {
+    registry_.add<WeatherSystem>(std::move(system));
 }
 
 void RendererSystems::setLeaf(std::unique_ptr<LeafSystem> system) {
-    leafSystem_ = std::move(system);
+    registry_.add<LeafSystem>(std::move(system));
+}
+
+void RendererSystems::setSnowMask(std::unique_ptr<SnowMaskSystem> system) {
+    registry_.add<SnowMaskSystem>(std::move(system));
+}
+
+void RendererSystems::setVolumetricSnow(std::unique_ptr<VolumetricSnowSystem> system) {
+    registry_.add<VolumetricSnowSystem>(std::move(system));
 }
 
 void RendererSystems::setWater(std::unique_ptr<WaterSystem> system) {
-    waterSystem_ = std::move(system);
+    registry_.add<WaterSystem>(std::move(system));
 }
 
 void RendererSystems::setWaterDisplacement(std::unique_ptr<WaterDisplacement> system) {
-    waterDisplacement_ = std::move(system);
+    registry_.add<WaterDisplacement>(std::move(system));
 }
 
 void RendererSystems::setFlowMap(std::unique_ptr<FlowMapGenerator> system) {
-    flowMapGenerator_ = std::move(system);
+    registry_.add<FlowMapGenerator>(std::move(system));
 }
 
 void RendererSystems::setFoam(std::unique_ptr<FoamBuffer> system) {
-    foamBuffer_ = std::move(system);
+    registry_.add<FoamBuffer>(std::move(system));
+}
+
+void RendererSystems::setSSR(std::unique_ptr<SSRSystem> system) {
+    registry_.add<SSRSystem>(std::move(system));
 }
 
 void RendererSystems::setWaterTileCull(std::unique_ptr<WaterTileCull> system) {
-    waterTileCull_ = std::move(system);
+    registry_.add<WaterTileCull>(std::move(system));
 }
 
 void RendererSystems::setWaterGBuffer(std::unique_ptr<WaterGBuffer> system) {
-    waterGBuffer_ = std::move(system);
+    registry_.add<WaterGBuffer>(std::move(system));
 }
 
 void RendererSystems::setCatmullClark(std::unique_ptr<CatmullClarkSystem> system) {
-    catmullClarkSystem_ = std::move(system);
+    registry_.add<CatmullClarkSystem>(std::move(system));
 }
 
 void RendererSystems::setRocks(std::unique_ptr<ScatterSystem> system) {
     // Unregister old material if exists
-    if (rocksSystem_) {
-        sceneCollection_.unregisterMaterial(&rocksSystem_->getMaterial());
+    if (auto* old = registry_.find<ScatterSystem, RocksTag>()) {
+        sceneCollection_.unregisterMaterial(&old->getMaterial());
     }
-    rocksSystem_ = std::move(system);
-    // Register new material
-    if (rocksSystem_) {
-        sceneCollection_.registerMaterial(&rocksSystem_->getMaterial());
-    }
+    auto& ref = registry_.add<ScatterSystem, RocksTag>(std::move(system));
+    sceneCollection_.registerMaterial(&ref.getMaterial());
 }
 
 void RendererSystems::setTree(std::unique_ptr<TreeSystem> system) {
-    treeSystem_ = std::move(system);
+    registry_.add<TreeSystem>(std::move(system));
 }
 
 void RendererSystems::setTreeRenderer(std::unique_ptr<TreeRenderer> renderer) {
-    treeRenderer_ = std::move(renderer);
+    registry_.add<TreeRenderer>(std::move(renderer));
 }
 
 void RendererSystems::setTreeLOD(std::unique_ptr<TreeLODSystem> system) {
-    treeLODSystem_ = std::move(system);
+    registry_.add<TreeLODSystem>(std::move(system));
 }
 
 void RendererSystems::setImpostorCull(std::unique_ptr<ImpostorCullSystem> system) {
-    impostorCullSystem_ = std::move(system);
+    registry_.add<ImpostorCullSystem>(std::move(system));
 }
 
 void RendererSystems::setDetritus(std::unique_ptr<ScatterSystem> system) {
     // Unregister old material if exists
-    if (detritusSystem_) {
-        sceneCollection_.unregisterMaterial(&detritusSystem_->getMaterial());
+    if (auto* old = registry_.find<ScatterSystem, DetritusTag>()) {
+        sceneCollection_.unregisterMaterial(&old->getMaterial());
     }
-    detritusSystem_ = std::move(system);
-    // Register new material
-    if (detritusSystem_) {
-        sceneCollection_.registerMaterial(&detritusSystem_->getMaterial());
-    }
+    auto& ref = registry_.add<ScatterSystem, DetritusTag>(std::move(system));
+    sceneCollection_.registerMaterial(&ref.getMaterial());
 }
 
 void RendererSystems::setDeferredTerrainObjects(std::unique_ptr<DeferredTerrainObjects> deferred) {
-    deferredTerrainObjects_ = std::move(deferred);
+    registry_.add<DeferredTerrainObjects>(std::move(deferred));
+}
+
+void RendererSystems::setHiZ(std::unique_ptr<HiZSystem> system) {
+    registry_.add<HiZSystem>(std::move(system));
+}
+
+void RendererSystems::setGPUSceneBuffer(std::unique_ptr<GPUSceneBuffer> buffer) {
+    registry_.add<GPUSceneBuffer>(std::move(buffer));
+}
+
+void RendererSystems::setGPUCullPass(std::unique_ptr<GPUCullPass> pass) {
+    registry_.add<GPUCullPass>(std::move(pass));
+}
+
+void RendererSystems::setScreenSpaceShadow(std::unique_ptr<ScreenSpaceShadowSystem> system) {
+    registry_.add<ScreenSpaceShadowSystem>(std::move(system));
 }
 
 void RendererSystems::setScene(std::unique_ptr<SceneManager> system) {
-    sceneManager_ = std::move(system);
+    registry_.add<SceneManager>(std::move(system));
+}
+
+void RendererSystems::setGlobalBuffers(std::unique_ptr<GlobalBufferManager> buffers) {
+    registry_.add<GlobalBufferManager>(std::move(buffers));
 }
 
 void RendererSystems::setSkinnedMesh(std::unique_ptr<SkinnedMeshRenderer> system) {
-    skinnedMeshRenderer_ = std::move(system);
+    registry_.add<SkinnedMeshRenderer>(std::move(system));
 }
 
 void RendererSystems::setNPCRenderer(std::unique_ptr<NPCRenderer> renderer) {
-    npcRenderer_ = std::move(renderer);
+    registry_.add<NPCRenderer>(std::move(renderer));
 }
+
+void RendererSystems::setDebugLineSystem(std::unique_ptr<DebugLineSystem> system) {
+    registry_.add<DebugLineSystem>(std::move(system));
+}
+
+void RendererSystems::setProfiler(std::unique_ptr<Profiler> profiler) {
+    registry_.add<Profiler>(std::move(profiler));
+}
+
+// ============================================================================
+// Initialization
+// ============================================================================
 
 bool RendererSystems::init(const InitContext& /*initCtx*/,
                             VkRenderPass /*swapchainRenderPass*/,
@@ -326,93 +284,36 @@ bool RendererSystems::init(const InitContext& /*initCtx*/,
                             const std::string& /*resourcePath*/) {
     // NOTE: This centralized init is not currently used.
     // Initialization is done via RendererInitPhases.cpp which calls each subsystem directly.
-    // This stub exists for potential future refactoring.
     SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "RendererSystems::init() is not implemented - use RendererInitPhases instead");
     return false;
 }
 
 void RendererSystems::destroy(VkDevice device, VmaAllocator allocator) {
-    // Note: initialized_ flag is not used since initialization is done
-    // via RendererInitPhases.cpp, not RendererSystems::init()
     SDL_Log("RendererSystems::destroy starting");
 
-    // Destroy in reverse dependency order
-    // Tier 2+ first, then Tier 1
-
-    // GPU-driven rendering (must be destroyed before allocator shutdown)
-    gpuCullPass_.reset();  // RAII cleanup via destructor
-    if (gpuSceneBuffer_) {
-        gpuSceneBuffer_->cleanup();
-        gpuSceneBuffer_.reset();
+    // GPUSceneBuffer needs explicit cleanup before its destructor
+    if (auto* gpuScene = registry_.find<GPUSceneBuffer>()) {
+        gpuScene->cleanup();
     }
 
-    // debugLineSystem_ cleanup handled by destructor (RAII)
-    debugLineSystem_.reset();
-
-    // Water
-    waterGBuffer_.reset();  // RAII cleanup via destructor
-    waterTileCull_.reset();  // RAII cleanup via destructor
-    ssrSystem_.reset();  // RAII cleanup via destructor
-    foamBuffer_.reset();  // RAII cleanup via destructor
-    flowMapGenerator_.reset();  // RAII cleanup via destructor
-    waterDisplacement_.reset();  // RAII cleanup via destructor
-    waterSystem_.reset();  // RAII cleanup via destructor
-
-    profiler_.reset();
-    screenSpaceShadowSystem_.reset();  // RAII cleanup via destructor
-    hiZSystem_.reset();  // RAII cleanup via destructor
-
-    // Geometry/Vegetation
-    deferredTerrainObjects_.reset();  // RAII cleanup via destructor
-    detritusSystem_.reset();  // RAII cleanup via destructor
-    catmullClarkSystem_.reset();  // RAII cleanup via destructor
-    rocksSystem_.reset();  // RAII cleanup via destructor
-    treeLODSystem_.reset();  // RAII cleanup via destructor
-    impostorCullSystem_.reset();  // RAII cleanup via destructor
-    treeRenderer_.reset();  // RAII cleanup via destructor
-    treeSystem_.reset();  // RAII cleanup via destructor
-
-    // Atmosphere
-    cloudShadowSystem_.reset();  // RAII cleanup via destructor
-    atmosphereLUTSystem_.reset();  // RAII cleanup via destructor
-    froxelSystem_.reset();  // RAII cleanup via destructor
-
-    // Weather/Snow
-    leafSystem_.reset();  // RAII cleanup via destructor
-    weatherSystem_.reset();  // RAII cleanup via destructor
-    volumetricSnowSystem_.reset();  // RAII cleanup via destructor
-    snowMaskSystem_.reset();  // RAII cleanup via destructor
-
-    // Grass/Wind
-    windSystem_.reset();  // RAII cleanup via destructor
-    grassSystem_.reset();  // RAII cleanup via destructor
-
-    sceneManager_.reset();  // RAII cleanup via destructor
-    globalBufferManager_.reset();  // RAII cleanup via destructor
-    roadRiverVisualization_.reset();  // RAII cleanup via destructor
-    roadNetworkLoader_.reset();  // RAII cleanup via destructor
-
-    // Tier 1
-    skySystem_.reset();  // RAII cleanup via destructor
-    terrainSystem_.reset();  // RAII cleanup via destructor
-    shadowSystem_.reset();  // RAII cleanup via destructor
-    skinnedMeshRenderer_.reset();  // RAII cleanup via destructor
-    bilateralGridSystem_.reset();  // RAII cleanup via destructor
-    bloomSystem_.reset();  // RAII cleanup via destructor
-    postProcessSystem_.reset();  // RAII cleanup via destructor
+    // SystemRegistry::destroyAll() destroys in reverse registration order,
+    // which mirrors the original reverse-dependency destruction.
+    registry_.destroyAll();
 
     SDL_Log("RendererSystems::destroy complete");
 }
 
 CoreResources RendererSystems::getCoreResources(uint32_t framesInFlight) const {
-    return CoreResources::collect(*postProcessSystem_, *shadowSystem_,
-                                  *terrainSystem_, framesInFlight);
+    return CoreResources::collect(registry_.get<PostProcessSystem>(),
+                                  registry_.get<ShadowSystem>(),
+                                  registry_.get<TerrainSystem>(), framesInFlight);
 }
 
 #ifdef JPH_DEBUG_RENDERER
 void RendererSystems::createPhysicsDebugRenderer(const InitContext& /*ctx*/, VkRenderPass /*hdrRenderPass*/) {
-    physicsDebugRenderer_ = std::make_unique<PhysicsDebugRenderer>();
-    physicsDebugRenderer_->init();
+    auto renderer = std::make_unique<PhysicsDebugRenderer>();
+    renderer->init();
+    registry_.add<PhysicsDebugRenderer>(std::move(renderer));
 }
 #endif
 
@@ -421,33 +322,32 @@ void RendererSystems::createPhysicsDebugRenderer(const InitContext& /*ctx*/, VkR
 // ============================================================================
 
 void RendererSystems::initControlSubsystems(VulkanContext& vulkanContext, PerformanceToggles& perfToggles) {
-    // Systems that directly implement their interfaces:
-    // - CelestialCalculator implements ILocationControl
-    // - TerrainSystem implements ITerrainControl
-    // - Profiler implements IProfilerControl
-    // - WeatherSystem implements IWeatherState
-    // - PostProcessSystem implements IPostProcessState
-    // - CloudShadowSystem implements ICloudShadowControl
-
-    // Subsystems that coordinate multiple systems:
-    environmentControl_ = std::make_unique<EnvironmentControlSubsystem>(
-        *froxelSystem_, *atmosphereLUTSystem_, *leafSystem_, *cloudShadowSystem_,
-        *postProcessSystem_, *environmentSettings_);
-    waterControl_ = std::make_unique<WaterControlSubsystem>(*waterSystem_, *waterTileCull_);
-    treeControl_ = std::make_unique<TreeControlSubsystem>(treeSystem_.get(), *this);
-    grassControl_ = std::make_unique<GrassControlAdapter>(*grassSystem_);
-    debugControl_ = std::make_unique<DebugControlSubsystem>(*debugLineSystem_, *hiZSystem_, *this);
-    performanceControl_ = std::make_unique<PerformanceControlSubsystem>(perfToggles, nullptr);
-    sceneControl_ = std::make_unique<SceneControlSubsystem>(*sceneManager_, vulkanContext);
-    playerControl_ = std::make_unique<PlayerControlSubsystem>(*sceneManager_, vulkanContext);
+    registry_.add<EnvironmentControlSubsystem>(std::make_unique<EnvironmentControlSubsystem>(
+        registry_.get<FroxelSystem>(), registry_.get<AtmosphereLUTSystem>(),
+        registry_.get<LeafSystem>(), registry_.get<CloudShadowSystem>(),
+        registry_.get<PostProcessSystem>(), registry_.get<EnvironmentSettings>()));
+    registry_.add<WaterControlSubsystem>(std::make_unique<WaterControlSubsystem>(
+        registry_.get<WaterSystem>(), registry_.get<WaterTileCull>()));
+    registry_.add<TreeControlSubsystem>(std::make_unique<TreeControlSubsystem>(
+        registry_.find<TreeSystem>(), *this));
+    registry_.add<GrassControlAdapter>(std::make_unique<GrassControlAdapter>(
+        registry_.get<GrassSystem>()));
+    registry_.add<DebugControlSubsystem>(std::make_unique<DebugControlSubsystem>(
+        registry_.get<DebugLineSystem>(), registry_.get<HiZSystem>(), *this));
+    registry_.add<PerformanceControlSubsystem>(std::make_unique<PerformanceControlSubsystem>(
+        perfToggles, nullptr));
+    registry_.add<SceneControlSubsystem>(std::make_unique<SceneControlSubsystem>(
+        registry_.get<SceneManager>(), vulkanContext));
+    registry_.add<PlayerControlSubsystem>(std::make_unique<PlayerControlSubsystem>(
+        registry_.get<SceneManager>(), vulkanContext));
 
     controlsInitialized_ = true;
     SDL_Log("Control subsystems initialized");
 }
 
 void RendererSystems::setPerformanceSyncCallback(std::function<void()> callback) {
-    if (performanceControl_) {
-        performanceControl_->setSyncCallback(callback);
+    if (auto* perf = registry_.find<PerformanceControlSubsystem>()) {
+        perf->setSyncCallback(callback);
     }
 }
 
@@ -470,48 +370,51 @@ void RendererSystems::resetAllTemporalHistory() {
     }
 }
 
+// ============================================================================
 // Control subsystem accessors
+// ============================================================================
+
 // Systems that directly implement their interfaces:
-ILocationControl& RendererSystems::locationControl() { return *celestialCalculator_; }
-const ILocationControl& RendererSystems::locationControl() const { return *celestialCalculator_; }
+ILocationControl& RendererSystems::locationControl() { return registry_.get<CelestialCalculator>(); }
+const ILocationControl& RendererSystems::locationControl() const { return registry_.get<CelestialCalculator>(); }
 
-IWeatherState& RendererSystems::weatherState() { return *weatherSystem_; }
-const IWeatherState& RendererSystems::weatherState() const { return *weatherSystem_; }
+IWeatherState& RendererSystems::weatherState() { return registry_.get<WeatherSystem>(); }
+const IWeatherState& RendererSystems::weatherState() const { return registry_.get<WeatherSystem>(); }
 
-IEnvironmentControl& RendererSystems::environmentControl() { return *environmentControl_; }
-const IEnvironmentControl& RendererSystems::environmentControl() const { return *environmentControl_; }
+IEnvironmentControl& RendererSystems::environmentControl() { return registry_.get<EnvironmentControlSubsystem>(); }
+const IEnvironmentControl& RendererSystems::environmentControl() const { return registry_.get<EnvironmentControlSubsystem>(); }
 
-IPostProcessState& RendererSystems::postProcessState() { return *postProcessSystem_; }
-const IPostProcessState& RendererSystems::postProcessState() const { return *postProcessSystem_; }
+IPostProcessState& RendererSystems::postProcessState() { return registry_.get<PostProcessSystem>(); }
+const IPostProcessState& RendererSystems::postProcessState() const { return registry_.get<PostProcessSystem>(); }
 
-ICloudShadowControl& RendererSystems::cloudShadowControl() { return *cloudShadowSystem_; }
-const ICloudShadowControl& RendererSystems::cloudShadowControl() const { return *cloudShadowSystem_; }
+ICloudShadowControl& RendererSystems::cloudShadowControl() { return registry_.get<CloudShadowSystem>(); }
+const ICloudShadowControl& RendererSystems::cloudShadowControl() const { return registry_.get<CloudShadowSystem>(); }
 
-ITerrainControl& RendererSystems::terrainControl() { return *terrainSystem_; }
-const ITerrainControl& RendererSystems::terrainControl() const { return *terrainSystem_; }
+ITerrainControl& RendererSystems::terrainControl() { return registry_.get<TerrainSystem>(); }
+const ITerrainControl& RendererSystems::terrainControl() const { return registry_.get<TerrainSystem>(); }
 
-IWaterControl& RendererSystems::waterControl() { return *waterControl_; }
-const IWaterControl& RendererSystems::waterControl() const { return *waterControl_; }
+IWaterControl& RendererSystems::waterControl() { return registry_.get<WaterControlSubsystem>(); }
+const IWaterControl& RendererSystems::waterControl() const { return registry_.get<WaterControlSubsystem>(); }
 
-ITreeControl& RendererSystems::treeControl() { return *treeControl_; }
-const ITreeControl& RendererSystems::treeControl() const { return *treeControl_; }
+ITreeControl& RendererSystems::treeControl() { return registry_.get<TreeControlSubsystem>(); }
+const ITreeControl& RendererSystems::treeControl() const { return registry_.get<TreeControlSubsystem>(); }
 
-IGrassControl& RendererSystems::grassControl() { return *grassControl_; }
-const IGrassControl& RendererSystems::grassControl() const { return *grassControl_; }
+IGrassControl& RendererSystems::grassControl() { return registry_.get<GrassControlAdapter>(); }
+const IGrassControl& RendererSystems::grassControl() const { return registry_.get<GrassControlAdapter>(); }
 
-IDebugControl& RendererSystems::debugControl() { return *debugControl_; }
-const IDebugControl& RendererSystems::debugControl() const { return *debugControl_; }
-DebugControlSubsystem& RendererSystems::debugControlSubsystem() { return *debugControl_; }
-const DebugControlSubsystem& RendererSystems::debugControlSubsystem() const { return *debugControl_; }
+IDebugControl& RendererSystems::debugControl() { return registry_.get<DebugControlSubsystem>(); }
+const IDebugControl& RendererSystems::debugControl() const { return registry_.get<DebugControlSubsystem>(); }
+DebugControlSubsystem& RendererSystems::debugControlSubsystem() { return registry_.get<DebugControlSubsystem>(); }
+const DebugControlSubsystem& RendererSystems::debugControlSubsystem() const { return registry_.get<DebugControlSubsystem>(); }
 
-IProfilerControl& RendererSystems::profilerControl() { return *profiler_; }
-const IProfilerControl& RendererSystems::profilerControl() const { return *profiler_; }
+IProfilerControl& RendererSystems::profilerControl() { return registry_.get<Profiler>(); }
+const IProfilerControl& RendererSystems::profilerControl() const { return registry_.get<Profiler>(); }
 
-IPerformanceControl& RendererSystems::performanceControl() { return *performanceControl_; }
-const IPerformanceControl& RendererSystems::performanceControl() const { return *performanceControl_; }
+IPerformanceControl& RendererSystems::performanceControl() { return registry_.get<PerformanceControlSubsystem>(); }
+const IPerformanceControl& RendererSystems::performanceControl() const { return registry_.get<PerformanceControlSubsystem>(); }
 
-ISceneControl& RendererSystems::sceneControl() { return *sceneControl_; }
-const ISceneControl& RendererSystems::sceneControl() const { return *sceneControl_; }
+ISceneControl& RendererSystems::sceneControl() { return registry_.get<SceneControlSubsystem>(); }
+const ISceneControl& RendererSystems::sceneControl() const { return registry_.get<SceneControlSubsystem>(); }
 
-IPlayerControl& RendererSystems::playerControl() { return *playerControl_; }
-const IPlayerControl& RendererSystems::playerControl() const { return *playerControl_; }
+IPlayerControl& RendererSystems::playerControl() { return registry_.get<PlayerControlSubsystem>(); }
+const IPlayerControl& RendererSystems::playerControl() const { return registry_.get<PlayerControlSubsystem>(); }
