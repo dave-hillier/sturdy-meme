@@ -2,7 +2,19 @@
 
 #include "GeometrySystemGroup.h"
 #include "CatmullClarkSystem.h"
+#include "RendererSystems.h"
 #include <SDL3/SDL.h>
+
+void GeometrySystemGroup::Bundle::registerAll(RendererSystems& systems) {
+    systems.registry().add<CatmullClarkSystem>(std::move(catmullClark));
+}
+
+bool GeometrySystemGroup::createAndRegister(const CreateDeps& deps, RendererSystems& systems) {
+    auto bundle = createAll(deps);
+    if (!bundle) return false;
+    bundle->registerAll(systems);
+    return true;
+}
 
 std::optional<GeometrySystemGroup::Bundle> GeometrySystemGroup::createAll(
     const CreateDeps& deps

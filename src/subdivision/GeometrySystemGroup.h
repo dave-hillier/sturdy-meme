@@ -11,6 +11,7 @@
 
 // Forward declarations
 class CatmullClarkSystem;
+class RendererSystems;
 
 /**
  * GeometrySystemGroup - Groups procedural geometry systems
@@ -29,7 +30,7 @@ class CatmullClarkSystem;
  * Self-initialization:
  *   auto bundle = GeometrySystemGroup::createAll(deps);
  *   if (bundle) {
- *       systems.setCatmullClark(std::move(bundle->catmullClark));
+ *       bundle->registerAll(systems);
  *   }
  */
 struct GeometrySystemGroup {
@@ -54,6 +55,8 @@ struct GeometrySystemGroup {
      */
     struct Bundle {
         std::unique_ptr<CatmullClarkSystem> catmullClark;
+
+        void registerAll(RendererSystems& systems);
     };
 
     using HeightFunc = std::function<float(float, float)>;
@@ -82,4 +85,6 @@ struct GeometrySystemGroup {
      * Note: Object position is computed using terrain height if getTerrainHeight is provided.
      */
     static std::optional<Bundle> createAll(const CreateDeps& deps);
+
+    static bool createAndRegister(const CreateDeps& deps, RendererSystems& systems);
 };

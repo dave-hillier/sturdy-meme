@@ -6,9 +6,24 @@
 #include "CloudShadowSystem.h"
 #include "FroxelSystem.h"
 #include "PostProcessSystem.h"
+#include "RendererSystems.h"
 #include "core/vulkan/CommandBufferUtils.h"
 #include <glm/glm.hpp>
 #include <SDL3/SDL.h>
+
+void AtmosphereSystemGroup::Bundle::registerAll(RendererSystems& systems) {
+    systems.registry().add<SkySystem>(std::move(sky));
+    systems.registry().add<FroxelSystem>(std::move(froxel));
+    systems.registry().add<AtmosphereLUTSystem>(std::move(atmosphereLUT));
+    systems.registry().add<CloudShadowSystem>(std::move(cloudShadow));
+}
+
+bool AtmosphereSystemGroup::createAndRegister(const CreateDeps& deps, RendererSystems& systems) {
+    auto bundle = createAll(deps);
+    if (!bundle) return false;
+    bundle->registerAll(systems);
+    return true;
+}
 
 std::optional<AtmosphereSystemGroup::Bundle> AtmosphereSystemGroup::createAll(
     const CreateDeps& deps

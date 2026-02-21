@@ -5,56 +5,48 @@
 #include "RendererSystems.h"
 #include "CoreResources.h"
 
-// Include all subsystem headers (needed for complete types in setter implementations)
-#include "SkySystem.h"
-#include "GrassSystem.h"
-#include "WindSystem.h"
-#include "DisplacementSystem.h"
-#include "WeatherSystem.h"
-#include "LeafSystem.h"
-#include "PostProcessSystem.h"
-#include "BloomSystem.h"
-#include "BilateralGridSystem.h"
-#include "GodRaysSystem.h"
-#include "FroxelSystem.h"
-#include "AtmosphereLUTSystem.h"
-#include "TerrainSystem.h"
-#include "CatmullClarkSystem.h"
-#include "SnowMaskSystem.h"
-#include "VolumetricSnowSystem.h"
-#include "ScatterSystem.h"
-#include "scene/SceneMaterial.h"
-#include "TreeSystem.h"
-#include "TreeRenderer.h"
-#include "TreeLODSystem.h"
-#include "ImpostorCullSystem.h"
-#include "DeferredTerrainObjects.h"
-#include "CloudShadowSystem.h"
-#include "HiZSystem.h"
-#include "ScreenSpaceShadowSystem.h"
-#include "GPUSceneBuffer.h"
-#include "culling/GPUCullPass.h"
-#include "WaterSystem.h"
-#include "WaterDisplacement.h"
-#include "FlowMapGenerator.h"
-#include "FoamBuffer.h"
-#include "SSRSystem.h"
-#include "WaterTileCull.h"
-#include "WaterGBuffer.h"
+// Needed for constructor (registry_.emplace<T>())
 #include "ErosionDataLoader.h"
 #include "RoadNetworkLoader.h"
 #include "RoadRiverVisualization.h"
 #include "UBOBuilder.h"
-#include "Profiler.h"
-#include "DebugLineSystem.h"
+#include "TimeSystem.h"
+#include "CelestialCalculator.h"
+#include "EnvironmentSettings.h"
+
+// Needed for non-trivial setters (sceneCollection_ interaction)
+#include "ScatterSystem.h"
+#include "scene/SceneMaterial.h"
+
+// Needed for remaining trivial setters (non-grouped systems)
+#include "PostProcessSystem.h"
+#include "BloomSystem.h"
+#include "BilateralGridSystem.h"
+#include "GodRaysSystem.h"
 #include "ShadowSystem.h"
+#include "TerrainSystem.h"
+#include "DeferredTerrainObjects.h"
+#include "HiZSystem.h"
+#include "ScreenSpaceShadowSystem.h"
+#include "GPUSceneBuffer.h"
+#include "culling/GPUCullPass.h"
 #include "SceneManager.h"
 #include "GlobalBufferManager.h"
 #include "SkinnedMeshRenderer.h"
 #include "npc/NPCRenderer.h"
-#include "TimeSystem.h"
-#include "CelestialCalculator.h"
-#include "EnvironmentSettings.h"
+#include "DebugLineSystem.h"
+#include "Profiler.h"
+
+// Needed for control subsystem creation (registry_.get<T>() requires complete types for casting)
+#include "FroxelSystem.h"
+#include "AtmosphereLUTSystem.h"
+#include "LeafSystem.h"
+#include "CloudShadowSystem.h"
+#include "WeatherSystem.h"
+#include "GrassSystem.h"
+#include "WaterSystem.h"
+#include "WaterTileCull.h"
+#include "TreeSystem.h"
 #include "VulkanContext.h"
 #include "PerformanceToggles.h"
 
@@ -90,108 +82,8 @@ RendererSystems::~RendererSystems() {
 }
 
 // ============================================================================
-// Setters - delegate to SystemRegistry
+// Non-trivial setters (have sceneCollection_ side effects)
 // ============================================================================
-
-void RendererSystems::setPostProcess(std::unique_ptr<PostProcessSystem> system) {
-    registry_.add<PostProcessSystem>(std::move(system));
-}
-
-void RendererSystems::setBloom(std::unique_ptr<BloomSystem> system) {
-    registry_.add<BloomSystem>(std::move(system));
-}
-
-void RendererSystems::setBilateralGrid(std::unique_ptr<BilateralGridSystem> system) {
-    registry_.add<BilateralGridSystem>(std::move(system));
-}
-
-void RendererSystems::setGodRays(std::unique_ptr<GodRaysSystem> system) {
-    registry_.add<GodRaysSystem>(std::move(system));
-}
-
-void RendererSystems::setShadow(std::unique_ptr<ShadowSystem> system) {
-    registry_.add<ShadowSystem>(std::move(system));
-}
-
-void RendererSystems::setTerrain(std::unique_ptr<TerrainSystem> system) {
-    registry_.add<TerrainSystem>(std::move(system));
-}
-
-void RendererSystems::setSky(std::unique_ptr<SkySystem> system) {
-    registry_.add<SkySystem>(std::move(system));
-}
-
-void RendererSystems::setAtmosphereLUT(std::unique_ptr<AtmosphereLUTSystem> system) {
-    registry_.add<AtmosphereLUTSystem>(std::move(system));
-}
-
-void RendererSystems::setFroxel(std::unique_ptr<FroxelSystem> system) {
-    registry_.add<FroxelSystem>(std::move(system));
-}
-
-void RendererSystems::setCloudShadow(std::unique_ptr<CloudShadowSystem> system) {
-    registry_.add<CloudShadowSystem>(std::move(system));
-}
-
-void RendererSystems::setGrass(std::unique_ptr<GrassSystem> system) {
-    registry_.add<GrassSystem>(std::move(system));
-}
-
-void RendererSystems::setWind(std::unique_ptr<WindSystem> system) {
-    registry_.add<WindSystem>(std::move(system));
-}
-
-void RendererSystems::setDisplacement(std::unique_ptr<DisplacementSystem> system) {
-    registry_.add<DisplacementSystem>(std::move(system));
-}
-
-void RendererSystems::setWeather(std::unique_ptr<WeatherSystem> system) {
-    registry_.add<WeatherSystem>(std::move(system));
-}
-
-void RendererSystems::setLeaf(std::unique_ptr<LeafSystem> system) {
-    registry_.add<LeafSystem>(std::move(system));
-}
-
-void RendererSystems::setSnowMask(std::unique_ptr<SnowMaskSystem> system) {
-    registry_.add<SnowMaskSystem>(std::move(system));
-}
-
-void RendererSystems::setVolumetricSnow(std::unique_ptr<VolumetricSnowSystem> system) {
-    registry_.add<VolumetricSnowSystem>(std::move(system));
-}
-
-void RendererSystems::setWater(std::unique_ptr<WaterSystem> system) {
-    registry_.add<WaterSystem>(std::move(system));
-}
-
-void RendererSystems::setWaterDisplacement(std::unique_ptr<WaterDisplacement> system) {
-    registry_.add<WaterDisplacement>(std::move(system));
-}
-
-void RendererSystems::setFlowMap(std::unique_ptr<FlowMapGenerator> system) {
-    registry_.add<FlowMapGenerator>(std::move(system));
-}
-
-void RendererSystems::setFoam(std::unique_ptr<FoamBuffer> system) {
-    registry_.add<FoamBuffer>(std::move(system));
-}
-
-void RendererSystems::setSSR(std::unique_ptr<SSRSystem> system) {
-    registry_.add<SSRSystem>(std::move(system));
-}
-
-void RendererSystems::setWaterTileCull(std::unique_ptr<WaterTileCull> system) {
-    registry_.add<WaterTileCull>(std::move(system));
-}
-
-void RendererSystems::setWaterGBuffer(std::unique_ptr<WaterGBuffer> system) {
-    registry_.add<WaterGBuffer>(std::move(system));
-}
-
-void RendererSystems::setCatmullClark(std::unique_ptr<CatmullClarkSystem> system) {
-    registry_.add<CatmullClarkSystem>(std::move(system));
-}
 
 void RendererSystems::setRocks(std::unique_ptr<ScatterSystem> system) {
     // Unregister old material if exists
@@ -200,22 +92,6 @@ void RendererSystems::setRocks(std::unique_ptr<ScatterSystem> system) {
     }
     auto& ref = registry_.add<ScatterSystem, RocksTag>(std::move(system));
     sceneCollection_.registerMaterial(&ref.getMaterial());
-}
-
-void RendererSystems::setTree(std::unique_ptr<TreeSystem> system) {
-    registry_.add<TreeSystem>(std::move(system));
-}
-
-void RendererSystems::setTreeRenderer(std::unique_ptr<TreeRenderer> renderer) {
-    registry_.add<TreeRenderer>(std::move(renderer));
-}
-
-void RendererSystems::setTreeLOD(std::unique_ptr<TreeLODSystem> system) {
-    registry_.add<TreeLODSystem>(std::move(system));
-}
-
-void RendererSystems::setImpostorCull(std::unique_ptr<ImpostorCullSystem> system) {
-    registry_.add<ImpostorCullSystem>(std::move(system));
 }
 
 void RendererSystems::setDetritus(std::unique_ptr<ScatterSystem> system) {
@@ -227,49 +103,28 @@ void RendererSystems::setDetritus(std::unique_ptr<ScatterSystem> system) {
     sceneCollection_.registerMaterial(&ref.getMaterial());
 }
 
-void RendererSystems::setDeferredTerrainObjects(std::unique_ptr<DeferredTerrainObjects> deferred) {
-    registry_.add<DeferredTerrainObjects>(std::move(deferred));
-}
+// ============================================================================
+// Trivial setters for non-grouped systems
+// (Grouped systems are registered via Bundle::registerAll() in their system group .cpp files)
+// ============================================================================
 
-void RendererSystems::setHiZ(std::unique_ptr<HiZSystem> system) {
-    registry_.add<HiZSystem>(std::move(system));
-}
-
-void RendererSystems::setGPUSceneBuffer(std::unique_ptr<GPUSceneBuffer> buffer) {
-    registry_.add<GPUSceneBuffer>(std::move(buffer));
-}
-
-void RendererSystems::setGPUCullPass(std::unique_ptr<GPUCullPass> pass) {
-    registry_.add<GPUCullPass>(std::move(pass));
-}
-
-void RendererSystems::setScreenSpaceShadow(std::unique_ptr<ScreenSpaceShadowSystem> system) {
-    registry_.add<ScreenSpaceShadowSystem>(std::move(system));
-}
-
-void RendererSystems::setScene(std::unique_ptr<SceneManager> system) {
-    registry_.add<SceneManager>(std::move(system));
-}
-
-void RendererSystems::setGlobalBuffers(std::unique_ptr<GlobalBufferManager> buffers) {
-    registry_.add<GlobalBufferManager>(std::move(buffers));
-}
-
-void RendererSystems::setSkinnedMesh(std::unique_ptr<SkinnedMeshRenderer> system) {
-    registry_.add<SkinnedMeshRenderer>(std::move(system));
-}
-
-void RendererSystems::setNPCRenderer(std::unique_ptr<NPCRenderer> renderer) {
-    registry_.add<NPCRenderer>(std::move(renderer));
-}
-
-void RendererSystems::setDebugLineSystem(std::unique_ptr<DebugLineSystem> system) {
-    registry_.add<DebugLineSystem>(std::move(system));
-}
-
-void RendererSystems::setProfiler(std::unique_ptr<Profiler> profiler) {
-    registry_.add<Profiler>(std::move(profiler));
-}
+void RendererSystems::setPostProcess(std::unique_ptr<PostProcessSystem> system) { registry_.add<PostProcessSystem>(std::move(system)); }
+void RendererSystems::setBloom(std::unique_ptr<BloomSystem> system) { registry_.add<BloomSystem>(std::move(system)); }
+void RendererSystems::setBilateralGrid(std::unique_ptr<BilateralGridSystem> system) { registry_.add<BilateralGridSystem>(std::move(system)); }
+void RendererSystems::setGodRays(std::unique_ptr<GodRaysSystem> system) { registry_.add<GodRaysSystem>(std::move(system)); }
+void RendererSystems::setShadow(std::unique_ptr<ShadowSystem> system) { registry_.add<ShadowSystem>(std::move(system)); }
+void RendererSystems::setTerrain(std::unique_ptr<TerrainSystem> system) { registry_.add<TerrainSystem>(std::move(system)); }
+void RendererSystems::setDeferredTerrainObjects(std::unique_ptr<DeferredTerrainObjects> deferred) { registry_.add<DeferredTerrainObjects>(std::move(deferred)); }
+void RendererSystems::setHiZ(std::unique_ptr<HiZSystem> system) { registry_.add<HiZSystem>(std::move(system)); }
+void RendererSystems::setGPUSceneBuffer(std::unique_ptr<GPUSceneBuffer> buffer) { registry_.add<GPUSceneBuffer>(std::move(buffer)); }
+void RendererSystems::setGPUCullPass(std::unique_ptr<GPUCullPass> pass) { registry_.add<GPUCullPass>(std::move(pass)); }
+void RendererSystems::setScreenSpaceShadow(std::unique_ptr<ScreenSpaceShadowSystem> system) { registry_.add<ScreenSpaceShadowSystem>(std::move(system)); }
+void RendererSystems::setScene(std::unique_ptr<SceneManager> system) { registry_.add<SceneManager>(std::move(system)); }
+void RendererSystems::setGlobalBuffers(std::unique_ptr<GlobalBufferManager> buffers) { registry_.add<GlobalBufferManager>(std::move(buffers)); }
+void RendererSystems::setSkinnedMesh(std::unique_ptr<SkinnedMeshRenderer> system) { registry_.add<SkinnedMeshRenderer>(std::move(system)); }
+void RendererSystems::setNPCRenderer(std::unique_ptr<NPCRenderer> renderer) { registry_.add<NPCRenderer>(std::move(renderer)); }
+void RendererSystems::setDebugLineSystem(std::unique_ptr<DebugLineSystem> system) { registry_.add<DebugLineSystem>(std::move(system)); }
+void RendererSystems::setProfiler(std::unique_ptr<Profiler> profiler) { registry_.add<Profiler>(std::move(profiler)); }
 
 // ============================================================================
 // Initialization

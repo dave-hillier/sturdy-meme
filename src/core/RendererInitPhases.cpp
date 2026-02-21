@@ -15,7 +15,7 @@
 #include "ShadowSystem.h"
 #include "TerrainSystem.h"
 #include "GrassSystem.h"
-#include "DisplacementSystem.h"
+// DisplacementSystem.h - removed: registration now in VegetationSystemGroup::Bundle::registerAll()
 #include "WeatherSystem.h"
 #include "SnowMaskSystem.h"
 #include "VolumetricSnowSystem.h"
@@ -31,10 +31,8 @@
 #include "culling/GPUCullPass.h"
 #include "ScatterSystem.h"
 #include "ScatterSystemFactory.h"
-#include "TreeSystem.h"
+// TreeSystem.h, TreeRenderer.h, TreeLODSystem.h - removed: registration now in VegetationSystemGroup::Bundle::registerAll()
 #include "ThreadedTreeGenerator.h"
-#include "TreeRenderer.h"
-#include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
 #include "VegetationContentGenerator.h"
 #include "VegetationSystemGroup.h"
@@ -273,13 +271,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
 
             VkRenderPass hdrRenderPass = systems_->postProcess().getHDRRenderPass();
             SnowSystemGroup::CreateDeps snowDeps{*ctxPtr, hdrRenderPass};
-            auto snowBundle = SnowSystemGroup::createAll(snowDeps);
-            if (!snowBundle) return false;
-
-            systems_->setSnowMask(std::move(snowBundle->snowMask));
-            systems_->setVolumetricSnow(std::move(snowBundle->volumetricSnow));
-            systems_->setWeather(std::move(snowBundle->weather));
-            systems_->setLeaf(std::move(snowBundle->leaf));
+            if (!SnowSystemGroup::createAndRegister(snowDeps, *systems_)) return false;
             return true;
         };
         tasks.push_back(std::move(task));
@@ -364,17 +356,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 rockConfig
             };
 
-            auto vegBundle = VegetationSystemGroup::createAll(vegDeps);
-            if (!vegBundle) return false;
-
-            systems_->setWind(std::move(vegBundle->wind));
-            systems_->setDisplacement(std::move(vegBundle->displacement));
-            systems_->setGrass(std::move(vegBundle->grass));
-            systems_->setRocks(std::move(vegBundle->rocks));
-            systems_->setTree(std::move(vegBundle->tree));
-            systems_->setTreeRenderer(std::move(vegBundle->treeRenderer));
-            if (vegBundle->treeLOD) systems_->setTreeLOD(std::move(vegBundle->treeLOD));
-            if (vegBundle->impostorCull) systems_->setImpostorCull(std::move(vegBundle->impostorCull));
+            if (!VegetationSystemGroup::createAndRegister(vegDeps, *systems_)) return false;
 
             return true;
         };
@@ -402,13 +384,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 core.shadow.sampler,
                 systems_->globalBuffers().lightBuffers.buffers
             };
-            auto atmosBundle = AtmosphereSystemGroup::createAll(atmosDeps);
-            if (!atmosBundle) return false;
-
-            systems_->setSky(std::move(atmosBundle->sky));
-            systems_->setFroxel(std::move(atmosBundle->froxel));
-            systems_->setAtmosphereLUT(std::move(atmosBundle->atmosphereLUT));
-            systems_->setCloudShadow(std::move(atmosBundle->cloudShadow));
+            if (!AtmosphereSystemGroup::createAndRegister(atmosDeps, *systems_)) return false;
 
             AtmosphereSystemGroup::wireToPostProcess(systems_->froxel(), systems_->postProcess());
             return true;
@@ -437,16 +413,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                 resourcePath
             };
 
-            auto waterBundle = WaterSystemGroup::createAll(waterDeps);
-            if (!waterBundle) return false;
-
-            systems_->setWater(std::move(waterBundle->system));
-            systems_->setFlowMap(std::move(waterBundle->flowMap));
-            systems_->setWaterDisplacement(std::move(waterBundle->displacement));
-            systems_->setFoam(std::move(waterBundle->foam));
-            systems_->setSSR(std::move(waterBundle->ssr));
-            if (waterBundle->tileCull) systems_->setWaterTileCull(std::move(waterBundle->tileCull));
-            if (waterBundle->gBuffer) systems_->setWaterGBuffer(std::move(waterBundle->gBuffer));
+            if (!WaterSystemGroup::createAndRegister(waterDeps, *systems_)) return false;
 
             // Configure water subsystems
             TerrainFactory::Config terrainFactoryConfig{};
@@ -583,9 +550,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
                     resourcePath,
                     core.terrain.getHeightAt
                 };
-                auto geomBundle = GeometrySystemGroup::createAll(geomDeps);
-                if (!geomBundle) return false;
-                systems_->setCatmullClark(std::move(geomBundle->catmullClark));
+                if (!GeometrySystemGroup::createAndRegister(geomDeps, *systems_)) return false;
             }
 
             // Sky descriptor sets

@@ -10,8 +10,27 @@
 #include "TreeRenderer.h"
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
+#include "RendererSystems.h"
 #include "core/InitInfoBuilder.h"
 #include <SDL3/SDL.h>
+
+void VegetationSystemGroup::Bundle::registerAll(RendererSystems& systems) {
+    systems.registry().add<WindSystem>(std::move(wind));
+    systems.registry().add<DisplacementSystem>(std::move(displacement));
+    systems.registry().add<GrassSystem>(std::move(grass));
+    systems.setRocks(std::move(rocks));  // Non-trivial: updates sceneCollection_
+    if (tree) systems.registry().add<TreeSystem>(std::move(tree));
+    if (treeRenderer) systems.registry().add<TreeRenderer>(std::move(treeRenderer));
+    if (treeLOD) systems.registry().add<TreeLODSystem>(std::move(treeLOD));
+    if (impostorCull) systems.registry().add<ImpostorCullSystem>(std::move(impostorCull));
+}
+
+bool VegetationSystemGroup::createAndRegister(const CreateDeps& deps, RendererSystems& systems) {
+    auto bundle = createAll(deps);
+    if (!bundle) return false;
+    bundle->registerAll(systems);
+    return true;
+}
 
 std::optional<VegetationSystemGroup::Bundle> VegetationSystemGroup::createAll(
     const CreateDeps& deps

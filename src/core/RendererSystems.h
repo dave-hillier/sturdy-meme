@@ -187,92 +187,69 @@ public:
     const TerrainSystem* terrainPtr() const { return registry_.find<TerrainSystem>(); }
     void setTerrain(std::unique_ptr<TerrainSystem> system);
 
-    // Sky and atmosphere
+    // Sky and atmosphere (registered via AtmosphereSystemGroup::Bundle::registerAll)
     SkySystem& sky() { return registry_.get<SkySystem>(); }
     const SkySystem& sky() const { return registry_.get<SkySystem>(); }
-    void setSky(std::unique_ptr<SkySystem> system);
     AtmosphereLUTSystem& atmosphereLUT() { return registry_.get<AtmosphereLUTSystem>(); }
     const AtmosphereLUTSystem& atmosphereLUT() const { return registry_.get<AtmosphereLUTSystem>(); }
-    void setAtmosphereLUT(std::unique_ptr<AtmosphereLUTSystem> system);
     FroxelSystem& froxel() { return registry_.get<FroxelSystem>(); }
     const FroxelSystem& froxel() const { return registry_.get<FroxelSystem>(); }
     bool hasFroxel() const { return registry_.has<FroxelSystem>(); }
-    void setFroxel(std::unique_ptr<FroxelSystem> system);
     CloudShadowSystem& cloudShadow() { return registry_.get<CloudShadowSystem>(); }
     const CloudShadowSystem& cloudShadow() const { return registry_.get<CloudShadowSystem>(); }
-    void setCloudShadow(std::unique_ptr<CloudShadowSystem> system);
 
-    // Environment (grass, wind, weather)
+    // Environment (registered via VegetationSystemGroup/SnowSystemGroup Bundle::registerAll)
     GrassSystem& grass() { return registry_.get<GrassSystem>(); }
     const GrassSystem& grass() const { return registry_.get<GrassSystem>(); }
-    void setGrass(std::unique_ptr<GrassSystem> system);
     WindSystem& wind() { return registry_.get<WindSystem>(); }
     const WindSystem& wind() const { return registry_.get<WindSystem>(); }
-    void setWind(std::unique_ptr<WindSystem> system);
     DisplacementSystem& displacement() { return registry_.get<DisplacementSystem>(); }
     const DisplacementSystem& displacement() const { return registry_.get<DisplacementSystem>(); }
-    void setDisplacement(std::unique_ptr<DisplacementSystem> system);
     WeatherSystem& weather() { return registry_.get<WeatherSystem>(); }
     const WeatherSystem& weather() const { return registry_.get<WeatherSystem>(); }
-    void setWeather(std::unique_ptr<WeatherSystem> system);
     LeafSystem& leaf() { return registry_.get<LeafSystem>(); }
     const LeafSystem& leaf() const { return registry_.get<LeafSystem>(); }
-    void setLeaf(std::unique_ptr<LeafSystem> system);
 
-    // Snow
+    // Snow (registered via SnowSystemGroup::Bundle::registerAll)
     SnowMaskSystem& snowMask() { return registry_.get<SnowMaskSystem>(); }
     const SnowMaskSystem& snowMask() const { return registry_.get<SnowMaskSystem>(); }
-    void setSnowMask(std::unique_ptr<SnowMaskSystem> system);
     VolumetricSnowSystem& volumetricSnow() { return registry_.get<VolumetricSnowSystem>(); }
     const VolumetricSnowSystem& volumetricSnow() const { return registry_.get<VolumetricSnowSystem>(); }
-    void setVolumetricSnow(std::unique_ptr<VolumetricSnowSystem> system);
 
-    // Water
+    // Water (registered via WaterSystemGroup::Bundle::registerAll)
     WaterSystem& water() { return registry_.get<WaterSystem>(); }
     const WaterSystem& water() const { return registry_.get<WaterSystem>(); }
-    void setWater(std::unique_ptr<WaterSystem> system);
     WaterDisplacement& waterDisplacement() { return registry_.get<WaterDisplacement>(); }
     const WaterDisplacement& waterDisplacement() const { return registry_.get<WaterDisplacement>(); }
-    void setWaterDisplacement(std::unique_ptr<WaterDisplacement> system);
     FlowMapGenerator& flowMap() { return registry_.get<FlowMapGenerator>(); }
     const FlowMapGenerator& flowMap() const { return registry_.get<FlowMapGenerator>(); }
-    void setFlowMap(std::unique_ptr<FlowMapGenerator> system);
     FoamBuffer& foam() { return registry_.get<FoamBuffer>(); }
     const FoamBuffer& foam() const { return registry_.get<FoamBuffer>(); }
-    void setFoam(std::unique_ptr<FoamBuffer> system);
     SSRSystem& ssr() { return registry_.get<SSRSystem>(); }
     const SSRSystem& ssr() const { return registry_.get<SSRSystem>(); }
-    void setSSR(std::unique_ptr<SSRSystem> system);
     WaterTileCull& waterTileCull() { return registry_.get<WaterTileCull>(); }
     const WaterTileCull& waterTileCull() const { return registry_.get<WaterTileCull>(); }
     bool hasWaterTileCull() const { return registry_.has<WaterTileCull>(); }
-    void setWaterTileCull(std::unique_ptr<WaterTileCull> system);
     WaterGBuffer& waterGBuffer() { return registry_.get<WaterGBuffer>(); }
     const WaterGBuffer& waterGBuffer() const { return registry_.get<WaterGBuffer>(); }
-    void setWaterGBuffer(std::unique_ptr<WaterGBuffer> system);
 
-    // Geometry processing
+    // Geometry processing (registered via system group Bundle::registerAll)
     CatmullClarkSystem& catmullClark() { return registry_.get<CatmullClarkSystem>(); }
     const CatmullClarkSystem& catmullClark() const { return registry_.get<CatmullClarkSystem>(); }
-    void setCatmullClark(std::unique_ptr<CatmullClarkSystem> system);
     ScatterSystem& rocks() { return registry_.get<ScatterSystem, RocksTag>(); }
     const ScatterSystem& rocks() const { return registry_.get<ScatterSystem, RocksTag>(); }
-    void setRocks(std::unique_ptr<ScatterSystem> system);
+    void setRocks(std::unique_ptr<ScatterSystem> system);  // Non-trivial: updates sceneCollection_
     TreeSystem* tree() { return registry_.find<TreeSystem>(); }
     const TreeSystem* tree() const { return registry_.find<TreeSystem>(); }
-    void setTree(std::unique_ptr<TreeSystem> system);
     TreeRenderer* treeRenderer() { return registry_.find<TreeRenderer>(); }
     const TreeRenderer* treeRenderer() const { return registry_.find<TreeRenderer>(); }
-    void setTreeRenderer(std::unique_ptr<TreeRenderer> renderer);
     TreeLODSystem* treeLOD() { return registry_.find<TreeLODSystem>(); }
     const TreeLODSystem* treeLOD() const { return registry_.find<TreeLODSystem>(); }
-    void setTreeLOD(std::unique_ptr<TreeLODSystem> system);
     ImpostorCullSystem* impostorCull() { return registry_.find<ImpostorCullSystem>(); }
     const ImpostorCullSystem* impostorCull() const { return registry_.find<ImpostorCullSystem>(); }
-    void setImpostorCull(std::unique_ptr<ImpostorCullSystem> system);
     ScatterSystem* detritus() { return registry_.find<ScatterSystem, DetritusTag>(); }
     const ScatterSystem* detritus() const { return registry_.find<ScatterSystem, DetritusTag>(); }
-    void setDetritus(std::unique_ptr<ScatterSystem> system);
+    void setDetritus(std::unique_ptr<ScatterSystem> system);  // Non-trivial: updates sceneCollection_
 
     // Deferred terrain object generation (trees, rocks, detritus)
     DeferredTerrainObjects* deferredTerrainObjects() { return registry_.find<DeferredTerrainObjects>(); }

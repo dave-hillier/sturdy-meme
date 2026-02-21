@@ -14,6 +14,7 @@ class FroxelSystem;
 class AtmosphereLUTSystem;
 class CloudShadowSystem;
 class PostProcessSystem;
+class RendererSystems;
 
 /**
  * AtmosphereSystemGroup - Groups atmosphere-related rendering systems
@@ -35,8 +36,7 @@ class PostProcessSystem;
  * Self-initialization:
  *   auto bundle = AtmosphereSystemGroup::createAll(deps);
  *   if (bundle) {
- *       systems.setFroxel(std::move(bundle->froxel));
- *       // ... etc
+ *       bundle->registerAll(systems);
  *   }
  */
 struct AtmosphereSystemGroup {
@@ -70,6 +70,8 @@ struct AtmosphereSystemGroup {
         std::unique_ptr<FroxelSystem> froxel;
         std::unique_ptr<AtmosphereLUTSystem> atmosphereLUT;
         std::unique_ptr<CloudShadowSystem> cloudShadow;
+
+        void registerAll(RendererSystems& systems);
     };
 
     /**
@@ -97,6 +99,12 @@ struct AtmosphereSystemGroup {
      * Note: LUT computation happens inside this factory.
      */
     static std::optional<Bundle> createAll(const CreateDeps& deps);
+
+    /**
+     * Create all atmosphere systems and register them in RendererSystems.
+     * Combines createAll() + registerAll() so callers don't need concrete type includes.
+     */
+    static bool createAndRegister(const CreateDeps& deps, RendererSystems& systems);
 
     /**
      * Wire atmosphere systems to dependent systems.

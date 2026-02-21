@@ -18,6 +18,7 @@ class TreeRenderer;
 class TreeLODSystem;
 class ImpostorCullSystem;
 class ScatterSystem;
+class RendererSystems;
 
 /**
  * VegetationSystemGroup - Groups vegetation-related rendering systems
@@ -44,7 +45,8 @@ class ScatterSystem;
  *
  * Self-initialization:
  *   auto bundle = VegetationSystemGroup::createAll(deps);
- *   // Move systems to RendererSystems, then use VegetationContentGenerator for content
+ *   if (bundle) { bundle->registerAll(systems); }
+ *   // Then use VegetationContentGenerator for content
  */
 struct VegetationSystemGroup {
     // Non-owning references to systems (owned by RendererSystems)
@@ -93,6 +95,8 @@ struct VegetationSystemGroup {
         std::unique_ptr<TreeLODSystem> treeLOD;
         std::unique_ptr<ImpostorCullSystem> impostorCull;
         // Note: Detritus ScatterSystem needs tree positions, created separately after content generation
+
+        void registerAll(RendererSystems& systems);
     };
 
     using HeightFunc = std::function<float(float, float)>;
@@ -118,4 +122,6 @@ struct VegetationSystemGroup {
      * VegetationContentGenerator after systems are stored in RendererSystems.
      */
     static std::optional<Bundle> createAll(const CreateDeps& deps);
+
+    static bool createAndRegister(const CreateDeps& deps, RendererSystems& systems);
 };
