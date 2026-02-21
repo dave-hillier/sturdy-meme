@@ -23,7 +23,7 @@ public:
     // Tower radius constants (faithful to mfcg.js pc.TOWER_RADIUS and pc.LTOWER_RADIUS)
     static constexpr double TOWER_RADIUS = 1.9;
     static constexpr double LTOWER_RADIUS = 2.5;  // Large tower radius
-    static constexpr double THICKNESS = 1.5;      // Wall thickness
+    static constexpr double THICKNESS = 1.9;      // Wall thickness (faithful to MFCG)
 
     geom::Polygon shape;
     std::vector<bool> segments;

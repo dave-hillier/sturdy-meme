@@ -13,8 +13,8 @@ namespace wards {
 class Farm : public Ward {
 public:
     // Constants matching mfcg.js
-    static constexpr double MIN_SUBPLOT = 80.0;   // Minimum subplot area
-    static constexpr double MIN_FURROW = 1.5;     // Minimum furrow spacing
+    static constexpr double MIN_SUBPLOT = 400.0;  // Minimum subplot area (faithful to MFCG)
+    static constexpr double MIN_FURROW = 1.3;     // Minimum furrow spacing (faithful to MFCG)
 
     // Subplot and furrow data for rendering
     std::vector<geom::Polygon> subPlots;

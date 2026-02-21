@@ -27,13 +27,14 @@ namespace building {
 City::City(int nCells, int seed) : nCells_(nCells) {
     utils::Random::reset(seed);
 
-    // Random city features based on original algorithm
-    plazaNeeded = utils::Random::boolVal(0.8);
-    citadelNeeded = utils::Random::boolVal(0.5);
-    wallsNeeded = nCells > 15;
-    templeNeeded = utils::Random::boolVal(0.6);  // 60% chance of cathedral (faithful to mfcg.js)
-    slumsNeeded = wallsNeeded && utils::Random::boolVal(0.5);  // 50% if walled (faithful to mfcg.js)
-    coastNeeded = utils::Random::boolVal(0.5);  // 50% chance of coastal city (faithful to mfcg.js)
+    // Random city features - size-dependent probabilities (faithful to MFCG Blueprint)
+    // Reference: 01-blueprint-building.js lines 22-43
+    plazaNeeded = utils::Random::boolVal(0.9);                                    // 90% (was 80%)
+    wallsNeeded = utils::Random::boolVal((nCells + 30.0) / 80.0);                // size-dependent
+    citadelNeeded = utils::Random::boolVal(0.5 + nCells / 100.0);                // size-dependent
+    templeNeeded = utils::Random::boolVal(static_cast<double>(nCells) / 18.0);   // size-dependent
+    slumsNeeded = wallsNeeded && utils::Random::boolVal(static_cast<double>(nCells) / 80.0);  // size-dependent
+    coastNeeded = utils::Random::boolVal(0.5);
     riverNeeded = coastNeeded && utils::Random::boolVal(0.67);  // 67% when coast is present
 
     // maxDocks: sqrt(nCells/2) + 2 if river (faithful to mfcg.js line 10239)
@@ -309,17 +310,8 @@ void City::buildPatches() {
 
             // If patch is "beyond" the coast center (towards the sea), use lateral distance
             // mfcg.js line 10389: r.x > g.x && (u = Math.min(u, Math.abs(r.y - k) - n))
-            // We use a wider lateral band (1.5*n instead of n) to ensure water reaches the edge
             if (rotated.x > coastCenter.x) {
-                u = std::min(u, std::abs(rotated.y - k) - n * 1.5);
-            }
-
-            // Additionally, only allow circular water region for cells that are
-            // actually near the coast direction (rotated.x > 0), not in the opposite direction
-            // This prevents water from appearing in the middle of the map on the city side
-            if (rotated.x < coastCenter.x * 0.5) {
-                // Cell is far from the sea direction - don't use circular check
-                u = std::max(u, 1.0);  // Force positive (land)
+                u = std::min(u, std::abs(rotated.y - k) - n);
             }
 
             // Fractal noise for coastline variation (faithful to mfcg.js)
@@ -483,6 +475,20 @@ void City::optimizeJunctions() {
         }
     }
 
+    // Compute dynamic threshold (faithful to MFCG optimizeJunctions)
+    // Reference: 03-city.js line 181,191: threshold = max(3 * LTOWER_RADIUS, avgEdgeLength / 3)
+    double totalEdgeLength = 0;
+    int edgeCountForAvg = 0;
+    for (const auto& edge : dcel_->edges) {
+        if (!edge || !edge->origin || !edge->next || !edge->next->origin) continue;
+        auto edgeFace = edge->getFace();
+        if (!edgeFace || facesToOptimize.find(edgeFace.get()) == facesToOptimize.end()) continue;
+        totalEdgeLength += edge->length();
+        edgeCountForAvg++;
+    }
+    double avgEdgeLength = edgeCountForAvg > 0 ? totalEdgeLength / edgeCountForAvg : 0;
+    double collapseThreshold = std::max(3.0 * CurtainWall::LTOWER_RADIUS, avgEdgeLength / 3.0);
+
     // Track affected cells for shape update
     std::set<Cell*> affectedCells;
     int collapseCount = 0;
@@ -502,9 +508,9 @@ void City::optimizeJunctions() {
                 continue;
             }
 
-            // Check edge length
+            // Check edge length against dynamic threshold
             double len = edge->length();
-            if (len < 8.0 && len > 0.0) {
+            if (len < collapseThreshold && len > 0.0) {
                 // Collapse this edge using DCEL
                 auto result = dcel_->collapseEdge(edge);
 
@@ -560,11 +566,22 @@ void City::buildWalls() {
     std::vector<Cell*> outer;
 
     if (!wallsNeeded) {
-        // No walls needed - all cells are inner
-        inner = cells;
+        // No walls: inner is only cells already marked withinCity (first nCells_)
+        // Faithful to mfcg.js: a = Z.filter(cells, withinWalls); if empty, cells[0..nPatches]
         for (auto* p : cells) {
-            p->withinCity = true;
-            p->withinWalls = true;  // For border calculation
+            if (p->withinCity) {
+                inner.push_back(p);
+                p->withinWalls = true;  // Needed for virtual border calculation
+            }
+        }
+        // Fallback if none were marked (shouldn't happen, but matches reference)
+        if (inner.empty()) {
+            size_t limit = std::min(static_cast<size_t>(nCells_ + 1), cells.size());
+            for (size_t i = 0; i < limit; ++i) {
+                inner.push_back(cells[i]);
+                cells[i]->withinCity = true;
+                cells[i]->withinWalls = true;
+            }
         }
     } else {
         for (auto* patch : cells) {
@@ -588,6 +605,12 @@ void City::buildWalls() {
     Cell* citadelPatch = nullptr;
     std::vector<Cell*> citadelPatches;
     std::vector<geom::PointPtr> reservedPoints;  // Points that shouldn't be modified (by pointer identity)
+
+    // Reserve water edge vertices to prevent gates on the coast
+    // (faithful to mfcg.js buildWalls: excludePoints = this.waterEdge.slice())
+    for (size_t i = 0; i < waterEdge.length(); ++i) {
+        reservedPoints.push_back(waterEdge.ptr(i));
+    }
 
     if (citadelNeeded && wallsNeeded && !inner.empty()) {
         // Use the first inner patch (closest to center) for citadel

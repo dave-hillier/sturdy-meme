@@ -379,6 +379,12 @@ std::string SVGWriter::generate(const building::City& model, const Style& style)
                 }
             }
 
+            // Skip gates where both adjacent wall segments are disabled (e.g. coast)
+            size_t prevSeg = (gateIdx + n - 1) % n;
+            bool prevDisabled = prevSeg < wall->segments.size() && !wall->segments[prevSeg];
+            bool nextDisabled = gateIdx < wall->segments.size() && !wall->segments[gateIdx];
+            if (prevDisabled && nextDisabled) continue;
+
             // Get adjacent vertices to calculate wall directions
             size_t prev = (gateIdx + n - 1) % n;
             size_t nextIdx = (gateIdx + 1) % n;

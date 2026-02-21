@@ -55,13 +55,25 @@ void Block::createLots() {
 
     auto lotShapes = bisector.partition();
 
-    // Filter lots
-    double minArea = minSq / 4.0;
-
+    // Convert partitioned shapes to Polygons (faithful to MFCG: filterInner BEFORE valid-lot filter)
     for (const auto& lotShape : lotShapes) {
-        if (lotShape.size() < 3) continue;
+        if (lotShape.size() >= 3) {
+            lots.push_back(geom::Polygon(lotShape));
+        }
+    }
 
-        geom::Polygon lotPoly(lotShape);
+    // Filter inner lots FIRST (faithful to MFCG TwistedBlock.createLots)
+    // Reference: 06-blocks.js - filterInner is called before area/aspect filtering
+    filterInner();
+
+    // Now apply valid-lot filters on remaining lots
+    double minArea = minSq / 4.0;
+    std::vector<geom::Polygon> validLots;
+
+    for (const auto& lotPoly : lots) {
+        // Minimum 4 vertices (faithful to MFCG: 4 > h.length rejects < 4)
+        if (lotPoly.length() < 4) continue;
+
         double lotArea = std::abs(lotPoly.square());
 
         // Skip lots that are too small
@@ -81,8 +93,10 @@ void Block::createLots() {
             if (obbArea > 0.001 && lotArea / obbArea < 0.5) continue;
         }
 
-        lots.push_back(lotPoly);
+        validLots.push_back(lotPoly);
     }
+
+    lots = validLots;
 
     // If no lots created, use the whole block as one lot
     if (lots.empty()) {
