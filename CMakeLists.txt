@@ -181,6 +181,7 @@ set(SOURCES
     # Physics
     src/physics/PhysicsSystem.cpp
     src/physics/ArticulatedBody.cpp
+    src/physics/HumanoidConfig.cpp
     src/physics/JoltLayerConfig.cpp
     src/physics/JoltRuntime.cpp
     src/physics/CharacterController.cpp
@@ -662,7 +663,50 @@ if(SBSAR_MANIFESTS)
 endif()
 
 # ============================================================================
-# UNICON TRAINING PIPELINE
+# UNICON C++ TRAINING EXECUTABLE
+# ============================================================================
+
+add_executable(train_unicon
+    src/training/main.cpp
+    src/training/Trainer.cpp
+    src/training/TrainingMLP.cpp
+    src/training/TrainingEnv.cpp
+    src/training/MotionClip.cpp
+    src/training/RewardFunction.cpp
+    src/training/RolloutBuffer.cpp
+    # Shared physics (no Vulkan deps after HumanoidConfig extraction)
+    src/physics/PhysicsSystem.cpp
+    src/physics/ArticulatedBody.cpp
+    src/physics/JoltLayerConfig.cpp
+    src/physics/JoltRuntime.cpp
+    src/physics/CharacterController.cpp
+    # UniCon state encoder
+    src/unicon/StateEncoder.cpp
+)
+
+target_include_directories(train_unicon PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/training
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/physics
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/unicon
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/scene
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain
+)
+
+target_link_libraries(train_unicon PRIVATE
+    SDL3::SDL3
+    glm::glm
+    Jolt::Jolt
+    nlohmann_json::nlohmann_json
+)
+
+target_compile_definitions(train_unicon PRIVATE
+    GLM_FORCE_RADIANS
+    GLM_FORCE_DEPTH_ZERO_TO_ONE
+)
+
+# ============================================================================
+# UNICON TRAINING PIPELINE (Python)
 # ============================================================================
 
 # Find Python for running training/export scripts
