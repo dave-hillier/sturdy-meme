@@ -272,6 +272,34 @@ void SceneBuilder::createEntitiesFromRenderables() {
         for (auto e : leftHandAxisEntities_) attachChild(e);
     }
 
+    // Establish flag pole -> flag cloth hierarchy.
+    // The flag cloth is conceptually attached to the pole but its mesh vertices
+    // are positioned in world space by the cloth simulation. We set up a Parent
+    // relationship WITHOUT LocalTransform so the hierarchy system doesn't override
+    // the cloth sim's world-space positioning. This enables hierarchy panel grouping
+    // and future cloth-follows-pole logic.
+    if (flagPoleEntity_ != ecs::NullEntity && flagClothEntity_ != ecs::NullEntity) {
+        // Add Children to flag pole
+        if (!ecsWorld_->has<ecs::Children>(flagPoleEntity_)) {
+            ecsWorld_->add<ecs::Children>(flagPoleEntity_);
+        }
+        ecsWorld_->get<ecs::Children>(flagPoleEntity_).add(flagClothEntity_);
+
+        // Add Parent to flag cloth (no LocalTransform - cloth sim drives position)
+        ecsWorld_->add<ecs::Parent>(flagClothEntity_, flagPoleEntity_);
+
+        // Set hierarchy depths
+        if (!ecsWorld_->has<ecs::HierarchyDepth>(flagPoleEntity_)) {
+            ecsWorld_->add<ecs::HierarchyDepth>(flagPoleEntity_, uint16_t(0));
+        }
+        uint16_t poleDepth = ecsWorld_->get<ecs::HierarchyDepth>(flagPoleEntity_).depth;
+        if (!ecsWorld_->has<ecs::HierarchyDepth>(flagClothEntity_)) {
+            ecsWorld_->add<ecs::HierarchyDepth>(flagClothEntity_, static_cast<uint16_t>(poleDepth + 1));
+        } else {
+            ecsWorld_->get<ecs::HierarchyDepth>(flagClothEntity_).depth = static_cast<uint16_t>(poleDepth + 1);
+        }
+    }
+
     // Create NPC entities with tags
     if (npcSimulation_) {
         const auto& npcData = npcSimulation_->getData();

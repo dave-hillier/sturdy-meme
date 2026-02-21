@@ -17,7 +17,6 @@
 #include "TreeCollision.h"
 #include "Mesh.h"
 #include "Texture.h"
-#include "RenderableBuilder.h"
 #include "scene/Transform.h"
 #include "ecs/World.h"
 #include "ecs/Components.h"
@@ -106,13 +105,6 @@ public:
     void setECSWorld(ecs::World* world) { world_ = world; }
     ecs::World* getECSWorld() const { return world_; }
 
-    // Get scene objects for rendering (integrated with existing pipeline)
-    const std::vector<Renderable>& getBranchRenderables() const { return branchRenderables_; }
-    std::vector<Renderable>& getBranchRenderables() { return branchRenderables_; }
-
-    const std::vector<Renderable>& getLeafRenderables() const { return leafRenderables_; }
-    std::vector<Renderable>& getLeafRenderables() { return leafRenderables_; }
-
     // Tree management
     uint32_t addTree(const glm::vec3& position, float rotation, float scale, const TreeOptions& options);
 
@@ -167,6 +159,10 @@ public:
     // Get tree instances for physics/other systems
     const std::vector<TreeInstanceData>& getTreeInstances() const { return treeInstances_; }
 
+    // Get tree options for a given tree instance (looks up via meshIndex)
+    const TreeOptions& getTreeOptionsForInstance(uint32_t treeIndex) const {
+        return treeOptions_[treeInstances_[treeIndex].meshIndex];
+    }
     // Get ECS entity for a tree by index
     ecs::Entity getTreeEntity(uint32_t index) const {
         if (index < treeEntities_.size()) return treeEntities_[index];
@@ -221,9 +217,6 @@ private:
                           TreeMeshData* meshDataOut = nullptr);
     bool createSharedLeafQuadMesh();
     bool uploadLeafInstanceBuffer();
-    void createSceneObjects();
-    void rebuildSceneObjects();
-
     // ECS entity creation/destruction for trees
     ecs::Entity createTreeEntity(uint32_t treeIdx, const TreeInstanceData& instance, const TreeOptions& opts, const AABB& bounds);
     void destroyTreeEntity(uint32_t index);
@@ -285,8 +278,4 @@ private:
     // Tree instances (positions, rotations, etc.)
     std::vector<TreeInstanceData> treeInstances_;
     int selectedTreeIndex_ = -1;
-
-    // Scene objects for rendering
-    std::vector<Renderable> branchRenderables_;
-    std::vector<Renderable> leafRenderables_;
 };

@@ -74,9 +74,6 @@ bool TreeSystem::initInternal(const InitInfo& info) {
         selectedTreeIndex_ = 0;
     }
 
-    // Create scene objects for rendering
-    createSceneObjects();
-
     SDL_Log("TreeSystem::init() complete - %zu trees created", treeInstances_.size());
     return true;
 }
@@ -169,8 +166,6 @@ void TreeSystem::cleanup() {
     allLeafInstances_.clear();
     leafDrawInfoPerTree_.clear();
 
-    branchRenderables_.clear();
-    leafRenderables_.clear();
     treeInstances_.clear();
     treeOptions_.clear();
     treeMeshData_.clear();
@@ -519,89 +514,6 @@ bool TreeSystem::uploadLeafInstanceBuffer() {
     return true;
 }
 
-void TreeSystem::createSceneObjects() {
-    branchRenderables_.clear();
-    leafRenderables_.clear();
-
-    for (size_t treeIdx = 0; treeIdx < treeInstances_.size(); ++treeIdx) {
-        const auto& instance = treeInstances_[treeIdx];
-        if (instance.meshIndex >= branchMeshes_.size()) continue;
-        if (instance.meshIndex >= treeOptions_.size()) continue;
-
-        const TreeOptions& opts = treeOptions_[instance.meshIndex];
-
-        // Build transform using quaternion rotation
-        glm::mat4 transform = instance.getTransformMatrix();
-
-        // Read bark/leaf type from ECS when available, fall back to TreeOptions
-        std::string barkTypeName = opts.bark.type;
-        std::string leafTypeName = opts.leaves.type;
-        glm::vec3 leafTint = opts.leaves.tint;
-        float autumnHueShift = opts.leaves.autumnHueShift;
-
-        if (world_ && treeIdx < treeEntities_.size() && treeEntities_[treeIdx] != ecs::NullEntity) {
-            ecs::Entity e = treeEntities_[treeIdx];
-            if (auto* bark = world_->tryGet<ecs::BarkType>(e)) {
-                barkTypeName = bark->typeName;
-            }
-            if (auto* leaf = world_->tryGet<ecs::LeafType>(e)) {
-                leafTypeName = leaf->typeName;
-            }
-            if (auto* treeData = world_->tryGet<ecs::TreeData>(e)) {
-                leafTint = treeData->leafTint;
-                autumnHueShift = treeData->autumnHueShift;
-            }
-        }
-
-        // Get textures based on type name (string-based lookup)
-        Texture* barkTex = getBarkTexture(barkTypeName);
-        Texture* leafTex = getLeafTexture(leafTypeName);
-
-        // Branch renderable
-        Mesh* branchMesh = &branchMeshes_[instance.meshIndex];
-        if (branchMesh->getIndexCount() > 0) {
-            Renderable branchRenderable = RenderableBuilder()
-                .withMesh(branchMesh)
-                .withTexture(barkTex)
-                .withTransform(transform)
-                .withRoughness(0.7f)
-                .withMetallic(0.0f)
-                .withBarkType(barkTypeName)
-                .withTreeInstanceIndex(static_cast<int>(treeIdx))
-                .build();
-
-            branchRenderables_.push_back(branchRenderable);
-        }
-
-        // Leaf renderable - uses shared quad mesh with instancing
-        // The mesh index in the renderable is used to look up leaf draw info
-        if (instance.meshIndex < leafDrawInfoPerTree_.size() &&
-            leafDrawInfoPerTree_[instance.meshIndex].instanceCount > 0) {
-            Renderable leafRenderable = RenderableBuilder()
-                .withMesh(const_cast<Mesh*>(&sharedLeafQuadMesh_))  // Shared quad mesh
-                .withTexture(leafTex)
-                .withTransform(transform)
-                .withRoughness(0.8f)
-                .withMetallic(0.0f)
-                .withAlphaTest(opts.leaves.alphaTest)
-                .withLeafType(leafTypeName)
-                .withLeafTint(leafTint)
-                .withAutumnHueShift(autumnHueShift)
-                .withTreeInstanceIndex(static_cast<int>(treeIdx))
-                .build();
-
-            // Store the mesh index so the renderer can look up leaf draw info
-            leafRenderable.leafInstanceIndex = static_cast<int>(instance.meshIndex);
-            leafRenderables_.push_back(leafRenderable);
-        }
-    }
-}
-
-void TreeSystem::rebuildSceneObjects() {
-    refreshMeshRefs();
-    createSceneObjects();
-}
-
 uint32_t TreeSystem::addTree(const glm::vec3& position, float rotation, float scale, const TreeOptions& options) {
     // Generate mesh and leaf instances for this tree
     Mesh branchMesh;
@@ -654,7 +566,7 @@ uint32_t TreeSystem::addTree(const glm::vec3& position, float rotation, float sc
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSystem: Failed to upload leaf instance buffer");
     }
 
-    rebuildSceneObjects();
+    refreshMeshRefs();
 
     return treeIndex;
 }
@@ -726,7 +638,7 @@ bool TreeSystem::finalizeLeafInstanceBuffer() {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeSystem: Failed to upload leaf instance buffer");
         return false;
     }
-    rebuildSceneObjects();
+    refreshMeshRefs();
     return true;
 }
 
@@ -758,7 +670,7 @@ void TreeSystem::removeTree(uint32_t index) {
         selectedTreeIndex_--;
     }
 
-    rebuildSceneObjects();
+    refreshMeshRefs();
 }
 
 void TreeSystem::selectTree(int index) {
@@ -887,7 +799,7 @@ void TreeSystem::regenerateTree(uint32_t treeIndex) {
     // Re-upload leaf instance buffer
     uploadLeafInstanceBuffer();
 
-    rebuildSceneObjects();
+    refreshMeshRefs();
 }
 
 const TreeMeshData* TreeSystem::getTreeMeshData(uint32_t meshIndex) const {

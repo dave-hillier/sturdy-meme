@@ -559,10 +559,10 @@ bool TreeLeafCulling::createTwoPhaseLeafCullDescriptorSets() {
 }
 
 void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
-    const auto& leafRenderables = treeSystem.getLeafRenderables();
+    const auto& treeInstances = treeSystem.getTreeInstances();
     const auto& leafDrawInfo = treeSystem.getLeafDrawInfo();
 
-    if (leafRenderables.empty()) {
+    if (treeInstances.empty()) {
         spatialIndex_.reset();
         return;
     }
@@ -582,24 +582,24 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
         }
     }
 
-    // Build transforms and scales from leafRenderables
+    // Build transforms and scales from tree instances
     // CRITICAL: The spatial index must use the SAME filtering as recordCulling()
     // to ensure originalTreeIndex matches the index into the TreeCullData buffer.
-    // Trees with invalid leafInstanceIndex or zero instanceCount are filtered out
+    // Trees with invalid meshIndex or zero instanceCount are filtered out
     // in both places to maintain index consistency.
     std::vector<glm::mat4> transforms;
     std::vector<float> scales;
-    transforms.reserve(leafRenderables.size());
-    scales.reserve(leafRenderables.size());
-    for (const auto& renderable : leafRenderables) {
+    transforms.reserve(treeInstances.size());
+    scales.reserve(treeInstances.size());
+    for (const auto& instance : treeInstances) {
         // Apply same filtering as recordCulling() to ensure index consistency
-        if (renderable.leafInstanceIndex >= 0 &&
-            static_cast<size_t>(renderable.leafInstanceIndex) < leafDrawInfo.size()) {
-            const auto& drawInfo = leafDrawInfo[renderable.leafInstanceIndex];
+        if (instance.meshIndex < leafDrawInfo.size()) {
+            const auto& drawInfo = leafDrawInfo[instance.meshIndex];
             if (drawInfo.instanceCount > 0) {
-                transforms.push_back(renderable.transform);
+                glm::mat4 transform = instance.getTransformMatrix();
+                transforms.push_back(transform);
                 // Estimate scale from transform (use Y-axis length as approximation)
-                float scale = glm::length(glm::vec3(renderable.transform[1]));
+                float scale = glm::length(glm::vec3(transform[1]));
                 scales.push_back(scale);
             }
         }
@@ -624,7 +624,7 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
         }
     }
 
-    uint32_t requiredTreeCapacity = static_cast<uint32_t>(leafRenderables.size());
+    uint32_t requiredTreeCapacity = static_cast<uint32_t>(treeInstances.size());
     bool needsTreeFilterBuffers = visibleTreeBuffers_.empty() ||
                                   requiredTreeCapacity > maxVisibleTrees_;
 
@@ -655,7 +655,7 @@ void TreeLeafCulling::updateSpatialIndex(const TreeSystem& treeSystem) {
     }
 
     SDL_Log("TreeLeafCulling: Updated spatial index (%zu trees, %u non-empty cells)",
-            leafRenderables.size(), spatialIndex_->getNonEmptyCellCount());
+            treeInstances.size(), spatialIndex_->getNonEmptyCellCount());
 }
 
 void TreeLeafCulling::updateCullDescriptorSets(const TreeSystem& treeSystem) {
@@ -682,49 +682,50 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                                      const glm::vec4* frustumPlanes) {
     if (!isEnabled()) return;
 
-    const auto& leafRenderables = treeSystem.getLeafRenderables();
+    const auto& treeInstances = treeSystem.getTreeInstances();
     const auto& leafDrawInfo = treeSystem.getLeafDrawInfo();
 
-    if (leafRenderables.empty() || leafDrawInfo.empty()) return;
+    if (treeInstances.empty() || leafDrawInfo.empty()) return;
 
     vk::CommandBuffer vkCmd(cmd);
 
     // Build per-tree data for batched culling
     std::vector<TreeCullData> treeDataList;
     std::vector<TreeRenderDataGPU> treeRenderDataList;
-    treeDataList.reserve(leafRenderables.size());
-    treeRenderDataList.reserve(leafRenderables.size());
+    treeDataList.reserve(treeInstances.size());
+    treeRenderDataList.reserve(treeInstances.size());
 
     uint32_t numTrees = 0;
     uint32_t totalLeafInstances = 0;
 
-    for (const auto& renderable : leafRenderables) {
-        if (renderable.leafInstanceIndex >= 0 &&
-            static_cast<size_t>(renderable.leafInstanceIndex) < leafDrawInfo.size()) {
-            const auto& drawInfo = leafDrawInfo[renderable.leafInstanceIndex];
+    for (uint32_t i = 0; i < static_cast<uint32_t>(treeInstances.size()); ++i) {
+        const auto& instance = treeInstances[i];
+        if (instance.meshIndex < leafDrawInfo.size()) {
+            const auto& drawInfo = leafDrawInfo[instance.meshIndex];
             if (drawInfo.instanceCount > 0) {
                 float lodBlendFactor = 0.0f;
                 if (lodSystem) {
-                    // Use leafInstanceIndex (== tree instance index) for LOD lookup
-                    // This correctly maps to treeInstances_ even if some trees have no leaves
-                    lodBlendFactor = lodSystem->getBlendFactor(static_cast<uint32_t>(renderable.leafInstanceIndex));
+                    lodBlendFactor = lodSystem->getBlendFactor(i);
                 }
 
+                const auto& opts = treeSystem.getTreeOptionsForInstance(i);
                 uint32_t leafTypeIdx = LEAF_TYPE_OAK;
-                if (renderable.leafType == "ash") leafTypeIdx = LEAF_TYPE_ASH;
-                else if (renderable.leafType == "aspen") leafTypeIdx = LEAF_TYPE_ASPEN;
-                else if (renderable.leafType == "pine") leafTypeIdx = LEAF_TYPE_PINE;
+                if (opts.leaves.type == "ash") leafTypeIdx = LEAF_TYPE_ASH;
+                else if (opts.leaves.type == "aspen") leafTypeIdx = LEAF_TYPE_ASPEN;
+                else if (opts.leaves.type == "pine") leafTypeIdx = LEAF_TYPE_PINE;
 
                 static bool loggedOnce = false;
                 if (!loggedOnce && numTrees < 10) {
                     SDL_Log("TreeLeafCulling: Tree %u: leafType='%s' -> leafTypeIdx=%u, firstInst=%u, count=%u",
-                            numTrees, renderable.leafType.c_str(), leafTypeIdx,
+                            numTrees, opts.leaves.type.c_str(), leafTypeIdx,
                             drawInfo.firstInstance, drawInfo.instanceCount);
                     if (numTrees == 9) loggedOnce = true;
                 }
 
+                glm::mat4 transform = instance.getTransformMatrix();
+
                 TreeCullData treeData{};
-                treeData.treeModel = renderable.transform;
+                treeData.treeModel = transform;
                 treeData.inputFirstInstance = drawInfo.firstInstance;
                 treeData.inputInstanceCount = drawInfo.instanceCount;
                 treeData.treeIndex = numTrees;
@@ -733,9 +734,9 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
                 treeDataList.push_back(treeData);
 
                 TreeRenderDataGPU renderData{};
-                renderData.model = renderable.transform;
-                renderData.tintAndParams = glm::vec4(renderable.leafTint, renderable.autumnHueShift);
-                float windOffset = glm::fract(renderable.transform[3][0] * 0.1f + renderable.transform[3][2] * 0.1f) * 6.28318f;
+                renderData.model = transform;
+                renderData.tintAndParams = glm::vec4(opts.leaves.tint, opts.leaves.autumnHueShift);
+                float windOffset = glm::fract(transform[3][0] * 0.1f + transform[3][2] * 0.1f) * 6.28318f;
                 renderData.windOffsetAndLOD = glm::vec4(windOffset, lodBlendFactor, 0.0f, 0.0f);
                 treeRenderDataList.push_back(renderData);
 

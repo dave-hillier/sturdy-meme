@@ -174,11 +174,21 @@ void SceneManager::initializeSceneLights() {
         return glm::vec2(localX + sceneOrigin.x, localZ + sceneOrigin.y);
     };
 
-    // Orb light - flickering torch that follows the emissive sphere
-    auto orbPos = worldPos(2.0f, 0.0f);
-    glm::vec3 orbPosition(orbPos.x, 1.3f, orbPos.y);
-    orbLightEntity_ = ecs::light::createTorch(*ecsWorld_, orbPosition, 5.0f);
-    ecsWorld_->add<ecs::DebugName>(orbLightEntity_, "Orb Torch");
+    // Orb light - flickering torch as child of the emissive orb entity.
+    // The light follows the orb automatically via ECS hierarchy (parent-child transform propagation).
+    ecs::Entity orbEntity = sceneBuilder ? sceneBuilder->getEmissiveOrbEntity() : ecs::NullEntity;
+    if (orbEntity != ecs::NullEntity && ecsWorld_->valid(orbEntity)) {
+        orbLightEntity_ = ecs::light::createChildTorch(*ecsWorld_, orbEntity, 5.0f);
+        ecsWorld_->add<ecs::DebugName>(orbLightEntity_, "Orb Torch");
+        SDL_Log("Orb light created as child of emissive orb entity (hierarchy-driven)");
+    } else {
+        // Fallback: create standalone torch if orb entity doesn't exist yet
+        auto orbPos = worldPos(2.0f, 0.0f);
+        glm::vec3 orbPosition(orbPos.x, 1.3f, orbPos.y);
+        orbLightEntity_ = ecs::light::createTorch(*ecsWorld_, orbPosition, 5.0f);
+        ecsWorld_->add<ecs::DebugName>(orbLightEntity_, "Orb Torch");
+        SDL_Log("Orb light created as standalone (orb entity not available)");
+    }
 
     // Blue point light
     auto bluePos = worldPos(-3.0f, 2.0f);
@@ -228,17 +238,15 @@ void SceneManager::updatePhysicsToScene(PhysicsWorld& physics) {
             renderable->transform = physicsTransform;
         }
 
-        // Update orb light position to follow the emissive sphere
-        if (ecsWorld_->has<ecs::OrbTag>(entity)) {
-            glm::vec3 orbPosition = glm::vec3(physicsTransform[3]);
-            orbLightPosition = orbPosition;
+        // Sync ECS Transform from physics - enables hierarchy propagation
+        // (e.g., orb light follows orb entity via parent-child relationship)
+        if (ecsWorld_->has<ecs::Transform>(entity)) {
+            ecsWorld_->get<ecs::Transform>(entity).matrix = physicsTransform;
+        }
 
-            if (orbLightEntity_ != ecs::NullEntity && ecsWorld_->valid(orbLightEntity_)) {
-                if (ecsWorld_->has<ecs::Transform>(orbLightEntity_)) {
-                    ecsWorld_->get<ecs::Transform>(orbLightEntity_).matrix =
-                        ecs::Transform::fromPosition(orbPosition).matrix;
-                }
-            }
+        // Track orb light position for external queries
+        if (ecsWorld_->has<ecs::OrbTag>(entity)) {
+            orbLightPosition = glm::vec3(physicsTransform[3]);
         }
     }
 }

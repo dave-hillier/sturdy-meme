@@ -643,20 +643,16 @@ void TreeRenderer::setBranchShadowCullingEnabled(bool enabled) {
 
 void TreeRenderer::render(vk::CommandBuffer cmd, uint32_t frameIndex, float time,
                           const TreeSystem& treeSystem, const TreeLODSystem* lodSystem) {
-    const auto& branchRenderables = treeSystem.getBranchRenderables();
-    const auto& leafRenderables = treeSystem.getLeafRenderables();
-
-    if (branchRenderables.empty() && leafRenderables.empty()) return;
+    if (treeSystem.getTreeCount() == 0) return;
 
     vk::CommandBuffer vkCmd = cmd;
 
-    // Render branches - iterate ECS entities when available, fall back to renderables
+    // Render branches - iterate ECS entities
     vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **branchPipeline_);
 
     std::string lastBarkType;
 
-    if (ecsWorld_) {
-        // ECS path: iterate tree entities directly
+    {
         auto treeView = ecsWorld_->view<ecs::TreeTag, ecs::TreeData, ecs::BarkType, ecs::Transform, ecs::MeshRef>();
         for (auto entity : treeView) {
             const auto& treeData = treeView.get<ecs::TreeData>(entity);
@@ -705,43 +701,6 @@ void TreeRenderer::render(vk::CommandBuffer cmd, uint32_t frameIndex, float time
             vkCmd.drawIndexed(meshRef.mesh->getIndexCount(), 1, 0, 0, 0);
             DIAG_RECORD_DRAW();
         }
-    } else {
-        // Legacy path: iterate branchRenderables
-        for (const auto& renderable : branchRenderables) {
-            int treeIdx = renderable.treeInstanceIndex;
-            uint32_t lodIndex = (treeIdx >= 0) ? static_cast<uint32_t>(treeIdx) : 0;
-            if (lodSystem && !lodSystem->shouldRenderFullGeometry(lodIndex)) {
-                continue;
-            }
-
-            if (renderable.barkType != lastBarkType) {
-                vk::DescriptorSet descriptorSet = getBranchDescriptorSet(frameIndex, renderable.barkType);
-                vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, **branchPipelineLayout_,
-                                         0, descriptorSet, {});
-                lastBarkType = renderable.barkType;
-            }
-
-            TreeBranchPushConstants push{};
-            push.model = renderable.transform;
-            push.time = time;
-            push.lodBlendFactor = lodSystem ? lodSystem->getBlendFactor(lodIndex) : 0.0f;
-            push.barkTint = glm::vec3(1.0f);
-            push.roughnessScale = renderable.roughness;
-
-            vkCmd.pushConstants<TreeBranchPushConstants>(
-                **branchPipelineLayout_,
-                vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
-                0, push);
-
-            if (renderable.mesh) {
-                vk::Buffer vertexBuffers[] = {renderable.mesh->getVertexBuffer()};
-                vk::DeviceSize offsets[] = {0};
-                vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
-                vkCmd.bindIndexBuffer(renderable.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
-                vkCmd.drawIndexed(renderable.mesh->getIndexCount(), 1, 0, 0, 0);
-                DIAG_RECORD_DRAW();
-            }
-        }
     }
 
     // Render leaves with instancing
@@ -766,9 +725,9 @@ void TreeRenderer::render(vk::CommandBuffer cmd, uint32_t frameIndex, float time
         static const std::string leafTypeNames[NUM_LEAF_TYPES] = {"oak", "ash", "aspen", "pine"};
 
         float alphaTest = 0.5f;
-        if (!leafRenderables.empty()) {
-            alphaTest = leafRenderables[0].alphaTestThreshold > 0.0f ?
-                        leafRenderables[0].alphaTestThreshold : 0.5f;
+        if (treeSystem.getTreeCount() > 0) {
+            float optAlpha = treeSystem.getTreeOptionsForInstance(0).leaves.alphaTest;
+            if (optAlpha > 0.0f) alphaTest = optAlpha;
         }
 
         for (uint32_t leafType = 0; leafType < NUM_LEAF_TYPES; ++leafType) {
@@ -801,12 +760,7 @@ void TreeRenderer::render(vk::CommandBuffer cmd, uint32_t frameIndex, float time
 void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
                                  const TreeSystem& treeSystem, int cascadeIndex,
                                  const TreeLODSystem* lodSystem) {
-    const auto& branchRenderables = treeSystem.getBranchRenderables();
-    const auto& leafRenderables = treeSystem.getLeafRenderables();
-
-    if (branchRenderables.empty() && leafRenderables.empty()) {
-        return;
-    }
+    if (treeSystem.getTreeCount() == 0) return;
 
     vk::CommandBuffer vkCmd = cmd;
     const uint32_t cascade = static_cast<uint32_t>(cascadeIndex);
@@ -824,7 +778,7 @@ void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
     }
 
     // Render branch shadows
-    if (renderBranches && !branchRenderables.empty()) {
+    if (renderBranches) {
         bool useInstancedPath = isBranchShadowCullingEnabled() &&
                                 branchShadowInstancedPipeline_ &&
                                 !branchShadowInstancedDescriptorSets_.empty() &&
@@ -844,14 +798,13 @@ void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
             for (size_t groupIdx = 0; groupIdx < meshGroups.size(); ++groupIdx) {
                 const auto& group = meshGroups[groupIdx];
 
-                // Get the mesh for this group
-                if (group.meshIndex < branchRenderables.size()) {
-                    const auto& renderable = branchRenderables[group.meshIndex];
-                    if (renderable.mesh) {
-                        vk::Buffer vertexBuffers[] = {renderable.mesh->getVertexBuffer()};
+                if (group.meshIndex < treeSystem.getMeshCount()) {
+                    const Mesh& mesh = treeSystem.getBranchMesh(group.meshIndex);
+                    if (mesh.getIndexCount() > 0) {
+                        vk::Buffer vertexBuffers[] = {mesh.getVertexBuffer()};
                         vk::DeviceSize offsets[] = {0};
                         vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
-                        vkCmd.bindIndexBuffer(renderable.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+                        vkCmd.bindIndexBuffer(mesh.getIndexBuffer(), 0, vk::IndexType::eUint32);
 
                         TreeBranchShadowInstancedPushConstants push{};
                         push.cascadeIndex = cascade;
@@ -869,94 +822,56 @@ void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
                 }
             }
         } else if (branchShadowPipeline_) {
-            // Fallback: per-tree branch shadow rendering
+            // Per-tree branch shadow rendering via ECS
             vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **branchShadowPipeline_);
 
             std::string lastBarkType;
 
-            if (ecsWorld_) {
-                // ECS path for shadow branches
-                auto treeView = ecsWorld_->view<ecs::TreeTag, ecs::TreeData, ecs::BarkType, ecs::Transform, ecs::MeshRef>();
-                for (auto entity : treeView) {
-                    const auto& treeData = treeView.get<ecs::TreeData>(entity);
-                    const auto& bark = treeView.get<ecs::BarkType>(entity);
-                    const auto& xform = treeView.get<ecs::Transform>(entity);
-                    const auto& meshRef = treeView.get<ecs::MeshRef>(entity);
+            auto treeView = ecsWorld_->view<ecs::TreeTag, ecs::TreeData, ecs::BarkType, ecs::Transform, ecs::MeshRef>();
+            for (auto entity : treeView) {
+                const auto& treeData = treeView.get<ecs::TreeData>(entity);
+                const auto& bark = treeView.get<ecs::BarkType>(entity);
+                const auto& xform = treeView.get<ecs::Transform>(entity);
+                const auto& meshRef = treeView.get<ecs::MeshRef>(entity);
 
-                    uint32_t lodIndex = (treeData.treeInstanceIndex >= 0) ?
-                                        static_cast<uint32_t>(treeData.treeInstanceIndex) : 0;
-                    if (lodSystem && !lodSystem->shouldRenderBranchShadow(lodIndex, cascade)) {
-                        continue;
-                    }
-
-                    if (!meshRef.mesh || meshRef.mesh->getIndexCount() == 0) continue;
-                    if (!meshRef.mesh->getVertexBuffer() || !meshRef.mesh->getIndexBuffer()) continue;
-
-                    if (bark.typeName != lastBarkType) {
-                        vk::DescriptorSet branchSet = getBranchDescriptorSet(frameIndex, bark.typeName);
-                        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                                                 **branchShadowPipelineLayout_, 0,
-                                                 branchSet, {});
-                        lastBarkType = bark.typeName;
-                    }
-
-                    TreeBranchShadowPushConstants push{};
-                    push.model = xform.matrix;
-                    push.cascadeIndex = cascadeIndex;
-
-                    vkCmd.pushConstants<TreeBranchShadowPushConstants>(
-                        **branchShadowPipelineLayout_,
-                        vk::ShaderStageFlagBits::eVertex,
-                        0, push);
-
-                    vk::Buffer vertexBuffers[] = {meshRef.mesh->getVertexBuffer()};
-                    vk::DeviceSize offsets[] = {0};
-                    vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
-                    vkCmd.bindIndexBuffer(meshRef.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
-                    vkCmd.drawIndexed(meshRef.mesh->getIndexCount(), 1, 0, 0, 0);
-                    DIAG_RECORD_DRAW();
+                uint32_t lodIndex = (treeData.treeInstanceIndex >= 0) ?
+                                    static_cast<uint32_t>(treeData.treeInstanceIndex) : 0;
+                if (lodSystem && !lodSystem->shouldRenderBranchShadow(lodIndex, cascade)) {
+                    continue;
                 }
-            } else {
-                // Legacy path for shadow branches
-                for (const auto& renderable : branchRenderables) {
-                    int treeIdx = renderable.treeInstanceIndex;
-                    uint32_t lodIndex = (treeIdx >= 0) ? static_cast<uint32_t>(treeIdx) : 0;
-                    if (lodSystem && !lodSystem->shouldRenderBranchShadow(lodIndex, cascade)) {
-                        continue;
-                    }
 
-                    if (renderable.barkType != lastBarkType) {
-                        vk::DescriptorSet branchSet = getBranchDescriptorSet(frameIndex, renderable.barkType);
-                        vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
-                                                 **branchShadowPipelineLayout_, 0,
-                                                 branchSet, {});
-                        lastBarkType = renderable.barkType;
-                    }
+                if (!meshRef.mesh || meshRef.mesh->getIndexCount() == 0) continue;
+                if (!meshRef.mesh->getVertexBuffer() || !meshRef.mesh->getIndexBuffer()) continue;
 
-                    TreeBranchShadowPushConstants push{};
-                    push.model = renderable.transform;
-                    push.cascadeIndex = cascadeIndex;
-
-                    vkCmd.pushConstants<TreeBranchShadowPushConstants>(
-                        **branchShadowPipelineLayout_,
-                        vk::ShaderStageFlagBits::eVertex,
-                        0, push);
-
-                    if (renderable.mesh) {
-                        vk::Buffer vertexBuffers[] = {renderable.mesh->getVertexBuffer()};
-                        vk::DeviceSize offsets[] = {0};
-                        vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
-                        vkCmd.bindIndexBuffer(renderable.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
-                        vkCmd.drawIndexed(renderable.mesh->getIndexCount(), 1, 0, 0, 0);
-                        DIAG_RECORD_DRAW();
-                    }
+                if (bark.typeName != lastBarkType) {
+                    vk::DescriptorSet branchSet = getBranchDescriptorSet(frameIndex, bark.typeName);
+                    vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+                                             **branchShadowPipelineLayout_, 0,
+                                             branchSet, {});
+                    lastBarkType = bark.typeName;
                 }
+
+                TreeBranchShadowPushConstants push{};
+                push.model = xform.matrix;
+                push.cascadeIndex = cascadeIndex;
+
+                vkCmd.pushConstants<TreeBranchShadowPushConstants>(
+                    **branchShadowPipelineLayout_,
+                    vk::ShaderStageFlagBits::eVertex,
+                    0, push);
+
+                vk::Buffer vertexBuffers[] = {meshRef.mesh->getVertexBuffer()};
+                vk::DeviceSize offsets[] = {0};
+                vkCmd.bindVertexBuffers(0, vertexBuffers, offsets);
+                vkCmd.bindIndexBuffer(meshRef.mesh->getIndexBuffer(), 0, vk::IndexType::eUint32);
+                vkCmd.drawIndexed(meshRef.mesh->getIndexCount(), 1, 0, 0, 0);
+                DIAG_RECORD_DRAW();
             }
         }
     }
 
     // Render leaf shadows with instancing
-    if (renderLeaves && !leafRenderables.empty() && leafShadowPipeline_) {
+    if (renderLeaves && leafShadowPipeline_) {
         vkCmd.bindPipeline(vk::PipelineBindPoint::eGraphics, **leafShadowPipeline_);
 
         const Mesh& sharedQuad = treeSystem.getSharedLeafQuadMesh();
@@ -974,13 +889,13 @@ void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
         bool useCulledPath = isLeafCullingEnabled() && hasCulledDescriptors &&
                              leafCulling_ && leafCulling_->getIndirectBuffer(frameIndex) != VK_NULL_HANDLE;
 
-        if (useCulledPath && !leafRenderables.empty()) {
+        if (useCulledPath) {
             static const std::string leafTypeNames[NUM_LEAF_TYPES] = {"oak", "ash", "aspen", "pine"};
 
             float alphaTest = 0.5f;
-            if (!leafRenderables.empty()) {
-                alphaTest = leafRenderables[0].alphaTestThreshold > 0.0f ?
-                            leafRenderables[0].alphaTestThreshold : 0.5f;
+            if (treeSystem.getTreeCount() > 0) {
+                float optAlpha = treeSystem.getTreeOptionsForInstance(0).leaves.alphaTest;
+                if (optAlpha > 0.0f) alphaTest = optAlpha;
             }
 
             for (uint32_t leafType = 0; leafType < NUM_LEAF_TYPES; ++leafType) {
@@ -1006,18 +921,19 @@ void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
                 DIAG_RECORD_DRAW();
             }
         } else {
-            // Direct draw path (fallback)
+            // Direct draw path (fallback) - iterate tree instances
             const auto& leafDrawInfo = treeSystem.getLeafDrawInfo();
+            const auto& treeInstances = treeSystem.getTreeInstances();
             std::string lastLeafType;
             uint32_t leafTreeIndex = 0;
-            for (const auto& renderable : leafRenderables) {
-                if (renderable.leafInstanceIndex < 0 ||
-                    static_cast<size_t>(renderable.leafInstanceIndex) >= leafDrawInfo.size()) {
+            for (uint32_t i = 0; i < static_cast<uint32_t>(treeInstances.size()); ++i) {
+                const auto& instance = treeInstances[i];
+                if (instance.meshIndex >= leafDrawInfo.size()) {
                     leafTreeIndex++;
                     continue;
                 }
 
-                const auto& drawInfo = leafDrawInfo[renderable.leafInstanceIndex];
+                const auto& drawInfo = leafDrawInfo[instance.meshIndex];
                 if (drawInfo.instanceCount == 0) {
                     leafTreeIndex++;
                     continue;
@@ -1028,17 +944,18 @@ void TreeRenderer::renderShadows(vk::CommandBuffer cmd, uint32_t frameIndex,
                     continue;
                 }
 
-                if (renderable.leafType != lastLeafType) {
-                    vk::DescriptorSet leafSet = getLeafDescriptorSet(frameIndex, renderable.leafType);
+                const auto& opts = treeSystem.getTreeOptionsForInstance(i);
+                if (opts.leaves.type != lastLeafType) {
+                    vk::DescriptorSet leafSet = getLeafDescriptorSet(frameIndex, opts.leaves.type);
                     vkCmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
                                              **leafShadowPipelineLayout_, 0,
                                              leafSet, {});
-                    lastLeafType = renderable.leafType;
+                    lastLeafType = opts.leaves.type;
                 }
 
                 TreeLeafShadowPushConstants push{};
                 push.cascadeIndex = cascadeIndex;
-                push.alphaTest = renderable.alphaTestThreshold > 0.0f ? renderable.alphaTestThreshold : 0.5f;
+                push.alphaTest = opts.leaves.alphaTest > 0.0f ? opts.leaves.alphaTest : 0.5f;
 
                 vkCmd.pushConstants<TreeLeafShadowPushConstants>(
                     **leafShadowPipelineLayout_,

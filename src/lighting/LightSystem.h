@@ -433,6 +433,134 @@ inline Entity createSun(World& world,
 }
 
 // =============================================================================
+// Child Light Entity Creation Helpers
+// =============================================================================
+// Create light entities as children of other entities using ECS hierarchy.
+// The light's world Transform is computed from parent * LocalTransform,
+// so the light automatically follows the parent entity.
+
+// Create a point light as a child of an existing entity
+// localOffset: position relative to parent (default: same position)
+inline Entity createChildPointLight(World& world,
+                                     Entity parent,
+                                     const glm::vec3& color = glm::vec3(1.0f),
+                                     float intensity = 1.0f,
+                                     float radius = 10.0f,
+                                     const glm::vec3& localOffset = glm::vec3(0.0f)) {
+    Entity entity = world.create();
+    world.add<Transform>(entity);  // World transform computed by hierarchy system
+    world.add<LocalTransform>(entity, localOffset, glm::quat(1,0,0,0), glm::vec3(1));
+    world.add<Parent>(entity, parent);
+    world.add<PointLightComponent>(entity, color, intensity, radius);
+    world.add<LightSourceTag>(entity);
+    world.add<BoundingSphere>(entity, glm::vec3(0.0f), radius);
+
+    // Add to parent's Children list
+    if (world.has<Children>(parent)) {
+        world.get<Children>(parent).add(entity);
+    } else {
+        Children children;
+        children.add(entity);
+        world.add<Children>(parent, children);
+    }
+
+    // Set hierarchy depth
+    uint16_t parentDepth = 0;
+    if (world.has<HierarchyDepth>(parent)) {
+        parentDepth = world.get<HierarchyDepth>(parent).depth;
+    }
+    world.add<HierarchyDepth>(entity, static_cast<uint16_t>(parentDepth + 1));
+
+    return entity;
+}
+
+// Create a flickering point light as a child of an existing entity
+inline Entity createChildFlickeringPointLight(World& world,
+                                               Entity parent,
+                                               const PointLightComponent& light,
+                                               const LightFlickerComponent& flicker,
+                                               const glm::vec3& localOffset = glm::vec3(0.0f)) {
+    Entity entity = world.create();
+    world.add<Transform>(entity);
+    world.add<LocalTransform>(entity, localOffset, glm::quat(1,0,0,0), glm::vec3(1));
+    world.add<Parent>(entity, parent);
+    world.add<PointLightComponent>(entity, light);
+
+    LightFlickerComponent flickerCopy = flicker;
+    flickerCopy.baseIntensity = light.properties.intensity;
+    initializeFlickerPhase(flickerCopy);
+    world.add<LightFlickerComponent>(entity, flickerCopy);
+
+    world.add<LightSourceTag>(entity);
+    world.add<BoundingSphere>(entity, glm::vec3(0.0f), light.radius);
+
+    // Add to parent's Children list
+    if (world.has<Children>(parent)) {
+        world.get<Children>(parent).add(entity);
+    } else {
+        Children children;
+        children.add(entity);
+        world.add<Children>(parent, children);
+    }
+
+    uint16_t parentDepth = 0;
+    if (world.has<HierarchyDepth>(parent)) {
+        parentDepth = world.get<HierarchyDepth>(parent).depth;
+    }
+    world.add<HierarchyDepth>(entity, static_cast<uint16_t>(parentDepth + 1));
+
+    return entity;
+}
+
+// Create a torch light (point light + flicker) as a child of an existing entity
+inline Entity createChildTorch(World& world,
+                                Entity parent,
+                                float intensity = 2.0f,
+                                const glm::vec3& localOffset = glm::vec3(0.0f)) {
+    return createChildFlickeringPointLight(world, parent,
+        PointLightComponent::torch(intensity),
+        LightFlickerComponent::torch(),
+        localOffset);
+}
+
+// Create a spot light as a child of an existing entity
+inline Entity createChildSpotLight(World& world,
+                                    Entity parent,
+                                    const glm::vec3& direction,
+                                    const glm::vec3& color = glm::vec3(1.0f),
+                                    float intensity = 1.0f,
+                                    float radius = 15.0f,
+                                    float innerAngle = 30.0f,
+                                    float outerAngle = 45.0f,
+                                    const glm::vec3& localOffset = glm::vec3(0.0f)) {
+    Entity entity = world.create();
+
+    glm::quat rotation = RotationUtils::rotationFromDirection(direction);
+    world.add<Transform>(entity);
+    world.add<LocalTransform>(entity, localOffset, rotation, glm::vec3(1));
+    world.add<Parent>(entity, parent);
+    world.add<SpotLightComponent>(entity, color, intensity, radius, innerAngle, outerAngle);
+    world.add<LightSourceTag>(entity);
+    world.add<BoundingSphere>(entity, glm::vec3(0.0f), radius);
+
+    if (world.has<Children>(parent)) {
+        world.get<Children>(parent).add(entity);
+    } else {
+        Children children;
+        children.add(entity);
+        world.add<Children>(parent, children);
+    }
+
+    uint16_t parentDepth = 0;
+    if (world.has<HierarchyDepth>(parent)) {
+        parentDepth = world.get<HierarchyDepth>(parent).depth;
+    }
+    world.add<HierarchyDepth>(entity, static_cast<uint16_t>(parentDepth + 1));
+
+    return entity;
+}
+
+// =============================================================================
 // Light Query Helpers
 // =============================================================================
 

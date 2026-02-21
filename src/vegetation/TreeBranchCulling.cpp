@@ -256,9 +256,8 @@ void TreeBranchCulling::updateTreeData(const TreeSystem& treeSystem, const TreeL
     }
 
     const auto& instances = treeSystem.getTreeInstances();
-    const auto& branchRenderables = treeSystem.getBranchRenderables();
 
-    if (instances.empty() || branchRenderables.empty()) {
+    if (instances.empty()) {
         numTrees_ = 0;
         meshGroups_.clear();
         meshGroupRenderInfo_.clear();
@@ -287,22 +286,22 @@ void TreeBranchCulling::updateTreeData(const TreeSystem& treeSystem, const TreeL
     uint32_t outputOffset = 0;
 
     for (const auto& [meshIndex, treeIndices] : treesByMesh) {
-        if (meshIndex >= branchRenderables.size()) continue;
+        if (meshIndex >= treeSystem.getMeshCount()) continue;
 
-        const auto& renderable = branchRenderables[meshIndex];
-        if (!renderable.mesh) continue;
+        const Mesh& mesh = treeSystem.getBranchMesh(meshIndex);
+        if (mesh.getIndexCount() == 0) continue;
 
         BranchMeshGroupGPU group{};
         group.meshIndex = meshIndex;
         group.firstTree = treeIndices.front();
         group.treeCount = static_cast<uint32_t>(treeIndices.size());
-        group.barkTypeIndex = 0; // Default, could be extracted from barkType string
-        group.indexCount = renderable.mesh->getIndexCount();
+        group.barkTypeIndex = 0;
+        group.indexCount = mesh.getIndexCount();
         group.maxInstances = static_cast<uint32_t>(treeIndices.size());
         group.outputOffset = outputOffset;
 
         // Determine bark type index from string
-        const std::string& barkType = branchRenderables[meshIndex].barkType;
+        const std::string& barkType = treeSystem.getTreeOptions(meshIndex).bark.type;
         if (barkType == "birch") group.barkTypeIndex = 0;
         else if (barkType == "oak") group.barkTypeIndex = 1;
         else if (barkType == "pine") group.barkTypeIndex = 2;
