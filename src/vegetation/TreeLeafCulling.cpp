@@ -297,6 +297,25 @@ void TreeLeafCulling::recordCulling(VkCommandBuffer cmd, uint32_t frameIndex,
             SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TreeLeafCulling: Failed to create shared output buffers");
             return;
         }
+
+        // Deferred stage initialization: updateSpatialIndex() may have run before
+        // shared output buffers existed, so the TreeFilterStage and LeafCullPhase3Stage
+        // couldn't be initialized. Now that treeDataBuffers_ exists, create them.
+        if (isSpatialIndexEnabled() && treeFilterStage_.pipeline &&
+            treeFilterStage_.visibleTreeBuffers.empty() &&
+            !cellCullStage_.visibleCellBuffers.empty()) {
+            uint32_t requiredTreeCapacity = static_cast<uint32_t>(leafRenderables.size());
+            treeFilterStage_.createBuffers(device_, allocator_, descriptorPool_,
+                                           maxFramesInFlight_, requiredTreeCapacity,
+                                           *spatialIndex_, treeDataBuffers_,
+                                           cellCullStage_.visibleCellBuffers);
+        }
+
+        if (leafCullPhase3Stage_.descriptorSets.empty() && leafCullPhase3Stage_.pipeline &&
+            !treeFilterStage_.visibleTreeBuffers.empty()) {
+            leafCullPhase3Stage_.createDescriptorSets(device_, allocator_, descriptorPool_,
+                                                       maxFramesInFlight_);
+        }
     }
 
     // CRITICAL: Check if tree count exceeds buffer capacity and resize if needed.
