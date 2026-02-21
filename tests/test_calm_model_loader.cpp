@@ -1,9 +1,9 @@
 #include <doctest/doctest.h>
 #include "ml/ModelLoader.h"
-#include "ml/CALMModelLoader.h"
-#include "ml/CALMLatentSpace.h"
-#include "ml/CALMLowLevelController.h"
-#include "ml/CALMHighLevelController.h"
+#include "ml/calm/ModelLoader.h"
+#include "ml/LatentSpace.h"
+#include "ml/calm/LowLevelController.h"
+#include "ml/TaskController.h"
 #include "ml/Tensor.h"
 #include <fstream>
 #include <cstdint>
@@ -60,7 +60,7 @@ void writeDummyMLP(const std::string& filepath,
 
 } // anonymous namespace
 
-TEST_SUITE("CALMLatentSpace_JSON") {
+TEST_SUITE("LatentSpace_JSON") {
 
 TEST_CASE("loadLibraryFromJSON loads valid library") {
     TempDir tmp;
@@ -88,7 +88,7 @@ TEST_CASE("loadLibraryFromJSON loads valid library") {
     f << doc.dump(2);
     f.close();
 
-    ml::CALMLatentSpace space(4);
+    ml::LatentSpace space(4);
     REQUIRE(space.loadLibraryFromJSON(jsonPath));
     CHECK(space.librarySize() == 2);
 
@@ -107,7 +107,7 @@ TEST_CASE("loadLibraryFromJSON loads valid library") {
 }
 
 TEST_CASE("loadLibraryFromJSON rejects missing file") {
-    ml::CALMLatentSpace space(64);
+    ml::LatentSpace space(64);
     CHECK_FALSE(space.loadLibraryFromJSON("/nonexistent/path.json"));
 }
 
@@ -137,14 +137,14 @@ TEST_CASE("loadLibraryFromJSON skips mismatched dimensions") {
     f << doc.dump(2);
     f.close();
 
-    ml::CALMLatentSpace space(4);
+    ml::LatentSpace space(4);
     REQUIRE(space.loadLibraryFromJSON(jsonPath));
     CHECK(space.librarySize() == 1);  // Only the correctly-dimensioned one
 }
 
 } // TEST_SUITE
 
-TEST_SUITE("CALMModelLoader") {
+TEST_SUITE("calm::ModelLoader") {
 
 TEST_CASE("loadLLC loads three .bin files") {
     TempDir tmp;
@@ -164,15 +164,15 @@ TEST_CASE("loadLLC loads three .bin files") {
         {128, 20, 0},  // none
     });
 
-    ml::CALMLowLevelController llc;
-    REQUIRE(ml::CALMModelLoader::loadLLC(tmp.path, llc));
+    ml::calm::LowLevelController llc;
+    REQUIRE(ml::calm::ModelLoader::loadLLC(tmp.path, llc));
     CHECK(llc.isLoaded());
 }
 
 TEST_CASE("loadLLC fails with missing files") {
     TempDir tmp;
-    ml::CALMLowLevelController llc;
-    CHECK_FALSE(ml::CALMModelLoader::loadLLC(tmp.path, llc));
+    ml::calm::LowLevelController llc;
+    CHECK_FALSE(ml::calm::ModelLoader::loadLLC(tmp.path, llc));
 }
 
 TEST_CASE("loadHLC loads optional task network") {
@@ -184,15 +184,15 @@ TEST_CASE("loadHLC loads optional task network") {
         {64, 32, 0},
     });
 
-    ml::CALMHighLevelController hlc;
-    REQUIRE(ml::CALMModelLoader::loadHLC(tmp.path, "heading", hlc));
+    ml::TaskController hlc;
+    REQUIRE(ml::calm::ModelLoader::loadHLC(tmp.path, "heading", hlc));
     CHECK(hlc.isLoaded());
 }
 
 TEST_CASE("loadHLC returns false for missing task") {
     TempDir tmp;
-    ml::CALMHighLevelController hlc;
-    CHECK_FALSE(ml::CALMModelLoader::loadHLC(tmp.path, "nonexistent", hlc));
+    ml::TaskController hlc;
+    CHECK_FALSE(ml::calm::ModelLoader::loadHLC(tmp.path, "nonexistent", hlc));
 }
 
 TEST_CASE("loadRetargetMap loads valid JSON") {
@@ -211,8 +211,8 @@ TEST_CASE("loadRetargetMap loads valid JSON") {
     f << doc.dump(2);
     f.close();
 
-    ml::CALMModelLoader::RetargetMap map;
-    REQUIRE(ml::CALMModelLoader::loadRetargetMap(jsonPath, map));
+    ml::calm::ModelLoader::RetargetMap map;
+    REQUIRE(ml::calm::ModelLoader::loadRetargetMap(jsonPath, map));
     CHECK(map.jointMap.size() == 3);
     CHECK(map.jointMap["pelvis"] == "Hips");
     CHECK(map.scaleFactor == doctest::Approx(1.5f));
@@ -247,8 +247,8 @@ TEST_CASE("loadAll loads LLC and optional components") {
     lf << lib.dump(2);
     lf.close();
 
-    ml::CALMModelLoader::CALMModelSet models;
-    REQUIRE(ml::CALMModelLoader::loadAll(tmp.path, models, 8));
+    ml::calm::ModelLoader::ModelSet models;
+    REQUIRE(ml::calm::ModelLoader::loadAll(tmp.path, models, 8));
     CHECK(models.llc.isLoaded());
     CHECK(models.hasLibrary);
     CHECK(models.latentSpace.librarySize() == 1);

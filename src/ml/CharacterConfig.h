@@ -11,20 +11,20 @@ struct Skeleton;
 
 namespace ml {
 
-// Maps between CALM's DOF ordering and the engine's Skeleton joint indices.
-// CALM observations/actions use a flat array of joint angles; this config
-// defines which engine joints correspond to which CALM DOF slots.
-struct CALMCharacterConfig {
+// Maps between a policy's DOF ordering and the engine's Skeleton joint indices.
+// Observations/actions use a flat array of joint angles; this config defines
+// which engine joints correspond to which DOF slots.
+struct CharacterConfig {
     // Observation layout
     int observationDim = 0;            // Total per-frame observation size
-    int numAMPObsSteps = 2;            // Temporal stacking for policy
-    int numAMPEncObsSteps = 10;        // Temporal stacking for encoder
+    int numPolicyObsSteps = 2;         // Temporal stacking for policy
+    int numEncoderObsSteps = 10;       // Temporal stacking for encoder
 
     // Action layout
     int actionDim = 0;                 // Number of controllable DOFs
 
     // Joint DOF mapping:
-    // Each entry maps a CALM DOF index to a skeleton joint.
+    // Each entry maps a DOF index to a skeleton joint.
     // A joint may contribute 1-3 DOFs depending on which axes are controllable.
     struct DOFMapping {
         int32_t jointIndex;            // Index into Skeleton::joints
@@ -35,7 +35,7 @@ struct CALMCharacterConfig {
     std::vector<DOFMapping> dofMappings;
 
     // Key body joints used for position features in the observation.
-    // CALM tracks world-space positions of key bodies (hands, feet, head)
+    // Tracks world-space positions of key bodies (hands, feet, head)
     // relative to the root, projected into heading frame.
     struct KeyBody {
         int32_t jointIndex;
@@ -56,11 +56,11 @@ struct CALMCharacterConfig {
     // Build a default config by scanning a skeleton for standard humanoid bones.
     // Searches for common bone names (Hips, Spine, LeftUpLeg, etc.)
     // and builds DOF mappings + key body list automatically.
-    static CALMCharacterConfig buildFromSkeleton(const Skeleton& skeleton);
+    static CharacterConfig buildFromSkeleton(const Skeleton& skeleton);
 
     // Build from an explicit joint name map (for custom skeletons).
-    // nameMap: maps CALM canonical names → engine joint names
-    static CALMCharacterConfig buildFromNameMap(
+    // nameMap: maps canonical names -> engine joint names
+    static CharacterConfig buildFromNameMap(
         const Skeleton& skeleton,
         const std::unordered_map<std::string, std::string>& nameMap);
 };

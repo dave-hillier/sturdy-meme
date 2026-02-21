@@ -9,13 +9,13 @@
 
 namespace ml {
 
-// Manages the CALM latent space: a 64D unit hypersphere encoding character behaviors.
+// Manages a latent behavior space: a unit hypersphere encoding character behaviors.
 //
 // Three capabilities:
 //   1. Latent library — pre-encoded behaviors loaded from disk, tagged by name
-//   2. Encoder network — encodes stacked AMP observations into a latent vector
+//   2. Encoder network — encodes stacked observations into a latent vector
 //   3. Interpolation — smooth blending between latents on the unit hypersphere
-class CALMLatentSpace {
+class LatentSpace {
 public:
     static constexpr int DEFAULT_LATENT_DIM = 64;
 
@@ -23,11 +23,11 @@ public:
     struct EncodedBehavior {
         std::string clipName;
         std::vector<std::string> tags;   // Semantic tags: "walk", "run", "crouch", etc.
-        Tensor latent;                   // 64D, L2-normalized
+        Tensor latent;                   // L2-normalized
     };
 
-    CALMLatentSpace() = default;
-    explicit CALMLatentSpace(int latentDim);
+    LatentSpace() = default;
+    explicit LatentSpace(int latentDim);
 
     // --- Latent Library ---
 
@@ -56,9 +56,9 @@ public:
     // Set the encoder network (loaded via ModelLoader)
     void setEncoder(MLPNetwork encoder);
 
-    // Encode stacked AMP observations into a latent vector.
+    // Encode stacked observations into a latent vector.
     // Input: flattened temporal observation window
-    // Output: L2-normalized 64D latent
+    // Output: L2-normalized latent
     Tensor encode(const Tensor& stackedObs) const;
 
     // Check if encoder is available
@@ -68,7 +68,7 @@ public:
 
     // Linearly interpolate between two latents on the unit hypersphere.
     // Result is L2-normalized after interpolation.
-    //   alpha=0 → z0,  alpha=1 → z1
+    //   alpha=0 -> z0,  alpha=1 -> z1
     static Tensor interpolate(const Tensor& z0, const Tensor& z1, float alpha);
 
     // Get a zero latent (for initialization)

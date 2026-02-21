@@ -8,20 +8,20 @@
 
 namespace ml {
 
-// High-Level Controller (HLC) for CALM.
-// Task-specific policies that output latent codes to command the LLC.
-// Each HLC takes a task observation (target direction, position, etc.)
-// and the character's current observation, and produces a 64D latent code.
-class CALMHighLevelController {
+// High-Level Task Controller.
+// Task-specific policies that output latent codes to command a low-level controller.
+// Each task controller takes a task observation (target direction, position, etc.)
+// and produces a latent code.
+class TaskController {
 public:
-    CALMHighLevelController() = default;
+    TaskController() = default;
 
-    // Set the HLC policy network
+    // Set the task policy network
     void setNetwork(MLPNetwork network);
 
-    // Evaluate: task observation → latent code (L2-normalized)
+    // Evaluate: task observation -> latent code (L2-normalized)
     // taskObs: task-specific observation (target direction, distance, etc.)
-    // outLatent: 64D L2-normalized latent code
+    // outLatent: L2-normalized latent code
     void evaluate(const Tensor& taskObs, Tensor& outLatent) const;
 
     // Check if weights are loaded
@@ -43,12 +43,12 @@ private:
 
 // HeadingController — move in a direction at a target speed.
 // Task obs: [local_target_dir_x(1), local_target_dir_z(1), target_speed(1)]
-class CALMHeadingController {
+class HeadingController {
 public:
-    CALMHeadingController() = default;
+    HeadingController() = default;
 
-    // Set the underlying HLC network
-    void setHLC(CALMHighLevelController hlc) { hlc_ = std::move(hlc); }
+    // Set the underlying task network
+    void setHLC(TaskController hlc) { hlc_ = std::move(hlc); }
 
     // Set the desired heading direction and speed
     // direction: world-space 2D direction (xz plane, will be rotated to local frame)
@@ -60,10 +60,10 @@ public:
     void evaluate(float characterHeading, Tensor& outLatent) const;
 
     bool isLoaded() const { return hlc_.isLoaded(); }
-    CALMHighLevelController& hlc() { return hlc_; }
+    TaskController& hlc() { return hlc_; }
 
 private:
-    CALMHighLevelController hlc_;
+    TaskController hlc_;
     glm::vec2 targetDirection_{0.0f, 1.0f};
     float targetSpeed_ = 0.0f;
     mutable Tensor taskObs_;
@@ -71,11 +71,11 @@ private:
 
 // LocationController — navigate to a world position.
 // Task obs: [local_offset_x(1), local_offset_y(1), local_offset_z(1)]
-class CALMLocationController {
+class LocationController {
 public:
-    CALMLocationController() = default;
+    LocationController() = default;
 
-    void setHLC(CALMHighLevelController hlc) { hlc_ = std::move(hlc); }
+    void setHLC(TaskController hlc) { hlc_ = std::move(hlc); }
 
     // Set the target world position
     void setTarget(glm::vec3 worldPosition);
@@ -88,21 +88,21 @@ public:
     bool hasReached(glm::vec3 characterPosition, float threshold = 0.5f) const;
 
     bool isLoaded() const { return hlc_.isLoaded(); }
-    CALMHighLevelController& hlc() { return hlc_; }
+    TaskController& hlc() { return hlc_; }
 
 private:
-    CALMHighLevelController hlc_;
+    TaskController hlc_;
     glm::vec3 targetPosition_{0.0f};
     mutable Tensor taskObs_;
 };
 
 // StrikeController — attack a target position.
 // Task obs: [local_target_x(1), local_target_y(1), local_target_z(1), distance(1)]
-class CALMStrikeController {
+class StrikeController {
 public:
-    CALMStrikeController() = default;
+    StrikeController() = default;
 
-    void setHLC(CALMHighLevelController hlc) { hlc_ = std::move(hlc); }
+    void setHLC(TaskController hlc) { hlc_ = std::move(hlc); }
 
     // Set the target to strike
     void setTarget(glm::vec3 targetPosition);
@@ -115,10 +115,10 @@ public:
     float distanceToTarget(glm::vec3 characterPosition) const;
 
     bool isLoaded() const { return hlc_.isLoaded(); }
-    CALMHighLevelController& hlc() { return hlc_; }
+    TaskController& hlc() { return hlc_; }
 
 private:
-    CALMHighLevelController hlc_;
+    TaskController hlc_;
     glm::vec3 targetPosition_{0.0f};
     mutable Tensor taskObs_;
 };

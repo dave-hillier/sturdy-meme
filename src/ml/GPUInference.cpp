@@ -1,4 +1,4 @@
-#include "CALMGPUInference.h"
+#include "GPUInference.h"
 #include "../core/ShaderLoader.h"
 #include <SDL3/SDL_log.h>
 #include <cstring>
@@ -6,11 +6,11 @@
 
 namespace ml {
 
-CALMGPUInference::~CALMGPUInference() {
+GPUInference::~GPUInference() {
     destroy();
 }
 
-bool CALMGPUInference::init(VkDevice device, VmaAllocator allocator, const Config& cfg) {
+bool GPUInference::init(VkDevice device, VmaAllocator allocator, const Config& cfg) {
     device_ = device;
     allocator_ = allocator;
     config_ = cfg;
@@ -44,7 +44,7 @@ bool CALMGPUInference::init(VkDevice device, VmaAllocator allocator, const Confi
     layoutInfo.bindingCount = 5;
     layoutInfo.pBindings = bindings.data();
     if (vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &descriptorSetLayout_) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "CALMGPUInference: failed to create descriptor set layout");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GPUInference: failed to create descriptor set layout");
         return false;
     }
 
@@ -59,7 +59,7 @@ bool CALMGPUInference::init(VkDevice device, VmaAllocator allocator, const Confi
     poolInfo.poolSizeCount = 1;
     poolInfo.pPoolSizes = &poolSize;
     if (vkCreateDescriptorPool(device_, &poolInfo, nullptr, &descriptorPool_) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "CALMGPUInference: failed to create descriptor pool");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GPUInference: failed to create descriptor pool");
         return false;
     }
 
@@ -69,7 +69,7 @@ bool CALMGPUInference::init(VkDevice device, VmaAllocator allocator, const Confi
     VkPushConstantRange pushRange{};
     pushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     pushRange.offset = 0;
-    pushRange.size = sizeof(CALMInferencePushConstants);
+    pushRange.size = sizeof(InferencePushConstants);
 
     // Pipeline layout
     VkPipelineLayoutCreateInfo plInfo{};
@@ -79,7 +79,7 @@ bool CALMGPUInference::init(VkDevice device, VmaAllocator allocator, const Confi
     plInfo.pushConstantRangeCount = 1;
     plInfo.pPushConstantRanges = &pushRange;
     if (vkCreatePipelineLayout(device_, &plInfo, nullptr, &pipelineLayout_) != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "CALMGPUInference: failed to create pipeline layout");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GPUInference: failed to create pipeline layout");
         return false;
     }
 
@@ -87,7 +87,7 @@ bool CALMGPUInference::init(VkDevice device, VmaAllocator allocator, const Confi
     auto shaderModule = ShaderLoader::loadShaderModule(device_, cfg.shaderPath);
     if (!shaderModule) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "CALMGPUInference: failed to load shader %s", cfg.shaderPath.c_str());
+                     "GPUInference: failed to load shader %s", cfg.shaderPath.c_str());
         return false;
     }
 
@@ -127,17 +127,17 @@ bool CALMGPUInference::init(VkDevice device, VmaAllocator allocator, const Confi
     vkDestroyShaderModule(device_, *shaderModule, nullptr);
 
     if (result != VK_SUCCESS) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "CALMGPUInference: failed to create compute pipeline");
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "GPUInference: failed to create compute pipeline");
         return false;
     }
 
     initialized_ = true;
-    SDL_Log("CALMGPUInference: initialized (maxNPCs=%u, latent=%u, obs=%u, action=%u)",
+    SDL_Log("GPUInference: initialized (maxNPCs=%u, latent=%u, obs=%u, action=%u)",
             cfg.maxNPCs, cfg.latentDim, cfg.obsDim, cfg.actionDim);
     return true;
 }
 
-bool CALMGPUInference::uploadWeights(const CALMLowLevelController& llc) {
+bool GPUInference::uploadWeights(const calm::LowLevelController& llc) {
     if (!initialized_) return false;
 
     std::vector<float> packedWeights;
@@ -167,14 +167,14 @@ bool CALMGPUInference::uploadWeights(const CALMLowLevelController& llc) {
 
     updateDescriptorSet();
 
-    SDL_Log("CALMGPUInference: uploaded weights (%zu layers, %zu floats)",
+    SDL_Log("GPUInference: uploaded weights (%zu layers, %zu floats)",
             layerMetas.size(), packedWeights.size());
     return true;
 }
 
-void CALMGPUInference::uploadInputs(const std::vector<float>& latents,
-                                     const std::vector<float>& observations,
-                                     uint32_t npcCount) {
+void GPUInference::uploadInputs(const std::vector<float>& latents,
+                                 const std::vector<float>& observations,
+                                 uint32_t npcCount) {
     if (!initialized_) return;
     uploadToBuffer(latentBuffer_, latents.data(),
                    npcCount * config_.latentDim * sizeof(float));
@@ -182,7 +182,7 @@ void CALMGPUInference::uploadInputs(const std::vector<float>& latents,
                    npcCount * config_.obsDim * sizeof(float));
 }
 
-void CALMGPUInference::recordDispatch(VkCommandBuffer cmd, uint32_t npcCount) {
+void GPUInference::recordDispatch(VkCommandBuffer cmd, uint32_t npcCount) {
     if (!initialized_ || pipeline_ == VK_NULL_HANDLE) return;
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
@@ -203,14 +203,14 @@ void CALMGPUInference::recordDispatch(VkCommandBuffer cmd, uint32_t npcCount) {
                          0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
-void CALMGPUInference::readBackActions(std::vector<float>& actions, uint32_t npcCount) {
+void GPUInference::readBackActions(std::vector<float>& actions, uint32_t npcCount) {
     if (!initialized_) return;
     size_t totalFloats = npcCount * config_.actionDim;
     actions.resize(totalFloats);
     readFromBuffer(actionBuffer_, actions.data(), totalFloats * sizeof(float));
 }
 
-void CALMGPUInference::destroy() {
+void GPUInference::destroy() {
     if (!initialized_ && device_ == VK_NULL_HANDLE) return;
 
     destroyBuffer(weightBuffer_);
@@ -241,9 +241,9 @@ void CALMGPUInference::destroy() {
 
 // --- Buffer helpers ---
 
-bool CALMGPUInference::createBuffer(GPUBuffer& buf, size_t size,
-                                     VkBufferUsageFlags usage,
-                                     VmaMemoryUsage memUsage) {
+bool GPUInference::createBuffer(GPUBuffer& buf, size_t size,
+                                 VkBufferUsageFlags usage,
+                                 VmaMemoryUsage memUsage) {
     if (buf.buffer != VK_NULL_HANDLE) destroyBuffer(buf);
 
     VkBufferCreateInfo bufferInfo{};
@@ -258,21 +258,21 @@ bool CALMGPUInference::createBuffer(GPUBuffer& buf, size_t size,
     if (vmaCreateBuffer(allocator_, &bufferInfo, &allocInfo,
                         &buf.buffer, &buf.allocation, nullptr) != VK_SUCCESS) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "CALMGPUInference: failed to create buffer (size=%zu)", size);
+                     "GPUInference: failed to create buffer (size=%zu)", size);
         return false;
     }
     buf.size = size;
     return true;
 }
 
-void CALMGPUInference::destroyBuffer(GPUBuffer& buf) {
+void GPUInference::destroyBuffer(GPUBuffer& buf) {
     if (buf.buffer != VK_NULL_HANDLE && allocator_) {
         vmaDestroyBuffer(allocator_, buf.buffer, buf.allocation);
         buf = {};
     }
 }
 
-void CALMGPUInference::uploadToBuffer(GPUBuffer& buf, const void* data, size_t size) {
+void GPUInference::uploadToBuffer(GPUBuffer& buf, const void* data, size_t size) {
     void* mapped = nullptr;
     vmaMapMemory(allocator_, buf.allocation, &mapped);
     std::memcpy(mapped, data, size);
@@ -280,7 +280,7 @@ void CALMGPUInference::uploadToBuffer(GPUBuffer& buf, const void* data, size_t s
     vmaFlushAllocation(allocator_, buf.allocation, 0, size);
 }
 
-void CALMGPUInference::readFromBuffer(const GPUBuffer& buf, void* data, size_t size) {
+void GPUInference::readFromBuffer(const GPUBuffer& buf, void* data, size_t size) {
     vmaInvalidateAllocation(allocator_, buf.allocation, 0, size);
     void* mapped = nullptr;
     vmaMapMemory(allocator_, buf.allocation, &mapped);
@@ -288,7 +288,7 @@ void CALMGPUInference::readFromBuffer(const GPUBuffer& buf, void* data, size_t s
     vmaUnmapMemory(allocator_, buf.allocation);
 }
 
-bool CALMGPUInference::createDescriptorSet() {
+bool GPUInference::createDescriptorSet() {
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = descriptorPool_;
@@ -298,7 +298,7 @@ bool CALMGPUInference::createDescriptorSet() {
     return vkAllocateDescriptorSets(device_, &allocInfo, &descriptorSet_) == VK_SUCCESS;
 }
 
-void CALMGPUInference::updateDescriptorSet() {
+void GPUInference::updateDescriptorSet() {
     struct BufInfo { GPUBuffer* buf; uint32_t binding; };
     BufInfo buffers[] = {
         {&weightBuffer_, 0}, {&layerMetaBuffer_, 1},
@@ -333,9 +333,9 @@ void CALMGPUInference::updateDescriptorSet() {
     }
 }
 
-bool CALMGPUInference::packWeights(const CALMLowLevelController& llc,
-                                    std::vector<float>& packedWeights,
-                                    std::vector<GPULayerMeta>& layerMetas) {
+bool GPUInference::packWeights(const calm::LowLevelController& llc,
+                                std::vector<float>& packedWeights,
+                                std::vector<GPULayerMeta>& layerMetas) {
     packedWeights.clear();
     layerMetas.clear();
 

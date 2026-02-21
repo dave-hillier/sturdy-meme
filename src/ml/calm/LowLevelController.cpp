@@ -1,19 +1,19 @@
-#include "CALMLowLevelController.h"
+#include "LowLevelController.h"
 #include <cassert>
 
-namespace ml {
+namespace ml::calm {
 
-void CALMLowLevelController::setNetwork(StyleConditionedNetwork network) {
+void LowLevelController::setNetwork(StyleConditionedNetwork network) {
     network_ = std::move(network);
 }
 
-void CALMLowLevelController::setMuHead(MLPNetwork muHead) {
+void LowLevelController::setMuHead(MLPNetwork muHead) {
     muHead_ = std::move(muHead);
 }
 
-void CALMLowLevelController::evaluate(const Tensor& latent,
-                                       const Tensor& observation,
-                                       Tensor& actions) const {
+void LowLevelController::evaluate(const Tensor& latent,
+                                   const Tensor& observation,
+                                   Tensor& actions) const {
     // Step 1-3: Style conditioning + main MLP
     network_.forward(latent, observation, hiddenOutput_);
 
@@ -26,4 +26,4 @@ void CALMLowLevelController::evaluate(const Tensor& latent,
     }
 }
 
-} // namespace ml
+} // namespace ml::calm

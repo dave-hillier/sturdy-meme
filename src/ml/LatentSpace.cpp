@@ -1,4 +1,4 @@
-#include "CALMLatentSpace.h"
+#include "LatentSpace.h"
 #include <SDL3/SDL_log.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -7,21 +7,21 @@
 
 namespace ml {
 
-CALMLatentSpace::CALMLatentSpace(int latentDim)
+LatentSpace::LatentSpace(int latentDim)
     : latentDim_(latentDim) {
 }
 
 // --- Latent Library ---
 
-void CALMLatentSpace::addBehavior(const std::string& clipName,
-                                   const std::vector<std::string>& tags,
-                                   Tensor latent) {
+void LatentSpace::addBehavior(const std::string& clipName,
+                               const std::vector<std::string>& tags,
+                               Tensor latent) {
     assert(static_cast<int>(latent.size()) == latentDim_);
     Tensor::l2Normalize(latent);
     library_.push_back({clipName, tags, std::move(latent)});
 }
 
-const Tensor& CALMLatentSpace::sampleRandom(std::mt19937& rng) const {
+const Tensor& LatentSpace::sampleRandom(std::mt19937& rng) const {
     if (library_.empty()) {
         if (fallbackLatent_.empty()) {
             fallbackLatent_ = zeroLatent();
@@ -32,8 +32,8 @@ const Tensor& CALMLatentSpace::sampleRandom(std::mt19937& rng) const {
     return library_[dist(rng)].latent;
 }
 
-const Tensor& CALMLatentSpace::sampleByTag(const std::string& tag,
-                                            std::mt19937& rng) const {
+const Tensor& LatentSpace::sampleByTag(const std::string& tag,
+                                        std::mt19937& rng) const {
     // Collect matching indices
     std::vector<size_t> matching;
     for (size_t i = 0; i < library_.size(); ++i) {
@@ -47,7 +47,7 @@ const Tensor& CALMLatentSpace::sampleByTag(const std::string& tag,
 
     if (matching.empty()) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "CALMLatentSpace: no behaviors with tag '%s', falling back to random",
+                    "LatentSpace: no behaviors with tag '%s', falling back to random",
                     tag.c_str());
         return sampleRandom(rng);
     }
@@ -56,8 +56,8 @@ const Tensor& CALMLatentSpace::sampleByTag(const std::string& tag,
     return library_[matching[dist(rng)]].latent;
 }
 
-std::vector<const CALMLatentSpace::EncodedBehavior*>
-CALMLatentSpace::getBehaviorsByTag(const std::string& tag) const {
+std::vector<const LatentSpace::EncodedBehavior*>
+LatentSpace::getBehaviorsByTag(const std::string& tag) const {
     std::vector<const EncodedBehavior*> result;
     for (const auto& behavior : library_) {
         for (const auto& t : behavior.tags) {
@@ -72,11 +72,11 @@ CALMLatentSpace::getBehaviorsByTag(const std::string& tag) const {
 
 // --- File I/O ---
 
-bool CALMLatentSpace::loadLibraryFromJSON(const std::string& path) {
+bool LatentSpace::loadLibraryFromJSON(const std::string& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "CALMLatentSpace: failed to open %s", path.c_str());
+                     "LatentSpace: failed to open %s", path.c_str());
         return false;
     }
 
@@ -85,7 +85,7 @@ bool CALMLatentSpace::loadLibraryFromJSON(const std::string& path) {
         doc = nlohmann::json::parse(file);
     } catch (const nlohmann::json::parse_error& e) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "CALMLatentSpace: JSON parse error in %s: %s",
+                     "LatentSpace: JSON parse error in %s: %s",
                      path.c_str(), e.what());
         return false;
     }
@@ -95,7 +95,7 @@ bool CALMLatentSpace::loadLibraryFromJSON(const std::string& path) {
         int fileDim = doc["latent_dim"].get<int>();
         if (latentDim_ != 0 && fileDim != latentDim_) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "CALMLatentSpace: file latent_dim=%d differs from current=%d, using file value",
+                        "LatentSpace: file latent_dim=%d differs from current=%d, using file value",
                         fileDim, latentDim_);
         }
         latentDim_ = fileDim;
@@ -103,7 +103,7 @@ bool CALMLatentSpace::loadLibraryFromJSON(const std::string& path) {
 
     if (!doc.contains("behaviors") || !doc["behaviors"].is_array()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "CALMLatentSpace: missing 'behaviors' array in %s", path.c_str());
+                     "LatentSpace: missing 'behaviors' array in %s", path.c_str());
         return false;
     }
 
@@ -121,7 +121,7 @@ bool CALMLatentSpace::loadLibraryFromJSON(const std::string& path) {
 
         if (!entry.contains("latent") || !entry["latent"].is_array()) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "CALMLatentSpace: skipping '%s' — no latent array", clipName.c_str());
+                        "LatentSpace: skipping '%s' — no latent array", clipName.c_str());
             continue;
         }
 
@@ -134,7 +134,7 @@ bool CALMLatentSpace::loadLibraryFromJSON(const std::string& path) {
 
         if (static_cast<int>(data.size()) != latentDim_) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "CALMLatentSpace: '%s' has %zu dims (expected %d), skipping",
+                        "LatentSpace: '%s' has %zu dims (expected %d), skipping",
                         clipName.c_str(), data.size(), latentDim_);
             continue;
         }
@@ -145,17 +145,17 @@ bool CALMLatentSpace::loadLibraryFromJSON(const std::string& path) {
         ++loaded;
     }
 
-    SDL_Log("CALMLatentSpace: loaded %zu behaviors from %s", loaded, path.c_str());
+    SDL_Log("LatentSpace: loaded %zu behaviors from %s", loaded, path.c_str());
     return loaded > 0;
 }
 
 // --- Encoder ---
 
-void CALMLatentSpace::setEncoder(MLPNetwork encoder) {
+void LatentSpace::setEncoder(MLPNetwork encoder) {
     encoder_ = std::move(encoder);
 }
 
-Tensor CALMLatentSpace::encode(const Tensor& stackedObs) const {
+Tensor LatentSpace::encode(const Tensor& stackedObs) const {
     assert(hasEncoder());
     Tensor latent;
     encoder_.forward(stackedObs, latent);
@@ -163,7 +163,7 @@ Tensor CALMLatentSpace::encode(const Tensor& stackedObs) const {
     // Resize to latentDim if encoder output differs
     if (static_cast<int>(latent.size()) != latentDim_) {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "CALMLatentSpace: encoder output size %zu != latentDim %d",
+                    "LatentSpace: encoder output size %zu != latentDim %d",
                     latent.size(), latentDim_);
     }
 
@@ -173,7 +173,7 @@ Tensor CALMLatentSpace::encode(const Tensor& stackedObs) const {
 
 // --- Interpolation ---
 
-Tensor CALMLatentSpace::interpolate(const Tensor& z0, const Tensor& z1, float alpha) {
+Tensor LatentSpace::interpolate(const Tensor& z0, const Tensor& z1, float alpha) {
     assert(z0.size() == z1.size());
     size_t dim = z0.size();
 
@@ -188,7 +188,7 @@ Tensor CALMLatentSpace::interpolate(const Tensor& z0, const Tensor& z1, float al
     return result;
 }
 
-Tensor CALMLatentSpace::zeroLatent() const {
+Tensor LatentSpace::zeroLatent() const {
     // Return a unit vector along first dimension
     std::vector<float> data(latentDim_, 0.0f);
     if (latentDim_ > 0) {

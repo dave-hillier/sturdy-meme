@@ -1,12 +1,12 @@
-#include "CALMCharacterConfig.h"
+#include "CharacterConfig.h"
 #include "GLTFLoader.h"
 #include <SDL3/SDL_log.h>
 #include <algorithm>
 
 namespace ml {
 
-// Standard humanoid bone names used by CALM / AMP.
-// Listed in the order CALM enumerates DOFs.
+// Standard humanoid bone names used by physics-based character controllers.
+// Listed in the order DOFs are enumerated.
 // Each entry: {canonical name, candidate engine names to search for}
 struct BoneDef {
     const char* canonicalName;
@@ -56,15 +56,15 @@ static int32_t findJointByName(const Skeleton& skeleton,
     return -1;
 }
 
-// CALM observation per timestep:
+// Observation per timestep:
 //   root_h (1) + root_rot (6) + root_vel (3) + root_ang_vel (3)
 //   + dof_pos (N) + dof_vel (N) + key_body_pos (K*3)
 static int computeObservationDim(int numDOFs, int numKeyBodies) {
     return 1 + 6 + 3 + 3 + numDOFs + numDOFs + numKeyBodies * 3;
 }
 
-CALMCharacterConfig CALMCharacterConfig::buildFromSkeleton(const Skeleton& skeleton) {
-    CALMCharacterConfig config;
+CharacterConfig CharacterConfig::buildFromSkeleton(const Skeleton& skeleton) {
+    CharacterConfig config;
 
     const auto& defs = getHumanoidBoneDefs();
 
@@ -73,14 +73,14 @@ CALMCharacterConfig CALMCharacterConfig::buildFromSkeleton(const Skeleton& skele
         int32_t jointIdx = findJointByName(skeleton, def.candidateNames);
         if (jointIdx < 0) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "CALMCharacterConfig: bone '%s' not found in skeleton, skipping",
+                        "CharacterConfig: bone '%s' not found in skeleton, skipping",
                         def.canonicalName);
             continue;
         }
 
         // Add DOF mappings for this joint
         for (int axis = 0; axis < def.numDOFs; ++axis) {
-            CALMCharacterConfig::DOFMapping mapping;
+            CharacterConfig::DOFMapping mapping;
             mapping.jointIndex = jointIdx;
             mapping.axis = axis;
             config.dofMappings.push_back(mapping);
@@ -102,16 +102,16 @@ CALMCharacterConfig CALMCharacterConfig::buildFromSkeleton(const Skeleton& skele
     config.observationDim = computeObservationDim(
         dofIndex, static_cast<int>(config.keyBodies.size()));
 
-    SDL_Log("CALMCharacterConfig: built config with %d DOFs, %zu key bodies, obs_dim=%d",
+    SDL_Log("CharacterConfig: built config with %d DOFs, %zu key bodies, obs_dim=%d",
             config.actionDim, config.keyBodies.size(), config.observationDim);
 
     return config;
 }
 
-CALMCharacterConfig CALMCharacterConfig::buildFromNameMap(
+CharacterConfig CharacterConfig::buildFromNameMap(
     const Skeleton& skeleton,
     const std::unordered_map<std::string, std::string>& nameMap) {
-    CALMCharacterConfig config;
+    CharacterConfig config;
 
     const auto& defs = getHumanoidBoneDefs();
 
@@ -123,13 +123,13 @@ CALMCharacterConfig CALMCharacterConfig::buildFromNameMap(
         int32_t jointIdx = skeleton.findJointIndex(it->second);
         if (jointIdx < 0) {
             SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                        "CALMCharacterConfig: mapped bone '%s' -> '%s' not found in skeleton",
+                        "CharacterConfig: mapped bone '%s' -> '%s' not found in skeleton",
                         def.canonicalName, it->second.c_str());
             continue;
         }
 
         for (int axis = 0; axis < def.numDOFs; ++axis) {
-            CALMCharacterConfig::DOFMapping mapping;
+            CharacterConfig::DOFMapping mapping;
             mapping.jointIndex = jointIdx;
             mapping.axis = axis;
             config.dofMappings.push_back(mapping);

@@ -12,9 +12,9 @@ namespace JPH {
 
 #include "GLTFLoader.h"
 #include "CharacterController.h"
-#include "ml/CALMLatentSpace.h"
-#include "ml/CALMLowLevelController.h"
-#include "ml/CALMController.h"
+#include "ml/LatentSpace.h"
+#include "ml/calm/LowLevelController.h"
+#include "ml/calm/Controller.h"
 #include "ml/Tensor.h"
 
 // NOTE: CharacterController stubs and Skeleton stubs are defined in
@@ -61,7 +61,7 @@ static Skeleton makeHumanoidSkeleton() {
 }
 
 // Helper: build a trivial LLC with known weights
-static ml::CALMLowLevelController makeTrivialLLC(int obsDim, int actionDim, int latentDim) {
+static ml::calm::LowLevelController makeTrivialLLC(int obsDim, int actionDim, int latentDim) {
     // Style MLP: latentDim → 8, Tanh
     ml::MLPNetwork styleMLP;
     styleMLP.addLayer(latentDim, 8, ml::Activation::Tanh);
@@ -90,18 +90,18 @@ static ml::CALMLowLevelController makeTrivialLLC(int obsDim, int actionDim, int 
     scNet.setStyleMLP(std::move(styleMLP));
     scNet.setMainMLP(std::move(mainMLP));
 
-    ml::CALMLowLevelController llc;
+    ml::calm::LowLevelController llc;
     llc.setNetwork(std::move(scNet));
     return llc;
 }
 
 // ---------------------------------------------------------------------------
-// CALMLatentSpace tests
+// LatentSpace tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMLatentSpace") {
+TEST_SUITE("LatentSpace") {
     TEST_CASE("zeroLatent is unit vector") {
-        ml::CALMLatentSpace space(64);
+        ml::LatentSpace space(64);
         ml::Tensor z = space.zeroLatent();
         CHECK(static_cast<int>(z.size()) == 64);
         CHECK(z.l2Norm() == doctest::Approx(1.0f));
@@ -109,7 +109,7 @@ TEST_SUITE("CALMLatentSpace") {
     }
 
     TEST_CASE("addBehavior and sampleRandom") {
-        ml::CALMLatentSpace space(4);
+        ml::LatentSpace space(4);
         ml::Tensor z1(1, 4, {1, 0, 0, 0});
         ml::Tensor z2(1, 4, {0, 1, 0, 0});
         space.addBehavior("walk", {"walk", "locomotion"}, z1);
@@ -124,7 +124,7 @@ TEST_SUITE("CALMLatentSpace") {
     }
 
     TEST_CASE("sampleByTag returns matching behavior") {
-        ml::CALMLatentSpace space(4);
+        ml::LatentSpace space(4);
         ml::Tensor zWalk(1, 4, {1, 0, 0, 0});
         ml::Tensor zRun(1, 4, {0, 1, 0, 0});
         ml::Tensor zCrouch(1, 4, {0, 0, 1, 0});
@@ -139,7 +139,7 @@ TEST_SUITE("CALMLatentSpace") {
     }
 
     TEST_CASE("getBehaviorsByTag") {
-        ml::CALMLatentSpace space(4);
+        ml::LatentSpace space(4);
         ml::Tensor z1(1, 4, {1, 0, 0, 0});
         ml::Tensor z2(1, 4, {0, 1, 0, 0});
         ml::Tensor z3(1, 4, {0, 0, 1, 0});
@@ -161,20 +161,20 @@ TEST_SUITE("CALMLatentSpace") {
         ml::Tensor z0(1, 4, {1, 0, 0, 0});
         ml::Tensor z1(1, 4, {0, 1, 0, 0});
 
-        auto mid = ml::CALMLatentSpace::interpolate(z0, z1, 0.5f);
+        auto mid = ml::LatentSpace::interpolate(z0, z1, 0.5f);
         CHECK(mid.l2Norm() == doctest::Approx(1.0f));
 
         // At alpha=0, should be z0
-        auto atZero = ml::CALMLatentSpace::interpolate(z0, z1, 0.0f);
+        auto atZero = ml::LatentSpace::interpolate(z0, z1, 0.0f);
         CHECK(atZero[0] == doctest::Approx(1.0f));
 
         // At alpha=1, should be z1
-        auto atOne = ml::CALMLatentSpace::interpolate(z0, z1, 1.0f);
+        auto atOne = ml::LatentSpace::interpolate(z0, z1, 1.0f);
         CHECK(atOne[1] == doctest::Approx(1.0f));
     }
 
     TEST_CASE("encode produces normalized output") {
-        ml::CALMLatentSpace space(4);
+        ml::LatentSpace space(4);
 
         ml::MLPNetwork encoder;
         encoder.addLayer(8, 4, ml::Activation::ReLU);
@@ -192,7 +192,7 @@ TEST_SUITE("CALMLatentSpace") {
     }
 
     TEST_CASE("sampleRandom with empty library returns fallback") {
-        ml::CALMLatentSpace space(4);
+        ml::LatentSpace space(4);
         std::mt19937 rng(1);
         const auto& z = space.sampleRandom(rng);
         CHECK(static_cast<int>(z.size()) == 4);
@@ -201,10 +201,10 @@ TEST_SUITE("CALMLatentSpace") {
 }
 
 // ---------------------------------------------------------------------------
-// CALMLowLevelController tests
+// calm::LowLevelController tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMLowLevelController") {
+TEST_SUITE("calm::LowLevelController") {
     TEST_CASE("evaluate produces action output") {
         int obsDim = 10;
         int actionDim = 5;
@@ -257,7 +257,7 @@ TEST_SUITE("CALMLowLevelController") {
     }
 
     TEST_CASE("isLoaded check") {
-        ml::CALMLowLevelController empty;
+        ml::calm::LowLevelController empty;
         CHECK_FALSE(empty.isLoaded());
 
         auto loaded = makeTrivialLLC(10, 5, 8);
@@ -266,19 +266,19 @@ TEST_SUITE("CALMLowLevelController") {
 }
 
 // ---------------------------------------------------------------------------
-// CALMController (integrated) tests
+// calm::Controller (integrated) tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMController") {
+TEST_SUITE("calm::Controller") {
     TEST_CASE("init and update produce valid pose") {
         Skeleton skel = makeHumanoidSkeleton();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLC(charConfig.observationDim, charConfig.actionDim,
                                    charConfig.latentDim);
 
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
-        ml::CALMController controller;
+        ml::calm::Controller controller;
         controller.init(charConfig, std::move(llc), std::move(space));
         CHECK(controller.isInitialized());
 
@@ -291,13 +291,13 @@ TEST_SUITE("CALMController") {
 
     TEST_CASE("setLatent changes current latent") {
         Skeleton skel = makeHumanoidSkeleton();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLC(charConfig.observationDim, charConfig.actionDim,
                                    charConfig.latentDim);
 
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
-        ml::CALMController controller;
+        ml::calm::Controller controller;
         controller.init(charConfig, std::move(llc), std::move(space));
 
         ml::Tensor z(charConfig.latentDim);
@@ -310,13 +310,13 @@ TEST_SUITE("CALMController") {
 
     TEST_CASE("transitionToLatent interpolates over steps") {
         Skeleton skel = makeHumanoidSkeleton();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLC(charConfig.observationDim, charConfig.actionDim,
                                    charConfig.latentDim);
 
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
-        ml::CALMController controller;
+        ml::calm::Controller controller;
         controller.init(charConfig, std::move(llc), std::move(space));
 
         // Start at z0
@@ -346,17 +346,17 @@ TEST_SUITE("CALMController") {
 
     TEST_CASE("transitionToBehavior uses tag") {
         Skeleton skel = makeHumanoidSkeleton();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLC(charConfig.observationDim, charConfig.actionDim,
                                    charConfig.latentDim);
 
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
         ml::Tensor zRun(charConfig.latentDim);
         zRun[3] = 1.0f;
         ml::Tensor::l2Normalize(zRun);
         space.addBehavior("run", {"run"}, zRun);
 
-        ml::CALMController controller;
+        ml::calm::Controller controller;
         controller.init(charConfig, std::move(llc), std::move(space));
 
         controller.transitionToBehavior("run", 5);
@@ -365,13 +365,13 @@ TEST_SUITE("CALMController") {
 
     TEST_CASE("reset clears state") {
         Skeleton skel = makeHumanoidSkeleton();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLC(charConfig.observationDim, charConfig.actionDim,
                                    charConfig.latentDim);
 
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
-        ml::CALMController controller;
+        ml::calm::Controller controller;
         controller.init(charConfig, std::move(llc), std::move(space));
 
         ml::Tensor z(charConfig.latentDim);
@@ -385,13 +385,13 @@ TEST_SUITE("CALMController") {
 
     TEST_CASE("updateBlended with weight 0 returns base pose") {
         Skeleton skel = makeHumanoidSkeleton();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLC(charConfig.observationDim, charConfig.actionDim,
                                    charConfig.latentDim);
 
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
-        ml::CALMController controller;
+        ml::calm::Controller controller;
         controller.init(charConfig, std::move(llc), std::move(space));
 
         SkeletonPose basePose;

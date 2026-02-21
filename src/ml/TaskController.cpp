@@ -1,16 +1,16 @@
-#include "CALMHighLevelController.h"
+#include "TaskController.h"
 #include <cmath>
 #include <cassert>
 
 namespace ml {
 
-// --- CALMHighLevelController ---
+// --- TaskController ---
 
-void CALMHighLevelController::setNetwork(MLPNetwork network) {
+void TaskController::setNetwork(MLPNetwork network) {
     network_ = std::move(network);
 }
 
-void CALMHighLevelController::evaluate(const Tensor& taskObs, Tensor& outLatent) const {
+void TaskController::evaluate(const Tensor& taskObs, Tensor& outLatent) const {
     assert(network_.numLayers() > 0);
     network_.forward(taskObs, output_);
 
@@ -19,17 +19,17 @@ void CALMHighLevelController::evaluate(const Tensor& taskObs, Tensor& outLatent)
     Tensor::l2Normalize(outLatent);
 }
 
-int CALMHighLevelController::taskObsDim() const {
+int TaskController::taskObsDim() const {
     return network_.inputSize();
 }
 
-int CALMHighLevelController::latentDim() const {
+int TaskController::latentDim() const {
     return network_.outputSize();
 }
 
 // --- HeadingController ---
 
-void CALMHeadingController::setTarget(glm::vec2 direction, float speed) {
+void HeadingController::setTarget(glm::vec2 direction, float speed) {
     float len = std::sqrt(direction.x * direction.x + direction.y * direction.y);
     if (len > 1e-6f) {
         targetDirection_ = direction / len;
@@ -37,7 +37,7 @@ void CALMHeadingController::setTarget(glm::vec2 direction, float speed) {
     targetSpeed_ = speed;
 }
 
-void CALMHeadingController::evaluate(float characterHeading, Tensor& outLatent) const {
+void HeadingController::evaluate(float characterHeading, Tensor& outLatent) const {
     // Rotate target direction into the character's local frame
     float cosH = std::cos(-characterHeading);
     float sinH = std::sin(-characterHeading);
@@ -56,12 +56,12 @@ void CALMHeadingController::evaluate(float characterHeading, Tensor& outLatent) 
 
 // --- LocationController ---
 
-void CALMLocationController::setTarget(glm::vec3 worldPosition) {
+void LocationController::setTarget(glm::vec3 worldPosition) {
     targetPosition_ = worldPosition;
 }
 
-void CALMLocationController::evaluate(glm::vec3 characterPosition, float characterHeading,
-                                       Tensor& outLatent) const {
+void LocationController::evaluate(glm::vec3 characterPosition, float characterHeading,
+                                   Tensor& outLatent) const {
     // Compute world-space offset
     glm::vec3 offset = targetPosition_ - characterPosition;
 
@@ -81,7 +81,7 @@ void CALMLocationController::evaluate(glm::vec3 characterPosition, float charact
     hlc_.evaluate(taskObs_, outLatent);
 }
 
-bool CALMLocationController::hasReached(glm::vec3 characterPosition, float threshold) const {
+bool LocationController::hasReached(glm::vec3 characterPosition, float threshold) const {
     glm::vec3 offset = targetPosition_ - characterPosition;
     float dist = std::sqrt(offset.x * offset.x + offset.y * offset.y + offset.z * offset.z);
     return dist < threshold;
@@ -89,12 +89,12 @@ bool CALMLocationController::hasReached(glm::vec3 characterPosition, float thres
 
 // --- StrikeController ---
 
-void CALMStrikeController::setTarget(glm::vec3 targetPosition) {
+void StrikeController::setTarget(glm::vec3 targetPosition) {
     targetPosition_ = targetPosition;
 }
 
-void CALMStrikeController::evaluate(glm::vec3 characterPosition, float characterHeading,
-                                     Tensor& outLatent) const {
+void StrikeController::evaluate(glm::vec3 characterPosition, float characterHeading,
+                                 Tensor& outLatent) const {
     glm::vec3 offset = targetPosition_ - characterPosition;
     float dist = std::sqrt(offset.x * offset.x + offset.y * offset.y + offset.z * offset.z);
 
@@ -115,7 +115,7 @@ void CALMStrikeController::evaluate(glm::vec3 characterPosition, float character
     hlc_.evaluate(taskObs_, outLatent);
 }
 
-float CALMStrikeController::distanceToTarget(glm::vec3 characterPosition) const {
+float StrikeController::distanceToTarget(glm::vec3 characterPosition) const {
     glm::vec3 offset = targetPosition_ - characterPosition;
     return std::sqrt(offset.x * offset.x + offset.y * offset.y + offset.z * offset.z);
 }

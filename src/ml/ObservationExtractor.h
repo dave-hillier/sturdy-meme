@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CALMCharacterConfig.h"
+#include "CharacterConfig.h"
 #include "Tensor.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -16,9 +16,9 @@ namespace physics {
 
 namespace ml {
 
-// Extracts CALM-compatible observations from the engine's Skeleton and CharacterController.
+// Extracts per-frame observations from the engine's Skeleton and CharacterController.
 //
-// Per-frame observation vector layout (matching CALM/AMP):
+// Per-frame observation vector layout (AMP-style):
 //   [0]        root height (1)
 //   [1..6]     root rotation, heading-invariant 6D representation (6)
 //   [7..9]     local root velocity in heading frame (3)
@@ -29,12 +29,12 @@ namespace ml {
 //
 // The extractor maintains a ring buffer of recent frames for temporal stacking
 // (used by the encoder and discriminator).
-class CALMObservationExtractor {
+class ObservationExtractor {
 public:
     static constexpr int MAX_OBS_HISTORY = 16;
 
-    CALMObservationExtractor() = default;
-    explicit CALMObservationExtractor(const CALMCharacterConfig& config);
+    ObservationExtractor() = default;
+    explicit ObservationExtractor(const CharacterConfig& config);
 
     // Extract one frame of observations from the current character state.
     // Call once per simulation step.
@@ -69,10 +69,10 @@ public:
     void reset();
 
     // Get config
-    const CALMCharacterConfig& config() const { return config_; }
+    const CharacterConfig& config() const { return config_; }
 
 private:
-    CALMCharacterConfig config_;
+    CharacterConfig config_;
 
     // Ring buffer of observation frames
     std::array<std::vector<float>, MAX_OBS_HISTORY> history_;

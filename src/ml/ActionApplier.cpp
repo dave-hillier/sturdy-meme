@@ -1,4 +1,4 @@
-#include "CALMActionApplier.h"
+#include "ActionApplier.h"
 #include "GLTFLoader.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <cassert>
@@ -7,12 +7,12 @@
 
 namespace ml {
 
-CALMActionApplier::CALMActionApplier(const CALMCharacterConfig& config)
+ActionApplier::ActionApplier(const CharacterConfig& config)
     : config_(config) {
     buildJointDOFRanges();
 }
 
-void CALMActionApplier::buildJointDOFRanges() {
+void ActionApplier::buildJointDOFRanges() {
     jointDOFRanges_.clear();
     if (config_.dofMappings.empty()) return;
 
@@ -33,9 +33,9 @@ void CALMActionApplier::buildJointDOFRanges() {
     jointDOFRanges_.push_back({currentJoint, rangeStart, count});
 }
 
-void CALMActionApplier::applyToSkeleton(const Tensor& actions,
-                                         const Skeleton& skeleton,
-                                         SkeletonPose& outPose) const {
+void ActionApplier::applyToSkeleton(const Tensor& actions,
+                                     const Skeleton& skeleton,
+                                     SkeletonPose& outPose) const {
     assert(static_cast<int>(actions.size()) == config_.actionDim);
 
     size_t numJoints = skeleton.joints.size();
@@ -47,7 +47,7 @@ void CALMActionApplier::applyToSkeleton(const Tensor& actions,
                                            skeleton.joints[j].preRotation);
     }
 
-    // Override CALM-controlled joints with action-derived rotations
+    // Override policy-controlled joints with action-derived rotations
     for (const auto& range : jointDOFRanges_) {
         if (range.jointIndex < 0 ||
             static_cast<size_t>(range.jointIndex) >= numJoints) {
@@ -59,29 +59,29 @@ void CALMActionApplier::applyToSkeleton(const Tensor& actions,
     }
 }
 
-void CALMActionApplier::actionsToTargetPose(const Tensor& actions,
-                                             const Skeleton& skeleton,
-                                             SkeletonPose& outPose) const {
+void ActionApplier::actionsToTargetPose(const Tensor& actions,
+                                         const Skeleton& skeleton,
+                                         SkeletonPose& outPose) const {
     // Same as applyToSkeleton — builds the target pose from actions.
     // This is a separate method for clarity: the caller feeds this to
     // RagdollInstance::driveToTargetPose() instead of setting it on the skeleton.
     applyToSkeleton(actions, skeleton, outPose);
 }
 
-void CALMActionApplier::applyBlended(const Tensor& actions,
-                                      const Skeleton& skeleton,
-                                      const SkeletonPose& basePose,
-                                      float blendWeight,
-                                      SkeletonPose& outPose) const {
-    // First get the full CALM pose
-    SkeletonPose calmPose;
-    applyToSkeleton(actions, skeleton, calmPose);
+void ActionApplier::applyBlended(const Tensor& actions,
+                                  const Skeleton& skeleton,
+                                  const SkeletonPose& basePose,
+                                  float blendWeight,
+                                  SkeletonPose& outPose) const {
+    // First get the full policy pose
+    SkeletonPose policyPose;
+    applyToSkeleton(actions, skeleton, policyPose);
 
     // Blend with base pose
-    AnimationBlend::blend(basePose, calmPose, blendWeight, outPose);
+    AnimationBlend::blend(basePose, policyPose, blendWeight, outPose);
 }
 
-void CALMActionApplier::clampActions(Tensor& actions) const {
+void ActionApplier::clampActions(Tensor& actions) const {
     assert(static_cast<int>(actions.size()) == config_.actionDim);
 
     for (int d = 0; d < config_.actionDim; ++d) {
@@ -90,8 +90,8 @@ void CALMActionApplier::clampActions(Tensor& actions) const {
     }
 }
 
-glm::quat CALMActionApplier::buildJointRotation(int32_t jointIndex,
-                                                  const Tensor& actions) const {
+glm::quat ActionApplier::buildJointRotation(int32_t jointIndex,
+                                              const Tensor& actions) const {
     // Collect the Euler angles for this joint from the action vector
     float euler[3] = {0.0f, 0.0f, 0.0f};
 

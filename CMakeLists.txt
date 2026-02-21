@@ -282,17 +282,17 @@ set(SOURCES
     # Machine Learning
     src/ml/MLPNetwork.cpp
     src/ml/ModelLoader.cpp
-    src/ml/CALMCharacterConfig.cpp
-    src/ml/CALMObservation.cpp
-    src/ml/CALMActionApplier.cpp
-    src/ml/CALMLatentSpace.cpp
-    src/ml/CALMLowLevelController.cpp
-    src/ml/CALMController.cpp
-    src/ml/CALMHighLevelController.cpp
-    src/ml/CALMBehaviorFSM.cpp
-    src/ml/CALMAnimationIntegration.cpp
-    src/ml/CALMGPUInference.cpp
-    src/ml/CALMModelLoader.cpp
+    src/ml/CharacterConfig.cpp
+    src/ml/ObservationExtractor.cpp
+    src/ml/ActionApplier.cpp
+    src/ml/LatentSpace.cpp
+    src/ml/TaskController.cpp
+    src/ml/BehaviorFSM.cpp
+    src/ml/AnimationIntegration.cpp
+    src/ml/GPUInference.cpp
+    src/ml/calm/LowLevelController.cpp
+    src/ml/calm/Controller.cpp
+    src/ml/calm/ModelLoader.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -1330,16 +1330,16 @@ if(BUILD_TESTS)
         src/animation/MotionMatchingKDTree.cpp
         src/ml/MLPNetwork.cpp
         src/ml/ModelLoader.cpp
-        src/ml/CALMCharacterConfig.cpp
-        src/ml/CALMObservation.cpp
-        src/ml/CALMActionApplier.cpp
-        src/ml/CALMLatentSpace.cpp
-        src/ml/CALMLowLevelController.cpp
-        src/ml/CALMController.cpp
-        src/ml/CALMHighLevelController.cpp
-        src/ml/CALMBehaviorFSM.cpp
-        src/ml/CALMAnimationIntegration.cpp
-        src/ml/CALMModelLoader.cpp
+        src/ml/CharacterConfig.cpp
+        src/ml/ObservationExtractor.cpp
+        src/ml/ActionApplier.cpp
+        src/ml/LatentSpace.cpp
+        src/ml/TaskController.cpp
+        src/ml/BehaviorFSM.cpp
+        src/ml/AnimationIntegration.cpp
+        src/ml/calm/LowLevelController.cpp
+        src/ml/calm/Controller.cpp
+        src/ml/calm/ModelLoader.cpp
     )
 
     target_include_directories(vulkan_game_tests PRIVATE

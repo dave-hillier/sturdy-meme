@@ -13,9 +13,9 @@ namespace JPH {
 
 #include "GLTFLoader.h"
 #include "CharacterController.h"
-#include "ml/CALMHighLevelController.h"
-#include "ml/CALMBehaviorFSM.h"
-#include "ml/CALMAnimationIntegration.h"
+#include "ml/TaskController.h"
+#include "ml/BehaviorFSM.h"
+#include "ml/AnimationIntegration.h"
 #include "ml/Tensor.h"
 
 // NOTE: CharacterController stubs defined in test_calm_observation.cpp
@@ -60,7 +60,7 @@ static Skeleton makeTestSkel() {
 }
 
 // Helper: make a trivial HLC network (taskDim -> latentDim)
-static ml::CALMHighLevelController makeTrivialHLC(int taskDim, int latentDim) {
+static ml::TaskController makeTrivialHLC(int taskDim, int latentDim) {
     ml::MLPNetwork net;
     net.addLayer(taskDim, 32, ml::Activation::ReLU);
     net.addLayer(32, latentDim, ml::Activation::None);
@@ -76,13 +76,13 @@ static ml::CALMHighLevelController makeTrivialHLC(int taskDim, int latentDim) {
     std::vector<float> b2(latentDim, 0.0f);
     net.setLayerWeights(1, w2, b2);
 
-    ml::CALMHighLevelController hlc;
+    ml::TaskController hlc;
     hlc.setNetwork(std::move(net));
     return hlc;
 }
 
 // Helper: make a trivial LLC for integration tests
-static ml::CALMLowLevelController makeTrivialLLCForFSM(int obsDim, int actionDim, int latentDim) {
+static ml::calm::LowLevelController makeTrivialLLCForFSM(int obsDim, int actionDim, int latentDim) {
     ml::MLPNetwork styleMLP;
     styleMLP.addLayer(latentDim, 8, ml::Activation::Tanh);
     std::vector<float> sw(latentDim * 8, 0.0f);
@@ -107,16 +107,16 @@ static ml::CALMLowLevelController makeTrivialLLCForFSM(int obsDim, int actionDim
     scNet.setStyleMLP(std::move(styleMLP));
     scNet.setMainMLP(std::move(mainMLP));
 
-    ml::CALMLowLevelController llc;
+    ml::calm::LowLevelController llc;
     llc.setNetwork(std::move(scNet));
     return llc;
 }
 
 // ---------------------------------------------------------------------------
-// CALMHighLevelController tests
+// TaskController tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMHighLevelController") {
+TEST_SUITE("TaskController") {
     TEST_CASE("base HLC produces normalized latent") {
         auto hlc = makeTrivialHLC(3, 64);
         CHECK(hlc.isLoaded());
@@ -163,9 +163,9 @@ TEST_SUITE("CALMHighLevelController") {
 // HeadingController tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMHeadingController") {
+TEST_SUITE("HeadingController") {
     TEST_CASE("heading controller produces latent") {
-        ml::CALMHeadingController heading;
+        ml::HeadingController heading;
         heading.setHLC(makeTrivialHLC(3, 64));
 
         heading.setTarget(glm::vec2(1.0f, 0.0f), 3.0f);
@@ -178,7 +178,7 @@ TEST_SUITE("CALMHeadingController") {
     }
 
     TEST_CASE("different headings produce different latents") {
-        ml::CALMHeadingController heading;
+        ml::HeadingController heading;
         heading.setHLC(makeTrivialHLC(3, 16));
         heading.setTarget(glm::vec2(1.0f, 0.0f), 5.0f);
 
@@ -201,9 +201,9 @@ TEST_SUITE("CALMHeadingController") {
 // LocationController tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMLocationController") {
+TEST_SUITE("LocationController") {
     TEST_CASE("location controller evaluates") {
-        ml::CALMLocationController loc;
+        ml::LocationController loc;
         loc.setHLC(makeTrivialHLC(3, 64));
 
         loc.setTarget(glm::vec3(10.0f, 0.0f, 10.0f));
@@ -216,7 +216,7 @@ TEST_SUITE("CALMLocationController") {
     }
 
     TEST_CASE("hasReached works") {
-        ml::CALMLocationController loc;
+        ml::LocationController loc;
         loc.setHLC(makeTrivialHLC(3, 64));
         loc.setTarget(glm::vec3(5.0f, 0.0f, 0.0f));
 
@@ -230,9 +230,9 @@ TEST_SUITE("CALMLocationController") {
 // StrikeController tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMStrikeController") {
+TEST_SUITE("StrikeController") {
     TEST_CASE("strike controller evaluates") {
-        ml::CALMStrikeController strike;
+        ml::StrikeController strike;
         strike.setHLC(makeTrivialHLC(4, 64));  // strike has 4D task obs
 
         strike.setTarget(glm::vec3(2.0f, 0.0f, 0.0f));
@@ -244,7 +244,7 @@ TEST_SUITE("CALMStrikeController") {
     }
 
     TEST_CASE("distanceToTarget computes correctly") {
-        ml::CALMStrikeController strike;
+        ml::StrikeController strike;
         strike.setHLC(makeTrivialHLC(4, 64));
         strike.setTarget(glm::vec3(3.0f, 4.0f, 0.0f));
 
@@ -254,16 +254,16 @@ TEST_SUITE("CALMStrikeController") {
 }
 
 // ---------------------------------------------------------------------------
-// CALMBehaviorFSM tests
+// BehaviorFSM tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMBehaviorFSM") {
+TEST_SUITE("BehaviorFSM") {
     TEST_CASE("add states and start") {
         Skeleton skel = makeTestSkel();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLCForFSM(charConfig.observationDim, charConfig.actionDim,
                                          charConfig.latentDim);
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
         // Add behaviors to the latent space
         ml::Tensor zWalk(charConfig.latentDim);
@@ -276,10 +276,10 @@ TEST_SUITE("CALMBehaviorFSM") {
         ml::Tensor::l2Normalize(zIdle);
         space.addBehavior("idle", {"idle"}, zIdle);
 
-        ml::CALMController controller;
+        ml::calm::Controller controller;
         controller.init(charConfig, std::move(llc), std::move(space));
 
-        ml::CALMBehaviorFSM fsm;
+        ml::BehaviorFSM fsm;
         fsm.setController(&controller);
 
         int stepCount = 0;
@@ -300,10 +300,10 @@ TEST_SUITE("CALMBehaviorFSM") {
 
     TEST_CASE("FSM transitions on exit condition") {
         Skeleton skel = makeTestSkel();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLCForFSM(charConfig.observationDim, charConfig.actionDim,
                                          charConfig.latentDim);
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
         ml::Tensor zWalk(charConfig.latentDim);
         zWalk[0] = 1.0f;
@@ -315,10 +315,10 @@ TEST_SUITE("CALMBehaviorFSM") {
         ml::Tensor::l2Normalize(zIdle);
         space.addBehavior("idle_anim", {"idle"}, zIdle);
 
-        ml::CALMController controller;
+        ml::calm::Controller controller;
         controller.init(charConfig, std::move(llc), std::move(space));
 
-        ml::CALMBehaviorFSM fsm;
+        ml::BehaviorFSM fsm;
         fsm.setController(&controller);
 
         int stepCount = 0;
@@ -341,20 +341,20 @@ TEST_SUITE("CALMBehaviorFSM") {
 
     TEST_CASE("FSM terminal state marks complete") {
         Skeleton skel = makeTestSkel();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLCForFSM(charConfig.observationDim, charConfig.actionDim,
                                          charConfig.latentDim);
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
         ml::Tensor zIdle(charConfig.latentDim);
         zIdle[0] = 1.0f;
         ml::Tensor::l2Normalize(zIdle);
         space.addBehavior("idle_anim", {"idle"}, zIdle);
 
-        ml::CALMController controller;
+        ml::calm::Controller controller;
         controller.init(charConfig, std::move(llc), std::move(space));
 
-        ml::CALMBehaviorFSM fsm;
+        ml::BehaviorFSM fsm;
         fsm.setController(&controller);
 
         bool shouldExit = false;
@@ -372,10 +372,10 @@ TEST_SUITE("CALMBehaviorFSM") {
 
     TEST_CASE("FSM stop and transitionTo") {
         Skeleton skel = makeTestSkel();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLCForFSM(charConfig.observationDim, charConfig.actionDim,
                                          charConfig.latentDim);
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
         ml::Tensor z(charConfig.latentDim);
         z[0] = 1.0f;
@@ -383,10 +383,10 @@ TEST_SUITE("CALMBehaviorFSM") {
         space.addBehavior("walk_fwd", {"walk"}, z);
         space.addBehavior("run_fwd", {"run"}, z);
 
-        ml::CALMController controller;
+        ml::calm::Controller controller;
         controller.init(charConfig, std::move(llc), std::move(space));
 
-        ml::CALMBehaviorFSM fsm;
+        ml::BehaviorFSM fsm;
         fsm.setController(&controller);
 
         fsm.addState({"walk", "walk", {}, 10, {}, ""});
@@ -404,17 +404,17 @@ TEST_SUITE("CALMBehaviorFSM") {
 }
 
 // ---------------------------------------------------------------------------
-// CALMAnimationIntegration tests
+// AnimationIntegration tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMAnimationIntegration") {
+TEST_SUITE("AnimationIntegration") {
     TEST_CASE("create archetype and instance") {
-        ml::CALMArchetypeManager manager;
+        ml::ArchetypeManager manager;
         Skeleton skel = makeTestSkel();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLCForFSM(charConfig.observationDim, charConfig.actionDim,
                                          charConfig.latentDim);
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
         uint32_t archetypeId = manager.createArchetype(
             "humanoid", 0, std::move(llc), std::move(space), charConfig);
@@ -433,12 +433,12 @@ TEST_SUITE("CALMAnimationIntegration") {
     }
 
     TEST_CASE("update instance produces valid pose") {
-        ml::CALMArchetypeManager manager;
+        ml::ArchetypeManager manager;
         Skeleton skel = makeTestSkel();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLCForFSM(charConfig.observationDim, charConfig.actionDim,
                                          charConfig.latentDim);
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
         uint32_t archetypeId = manager.createArchetype(
             "humanoid", 0, std::move(llc), std::move(space), charConfig);
@@ -456,12 +456,12 @@ TEST_SUITE("CALMAnimationIntegration") {
     }
 
     TEST_CASE("LOD-aware update skips frames") {
-        ml::CALMArchetypeManager manager;
+        ml::ArchetypeManager manager;
         Skeleton skel = makeTestSkel();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLCForFSM(charConfig.observationDim, charConfig.actionDim,
                                          charConfig.latentDim);
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
         uint32_t archetypeId = manager.createArchetype(
             "humanoid", 0, std::move(llc), std::move(space), charConfig);
@@ -507,12 +507,12 @@ TEST_SUITE("CALMAnimationIntegration") {
     }
 
     TEST_CASE("clearInstances keeps archetypes") {
-        ml::CALMArchetypeManager manager;
+        ml::ArchetypeManager manager;
         Skeleton skel = makeTestSkel();
-        auto charConfig = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto charConfig = ml::CharacterConfig::buildFromSkeleton(skel);
         auto llc = makeTrivialLLCForFSM(charConfig.observationDim, charConfig.actionDim,
                                          charConfig.latentDim);
-        ml::CALMLatentSpace space(charConfig.latentDim);
+        ml::LatentSpace space(charConfig.latentDim);
 
         manager.createArchetype("humanoid", 0, std::move(llc), std::move(space), charConfig);
         manager.createInstance(0);
@@ -524,6 +524,6 @@ TEST_SUITE("CALMAnimationIntegration") {
     }
 }
 
-// NOTE: CALMGPUInference tests require a Vulkan device and are not included
+// NOTE: GPUInference tests require a Vulkan device and are not included
 // in the unit test suite. GPU inference is tested via integration tests
 // with the full rendering pipeline.

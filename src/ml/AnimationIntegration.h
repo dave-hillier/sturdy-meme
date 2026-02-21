@@ -1,9 +1,9 @@
 #pragma once
 
-#include "CALMController.h"
-#include "CALMLowLevelController.h"
-#include "CALMLatentSpace.h"
-#include "CALMCharacterConfig.h"
+#include "calm/Controller.h"
+#include "calm/LowLevelController.h"
+#include "LatentSpace.h"
+#include "CharacterConfig.h"
 #include "../animation/AnimationArchetypeManager.h"
 #include "../animation/CharacterLOD.h"
 #include "../npc/NPCData.h"
@@ -25,30 +25,30 @@ namespace JPH {
 
 namespace ml {
 
-// CALM Archetype — shared LLC and latent space for a character type.
+// Archetype — shared LLC and latent space for a character type.
 // Multiple NPCs of the same archetype share the LLC weights and latent library
-// (read-only), while each NPC owns its own CALMController state.
-struct CALMArchetype {
+// (read-only), while each NPC owns its own controller state.
+struct Archetype {
     uint32_t id = 0;
     std::string name;
 
     // Shared animation archetype (skeleton, clips for fallback)
     uint32_t animArchetypeId = AnimationArchetypeManager::INVALID_ARCHETYPE_ID;
 
-    // Shared CALM components (read-only at inference time)
-    CALMLowLevelController llc;
-    CALMLatentSpace latentSpace;
-    CALMCharacterConfig config;
+    // Shared components (read-only at inference time)
+    calm::LowLevelController llc;
+    LatentSpace latentSpace;
+    CharacterConfig config;
 
     // Shared ragdoll settings (ref-counted, built once per archetype)
     JPH::Ref<JPH::RagdollSettings> ragdollSettings;
     physics::RagdollConfig ragdollConfig;
 };
 
-// Per-NPC CALM instance state — lightweight data owned by each NPC.
-struct CALMNPCInstance {
+// Per-NPC instance state — lightweight data owned by each NPC.
+struct NPCInstance {
     uint32_t archetypeId = 0;
-    CALMController controller;  // Per-NPC latent state + obs history
+    calm::Controller controller;  // Per-NPC latent state + obs history
 
     // LOD control
     uint32_t lodLevel = 0;
@@ -66,41 +66,41 @@ struct CALMNPCInstance {
     bool usePhysics = false;  // Toggle kinematic vs physics-driven mode
 };
 
-// CALMArchetypeManager — manages CALM character types and per-NPC instances.
+// ArchetypeManager — manages character types and per-NPC instances.
 //
 // Workflow:
-//   1. Create CALM archetypes (loads shared LLC + latent library)
+//   1. Create archetypes (loads shared LLC + latent library)
 //   2. Spawn NPC instances referencing an archetype
 //   3. Each frame: update all instances with LOD-aware scheduling
 //
 // Integrates with AnimationArchetypeManager for fallback clip animation
 // and with CharacterLODConfig for update frequency control.
-class CALMArchetypeManager {
+class ArchetypeManager {
 public:
-    CALMArchetypeManager() = default;
+    ArchetypeManager() = default;
 
     // --- Archetype management ---
 
-    // Create a CALM archetype from components.
+    // Create an archetype from components.
     // animArchetypeId: reference to the AnimationArchetypeManager archetype (for skeleton + fallback clips)
-    // Returns the CALM archetype ID.
+    // Returns the archetype ID.
     uint32_t createArchetype(const std::string& name,
                              uint32_t animArchetypeId,
-                             CALMLowLevelController llc,
-                             CALMLatentSpace latentSpace,
-                             CALMCharacterConfig config);
+                             calm::LowLevelController llc,
+                             LatentSpace latentSpace,
+                             CharacterConfig config);
 
     // Get archetype by ID
-    const CALMArchetype* getArchetype(uint32_t id) const;
+    const Archetype* getArchetype(uint32_t id) const;
 
     // Find archetype by name
-    const CALMArchetype* findArchetype(const std::string& name) const;
+    const Archetype* findArchetype(const std::string& name) const;
 
     size_t archetypeCount() const { return archetypes_.size(); }
 
     // --- Instance management ---
 
-    // Create a new NPC instance referencing a CALM archetype.
+    // Create a new NPC instance referencing an archetype.
     // Returns instance index.
     size_t createInstance(uint32_t archetypeId);
 
@@ -108,8 +108,8 @@ public:
     void initInstance(size_t instanceIdx, Skeleton& skeleton);
 
     // Get instance state
-    CALMNPCInstance* getInstance(size_t index);
-    const CALMNPCInstance* getInstance(size_t index) const;
+    NPCInstance* getInstance(size_t index);
+    const NPCInstance* getInstance(size_t index) const;
 
     size_t instanceCount() const { return instances_.size(); }
 
@@ -176,11 +176,11 @@ public:
     static constexpr uint32_t INVALID_ARCHETYPE_ID = UINT32_MAX;
 
 private:
-    std::vector<std::unique_ptr<CALMArchetype>> archetypes_;
+    std::vector<std::unique_ptr<Archetype>> archetypes_;
     std::unordered_map<std::string, uint32_t> archetypeNameMap_;
     uint32_t nextArchetypeId_ = 0;
 
-    std::vector<CALMNPCInstance> instances_;
+    std::vector<NPCInstance> instances_;
 };
 
 // Utility: compute bone matrices from a SkeletonPose and a Skeleton.

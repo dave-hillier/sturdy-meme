@@ -1,4 +1,4 @@
-#include "CALMObservation.h"
+#include "ObservationExtractor.h"
 #include "GLTFLoader.h"
 #include "CharacterController.h"
 #include "RagdollInstance.h"
@@ -8,7 +8,7 @@
 
 namespace ml {
 
-CALMObservationExtractor::CALMObservationExtractor(const CALMCharacterConfig& config)
+ObservationExtractor::ObservationExtractor(const CharacterConfig& config)
     : config_(config) {
     // Pre-allocate history frames
     for (auto& frame : history_) {
@@ -17,7 +17,7 @@ CALMObservationExtractor::CALMObservationExtractor(const CALMCharacterConfig& co
     prevDOFPositions_.resize(config_.actionDim, 0.0f);
 }
 
-void CALMObservationExtractor::reset() {
+void ObservationExtractor::reset() {
     historyIndex_ = 0;
     historyCount_ = 0;
     hasPreviousFrame_ = false;
@@ -25,9 +25,9 @@ void CALMObservationExtractor::reset() {
     prevRootRotation_ = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 }
 
-void CALMObservationExtractor::extractFrame(const Skeleton& skeleton,
-                                             const CharacterController& controller,
-                                             float deltaTime) {
+void ObservationExtractor::extractFrame(const Skeleton& skeleton,
+                                         const CharacterController& controller,
+                                         float deltaTime) {
     auto& frame = history_[historyIndex_];
     frame.clear();
     frame.reserve(config_.observationDim);
@@ -46,7 +46,7 @@ void CALMObservationExtractor::extractFrame(const Skeleton& skeleton,
     hasPreviousFrame_ = true;
 }
 
-Tensor CALMObservationExtractor::getCurrentObs() const {
+Tensor ObservationExtractor::getCurrentObs() const {
     if (historyCount_ == 0) {
         return Tensor(config_.observationDim);
     }
@@ -55,7 +55,7 @@ Tensor CALMObservationExtractor::getCurrentObs() const {
                   std::vector<float>(history_[latest].begin(), history_[latest].end()));
 }
 
-Tensor CALMObservationExtractor::getStackedObs(int numSteps) const {
+Tensor ObservationExtractor::getStackedObs(int numSteps) const {
     int totalDim = numSteps * config_.observationDim;
     std::vector<float> stacked(totalDim, 0.0f);
 
@@ -71,17 +71,17 @@ Tensor CALMObservationExtractor::getStackedObs(int numSteps) const {
     return Tensor(1, totalDim, std::move(stacked));
 }
 
-Tensor CALMObservationExtractor::getEncoderObs() const {
-    return getStackedObs(config_.numAMPEncObsSteps);
+Tensor ObservationExtractor::getEncoderObs() const {
+    return getStackedObs(config_.numEncoderObsSteps);
 }
 
-Tensor CALMObservationExtractor::getPolicyObs() const {
-    return getStackedObs(config_.numAMPObsSteps);
+Tensor ObservationExtractor::getPolicyObs() const {
+    return getStackedObs(config_.numPolicyObsSteps);
 }
 
 // ---- Root features ----
 
-void CALMObservationExtractor::extractRootFeatures(
+void ObservationExtractor::extractRootFeatures(
     const Skeleton& skeleton,
     const CharacterController& controller,
     float deltaTime,
@@ -148,7 +148,7 @@ void CALMObservationExtractor::extractRootFeatures(
 
 // ---- DOF features ----
 
-void CALMObservationExtractor::extractDOFFeatures(
+void ObservationExtractor::extractDOFFeatures(
     const Skeleton& skeleton,
     float deltaTime,
     std::vector<float>& obs) {
@@ -184,7 +184,7 @@ void CALMObservationExtractor::extractDOFFeatures(
 
 // ---- Key body features ----
 
-void CALMObservationExtractor::extractKeyBodyFeatures(
+void ObservationExtractor::extractKeyBodyFeatures(
     const Skeleton& skeleton,
     std::vector<float>& obs) {
 
@@ -230,7 +230,7 @@ void CALMObservationExtractor::extractKeyBodyFeatures(
 
 // ---- Static helpers ----
 
-void CALMObservationExtractor::quatToTanNorm6D(const glm::quat& q, float out[6]) {
+void ObservationExtractor::quatToTanNorm6D(const glm::quat& q, float out[6]) {
     // Convert quaternion to rotation matrix, take first two columns
     glm::mat3 m = glm::mat3_cast(q);
     // Column 0
@@ -243,19 +243,19 @@ void CALMObservationExtractor::quatToTanNorm6D(const glm::quat& q, float out[6])
     out[5] = m[1][2];
 }
 
-float CALMObservationExtractor::getHeadingAngle(const glm::quat& q) {
+float ObservationExtractor::getHeadingAngle(const glm::quat& q) {
     // Project forward direction onto XZ plane, compute yaw
     glm::vec3 forward = q * glm::vec3(0.0f, 0.0f, 1.0f);
     return std::atan2(forward.x, forward.z);
 }
 
-glm::quat CALMObservationExtractor::removeHeading(const glm::quat& q) {
+glm::quat ObservationExtractor::removeHeading(const glm::quat& q) {
     float heading = getHeadingAngle(q);
     glm::quat headingQuat = glm::angleAxis(-heading, glm::vec3(0.0f, 1.0f, 0.0f));
     return headingQuat * q;
 }
 
-glm::vec3 CALMObservationExtractor::matrixToEulerXYZ(const glm::mat4& m) {
+glm::vec3 ObservationExtractor::matrixToEulerXYZ(const glm::mat4& m) {
     // Extract Euler angles (XYZ intrinsic order) from a rotation matrix
     glm::vec3 euler;
     float sy = m[0][2];
@@ -274,7 +274,7 @@ glm::vec3 CALMObservationExtractor::matrixToEulerXYZ(const glm::mat4& m) {
 
 // ---- Ragdoll-based observation extraction ----
 
-void CALMObservationExtractor::extractFrameFromRagdoll(
+void ObservationExtractor::extractFrameFromRagdoll(
     const Skeleton& skeleton,
     const physics::RagdollInstance& ragdoll,
     float deltaTime) {
@@ -297,7 +297,7 @@ void CALMObservationExtractor::extractFrameFromRagdoll(
     hasPreviousFrame_ = true;
 }
 
-void CALMObservationExtractor::extractRootFeaturesFromRagdoll(
+void ObservationExtractor::extractRootFeaturesFromRagdoll(
     const Skeleton& skeleton,
     const physics::RagdollInstance& ragdoll,
     float deltaTime,
@@ -347,7 +347,7 @@ void CALMObservationExtractor::extractRootFeaturesFromRagdoll(
     prevRootRotation_ = rootRot;
 }
 
-void CALMObservationExtractor::extractDOFFeaturesFromRagdoll(
+void ObservationExtractor::extractDOFFeaturesFromRagdoll(
     const Skeleton& skeleton,
     const physics::RagdollInstance& ragdoll,
     float deltaTime,

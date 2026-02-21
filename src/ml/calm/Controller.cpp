@@ -1,22 +1,22 @@
-#include "CALMController.h"
+#include "Controller.h"
 #include "GLTFLoader.h"
 #include "CharacterController.h"
 #include "RagdollInstance.h"
 #include <SDL3/SDL_log.h>
 
-namespace ml {
+namespace ml::calm {
 
-void CALMController::init(const CALMCharacterConfig& charConfig,
-                           CALMLowLevelController llc,
-                           CALMLatentSpace latentSpace,
-                           Config config) {
+void Controller::init(const CharacterConfig& charConfig,
+                       LowLevelController llc,
+                       LatentSpace latentSpace,
+                       Config config) {
     charConfig_ = charConfig;
     llc_ = std::move(llc);
     latentSpace_ = std::move(latentSpace);
     config_ = config;
 
-    obsExtractor_ = CALMObservationExtractor(charConfig_);
-    actionApplier_ = CALMActionApplier(charConfig_);
+    obsExtractor_ = ObservationExtractor(charConfig_);
+    actionApplier_ = ActionApplier(charConfig_);
 
     // Initialize latent to a default
     currentLatent_ = latentSpace_.zeroLatent();
@@ -31,14 +31,14 @@ void CALMController::init(const CALMCharacterConfig& charConfig,
     }
 
     initialized_ = true;
-    SDL_Log("CALMController: initialized (actionDim=%d, obsDim=%d, latentDim=%d)",
+    SDL_Log("calm::Controller: initialized (actionDim=%d, obsDim=%d, latentDim=%d)",
             charConfig_.actionDim, charConfig_.observationDim, latentSpace_.latentDim());
 }
 
-void CALMController::update(float deltaTime,
-                             Skeleton& skeleton,
-                             const CharacterController& physics,
-                             SkeletonPose& outPose) {
+void Controller::update(float deltaTime,
+                         Skeleton& skeleton,
+                         const CharacterController& physics,
+                         SkeletonPose& outPose) {
     if (!initialized_) return;
 
     // 1. Extract observation
@@ -57,12 +57,12 @@ void CALMController::update(float deltaTime,
     actionApplier_.applyToSkeleton(actions, skeleton, outPose);
 }
 
-void CALMController::updateBlended(float deltaTime,
-                                    Skeleton& skeleton,
-                                    const CharacterController& physics,
-                                    const SkeletonPose& basePose,
-                                    float blendWeight,
-                                    SkeletonPose& outPose) {
+void Controller::updateBlended(float deltaTime,
+                                Skeleton& skeleton,
+                                const CharacterController& physics,
+                                const SkeletonPose& basePose,
+                                float blendWeight,
+                                SkeletonPose& outPose) {
     if (!initialized_) return;
 
     // 1. Extract observation
@@ -81,10 +81,10 @@ void CALMController::updateBlended(float deltaTime,
     actionApplier_.applyBlended(actions, skeleton, basePose, blendWeight, outPose);
 }
 
-void CALMController::updatePhysics(float deltaTime,
-                                    Skeleton& skeleton,
-                                    physics::RagdollInstance& ragdoll,
-                                    SkeletonPose& outPose) {
+void Controller::updatePhysics(float deltaTime,
+                                Skeleton& skeleton,
+                                physics::RagdollInstance& ragdoll,
+                                SkeletonPose& outPose) {
     if (!initialized_) return;
 
     // 1. Read current pose from ragdoll for observation
@@ -123,26 +123,26 @@ void CALMController::updatePhysics(float deltaTime,
 
 // --- Latent control ---
 
-void CALMController::setLatent(const Tensor& z) {
+void Controller::setLatent(const Tensor& z) {
     currentLatent_ = z;
     targetLatent_ = z;
     interpolationStepsRemaining_ = 0;
     Tensor::l2Normalize(currentLatent_);
 }
 
-void CALMController::transitionToLatent(const Tensor& z, int steps) {
+void Controller::transitionToLatent(const Tensor& z, int steps) {
     targetLatent_ = z;
     Tensor::l2Normalize(targetLatent_);
     interpolationStepsTotal_ = std::max(1, steps);
     interpolationStepsRemaining_ = interpolationStepsTotal_;
 }
 
-void CALMController::transitionToBehavior(const std::string& tag, int steps) {
+void Controller::transitionToBehavior(const std::string& tag, int steps) {
     const Tensor& z = latentSpace_.sampleByTag(tag, rng_);
     transitionToLatent(z, steps);
 }
 
-void CALMController::reset() {
+void Controller::reset() {
     obsExtractor_.reset();
     currentLatent_ = latentSpace_.zeroLatent();
     targetLatent_ = currentLatent_;
@@ -158,13 +158,13 @@ void CALMController::reset() {
 
 // --- Private ---
 
-void CALMController::stepLatent() {
+void Controller::stepLatent() {
     // Handle interpolation
     if (interpolationStepsRemaining_ > 0) {
         --interpolationStepsRemaining_;
         float alpha = 1.0f - static_cast<float>(interpolationStepsRemaining_)
                              / static_cast<float>(interpolationStepsTotal_);
-        currentLatent_ = CALMLatentSpace::interpolate(currentLatent_, targetLatent_, alpha);
+        currentLatent_ = LatentSpace::interpolate(currentLatent_, targetLatent_, alpha);
     }
 
     // Handle auto-resample
@@ -176,7 +176,7 @@ void CALMController::stepLatent() {
     }
 }
 
-void CALMController::resampleLatent() {
+void Controller::resampleLatent() {
     const Tensor& newZ = latentSpace_.sampleRandom(rng_);
     currentLatent_ = newZ;
     targetLatent_ = newZ;
@@ -191,4 +191,4 @@ void CALMController::resampleLatent() {
     }
 }
 
-} // namespace ml
+} // namespace ml::calm

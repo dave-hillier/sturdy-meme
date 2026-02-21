@@ -1,9 +1,9 @@
 #pragma once
 
-#include "CALMLowLevelController.h"
-#include "CALMLatentSpace.h"
-#include "CALMObservation.h"
-#include "CALMActionApplier.h"
+#include "LowLevelController.h"
+#include "../LatentSpace.h"
+#include "../ObservationExtractor.h"
+#include "../ActionApplier.h"
 #include "AnimationBlend.h"
 #include <random>
 
@@ -14,39 +14,39 @@ namespace physics {
     class RagdollInstance;
 }
 
-namespace ml {
+namespace ml::calm {
 
-struct CALMControllerConfig {
+struct ControllerConfig {
     int latentStepsMin = 10;       // Min steps before latent resample
     int latentStepsMax = 150;      // Max steps before latent resample
     bool autoResample = false;     // Auto-resample latent on step expiry
 };
 
 // Per-character CALM controller that ties together the full inference pipeline:
-//   observation extraction → latent management → LLC policy → action application
+//   observation extraction -> latent management -> LLC policy -> action application
 //
 // Each frame:
 //   1. Extract observation from skeleton + physics
 //   2. Manage latent code (resample, interpolate)
-//   3. Run LLC: policy(z, obs) → actions
+//   3. Run LLC: policy(z, obs) -> actions
 //   4. Apply actions to produce a SkeletonPose
 //
 // External control via setLatent() / transitionToLatent() / transitionToBehavior()
 // allows high-level controllers and FSMs to direct the character.
-class CALMController {
+class Controller {
 public:
-    using Config = CALMControllerConfig;
+    using Config = ControllerConfig;
 
-    CALMController() = default;
+    Controller() = default;
 
     // Initialize with all components
-    void init(const CALMCharacterConfig& charConfig,
-              CALMLowLevelController llc,
-              CALMLatentSpace latentSpace,
+    void init(const CharacterConfig& charConfig,
+              LowLevelController llc,
+              LatentSpace latentSpace,
               Config config = {});
 
     // Per-frame update: extract obs, run policy, produce pose.
-    // Returns the CALM-generated skeleton pose.
+    // Returns the generated skeleton pose.
     void update(float deltaTime,
                 Skeleton& skeleton,
                 const CharacterController& physics,
@@ -60,7 +60,7 @@ public:
                        float blendWeight,
                        SkeletonPose& outPose);
 
-    // Physics-driven update: read ragdoll state → observe → infer → drive motors.
+    // Physics-driven update: read ragdoll state -> observe -> infer -> drive motors.
     // Instead of setting joint transforms directly, this converts actions to a
     // target pose and feeds it to the ragdoll's motor system.
     // outPose receives the current physics-resolved pose for rendering.
@@ -90,20 +90,20 @@ public:
     int stepsUntilResample() const { return stepsUntilResample_; }
 
     // Access sub-components
-    const CALMLowLevelController& llc() const { return llc_; }
-    const CALMLatentSpace& latentSpace() const { return latentSpace_; }
-    const CALMObservationExtractor& obsExtractor() const { return obsExtractor_; }
-    const CALMActionApplier& actionApplier() const { return actionApplier_; }
+    const LowLevelController& llc() const { return llc_; }
+    const LatentSpace& latentSpace() const { return latentSpace_; }
+    const ObservationExtractor& obsExtractor() const { return obsExtractor_; }
+    const ActionApplier& actionApplier() const { return actionApplier_; }
 
     // Reset state (call on teleport/respawn)
     void reset();
 
 private:
-    CALMLowLevelController llc_;
-    CALMLatentSpace latentSpace_;
-    CALMObservationExtractor obsExtractor_;
-    CALMActionApplier actionApplier_;
-    CALMCharacterConfig charConfig_;
+    LowLevelController llc_;
+    LatentSpace latentSpace_;
+    ObservationExtractor obsExtractor_;
+    ActionApplier actionApplier_;
+    CharacterConfig charConfig_;
     Config config_;
 
     // Latent state
@@ -122,4 +122,4 @@ private:
     void resampleLatent();
 };
 
-} // namespace ml
+} // namespace ml::calm

@@ -14,9 +14,9 @@ namespace JPH {
 
 #include "GLTFLoader.h"
 #include "CharacterController.h"
-#include "ml/CALMCharacterConfig.h"
-#include "ml/CALMObservation.h"
-#include "ml/CALMActionApplier.h"
+#include "ml/CharacterConfig.h"
+#include "ml/ObservationExtractor.h"
+#include "ml/ActionApplier.h"
 #include "ml/Tensor.h"
 
 // Stub CharacterController member functions for testing (avoids linking Jolt)
@@ -38,7 +38,7 @@ bool CharacterController::isOnGround() const { return true; }
 // ---------------------------------------------------------------------------
 static Skeleton makeTestSkeleton() {
     Skeleton skel;
-    // Build a minimal humanoid skeleton with the bones CALM expects
+    // Build a minimal humanoid skeleton with the bones the policy expects
     auto addJoint = [&](const std::string& boneName, int32_t parent) -> int32_t {
         Joint jnt;
         jnt.name = boneName;
@@ -81,13 +81,13 @@ static Skeleton makeTestSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// CALMCharacterConfig tests
+// CharacterConfig tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMCharacterConfig") {
+TEST_SUITE("CharacterConfig") {
     TEST_CASE("buildFromSkeleton finds standard humanoid bones") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
 
         // Should have found DOFs for the standard bones
         CHECK(config.actionDim > 0);
@@ -103,7 +103,7 @@ TEST_SUITE("CALMCharacterConfig") {
 
     TEST_CASE("observation dim matches expected formula") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
 
         // obs = root_h(1) + root_rot(6) + root_vel(3) + root_ang_vel(3)
         //     + dof_pos(N) + dof_vel(N) + key_body_pos(K*3)
@@ -120,7 +120,7 @@ TEST_SUITE("CALMCharacterConfig") {
             {"right_foot", "RightFoot"},
             {"left_foot", "LeftFoot"},
         };
-        auto config = ml::CALMCharacterConfig::buildFromNameMap(skel, nameMap);
+        auto config = ml::CharacterConfig::buildFromNameMap(skel, nameMap);
 
         // pelvis(3) + head(3) + right_foot(3) + left_foot(3) = 12
         CHECK(config.actionDim == 12);
@@ -129,7 +129,7 @@ TEST_SUITE("CALMCharacterConfig") {
 
     TEST_CASE("DOF mappings have valid joint indices") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
 
         for (const auto& dof : config.dofMappings) {
             CHECK(dof.jointIndex >= 0);
@@ -141,14 +141,14 @@ TEST_SUITE("CALMCharacterConfig") {
 }
 
 // ---------------------------------------------------------------------------
-// CALMObservationExtractor tests
+// ObservationExtractor tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMObservationExtractor") {
+TEST_SUITE("ObservationExtractor") {
     TEST_CASE("produces correct observation dimension") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
-        ml::CALMObservationExtractor extractor(config);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
+        ml::ObservationExtractor extractor(config);
 
         CharacterController controller;
 
@@ -160,8 +160,8 @@ TEST_SUITE("CALMObservationExtractor") {
 
     TEST_CASE("root height appears in first element") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
-        ml::CALMObservationExtractor extractor(config);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
+        ml::ObservationExtractor extractor(config);
 
         CharacterController controller;
         // getPosition() returns (0, 1, 0) in our stub
@@ -175,8 +175,8 @@ TEST_SUITE("CALMObservationExtractor") {
 
     TEST_CASE("stacked observations have correct dimension") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
-        ml::CALMObservationExtractor extractor(config);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
+        ml::ObservationExtractor extractor(config);
 
         CharacterController controller;
 
@@ -189,13 +189,13 @@ TEST_SUITE("CALMObservationExtractor") {
         CHECK(static_cast<int>(stacked.size()) == 3 * config.observationDim);
 
         ml::Tensor encoder = extractor.getEncoderObs();
-        CHECK(static_cast<int>(encoder.size()) == config.numAMPEncObsSteps * config.observationDim);
+        CHECK(static_cast<int>(encoder.size()) == config.numEncoderObsSteps * config.observationDim);
     }
 
     TEST_CASE("reset clears history") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
-        ml::CALMObservationExtractor extractor(config);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
+        ml::ObservationExtractor extractor(config);
 
         CharacterController controller;
         extractor.extractFrame(skel, controller, 1.0f / 30.0f);
@@ -213,8 +213,8 @@ TEST_SUITE("CALMObservationExtractor") {
 
     TEST_CASE("velocity features are zero on first frame") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
-        ml::CALMObservationExtractor extractor(config);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
+        ml::ObservationExtractor extractor(config);
 
         CharacterController controller;
         extractor.extractFrame(skel, controller, 1.0f / 30.0f);
@@ -228,14 +228,14 @@ TEST_SUITE("CALMObservationExtractor") {
 }
 
 // ---------------------------------------------------------------------------
-// CALMActionApplier tests
+// ActionApplier tests
 // ---------------------------------------------------------------------------
 
-TEST_SUITE("CALMActionApplier") {
+TEST_SUITE("ActionApplier") {
     TEST_CASE("produces pose with correct bone count") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
-        ml::CALMActionApplier applier(config);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
+        ml::ActionApplier applier(config);
 
         ml::Tensor actions(config.actionDim);
         actions.fill(0.0f); // Zero angles = identity-ish
@@ -248,8 +248,8 @@ TEST_SUITE("CALMActionApplier") {
 
     TEST_CASE("zero actions produce near-identity rotations") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
-        ml::CALMActionApplier applier(config);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
+        ml::ActionApplier applier(config);
 
         ml::Tensor actions(config.actionDim);
         actions.fill(0.0f);
@@ -257,7 +257,7 @@ TEST_SUITE("CALMActionApplier") {
         SkeletonPose pose;
         applier.applyToSkeleton(actions, skel, pose);
 
-        // All CALM-controlled joints should have identity-ish rotation
+        // All policy-controlled joints should have identity-ish rotation
         for (const auto& dof : config.dofMappings) {
             const auto& bone = pose[dof.jointIndex];
             // Quaternion should be near identity (w ≈ 1)
@@ -267,8 +267,8 @@ TEST_SUITE("CALMActionApplier") {
 
     TEST_CASE("non-zero action rotates joint") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
-        ml::CALMActionApplier applier(config);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
+        ml::ActionApplier applier(config);
 
         ml::Tensor actions(config.actionDim);
         actions.fill(0.0f);
@@ -286,8 +286,8 @@ TEST_SUITE("CALMActionApplier") {
 
     TEST_CASE("clampActions respects joint limits") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
-        ml::CALMActionApplier applier(config);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
+        ml::ActionApplier applier(config);
 
         ml::Tensor actions(config.actionDim);
         actions.fill(100.0f); // Way beyond limits
@@ -302,8 +302,8 @@ TEST_SUITE("CALMActionApplier") {
 
     TEST_CASE("blended with weight 0 returns base pose") {
         Skeleton skel = makeTestSkeleton();
-        auto config = ml::CALMCharacterConfig::buildFromSkeleton(skel);
-        ml::CALMActionApplier applier(config);
+        auto config = ml::CharacterConfig::buildFromSkeleton(skel);
+        ml::ActionApplier applier(config);
 
         // Create a base pose with known rotations
         SkeletonPose basePose;

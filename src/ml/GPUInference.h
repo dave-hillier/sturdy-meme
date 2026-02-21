@@ -2,7 +2,7 @@
 
 #include "Tensor.h"
 #include "MLPNetwork.h"
-#include "CALMLowLevelController.h"
+#include "calm/LowLevelController.h"
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <vector>
@@ -22,14 +22,14 @@ struct GPULayerMeta {
 };
 
 // Push constants matching the shader layout
-struct CALMInferencePushConstants {
+struct InferencePushConstants {
     uint32_t numLayers;
     uint32_t styleLayerCount;
     uint32_t mainLayerCount;
     uint32_t styleDim;
 };
 
-// GPU batch inference for CALM LLC policies.
+// GPU batch inference for style-conditioned LLC policies.
 //
 // Evaluates the same LLC network for many NPCs simultaneously using a
 // Vulkan compute shader. All NPCs must share the same LLC architecture
@@ -42,7 +42,7 @@ struct CALMInferencePushConstants {
 //
 // The compute shader processes one NPC per invocation, performing the full
 // style-conditioned MLP forward pass (style MLP -> concat -> main MLP -> muHead).
-class CALMGPUInference {
+class GPUInference {
 public:
     struct Config {
         uint32_t maxNPCs = 256;         // Maximum NPCs in a single batch
@@ -53,18 +53,18 @@ public:
         std::string shaderPath;         // Path to calm_inference.comp.spv
     };
 
-    CALMGPUInference() = default;
-    ~CALMGPUInference();
+    GPUInference() = default;
+    ~GPUInference();
 
     // Non-copyable
-    CALMGPUInference(const CALMGPUInference&) = delete;
-    CALMGPUInference& operator=(const CALMGPUInference&) = delete;
+    GPUInference(const GPUInference&) = delete;
+    GPUInference& operator=(const GPUInference&) = delete;
 
     // Initialize GPU resources (pipeline, descriptor sets, buffers).
     bool init(VkDevice device, VmaAllocator allocator, const Config& config);
 
     // Upload LLC network weights to the GPU.
-    bool uploadWeights(const CALMLowLevelController& llc);
+    bool uploadWeights(const calm::LowLevelController& llc);
 
     // Upload batched input data (latent codes + observations) for this frame.
     void uploadInputs(const std::vector<float>& latents,
@@ -113,7 +113,7 @@ private:
     GPUBuffer obsBuffer_;
     GPUBuffer actionBuffer_;
 
-    CALMInferencePushConstants pushConstants_{};
+    InferencePushConstants pushConstants_{};
 
     // Helpers
     bool createBuffer(GPUBuffer& buf, size_t size,
@@ -125,7 +125,7 @@ private:
     bool createDescriptorSet();
     void updateDescriptorSet();
 
-    bool packWeights(const CALMLowLevelController& llc,
+    bool packWeights(const calm::LowLevelController& llc,
                      std::vector<float>& packedWeights,
                      std::vector<GPULayerMeta>& layerMetas);
 };

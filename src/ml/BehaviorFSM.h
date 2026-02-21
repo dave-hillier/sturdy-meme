@@ -1,7 +1,7 @@
 #pragma once
 
-#include "CALMController.h"
-#include "CALMHighLevelController.h"
+#include "calm/Controller.h"
+#include "TaskController.h"
 #include "Tensor.h"
 #include <string>
 #include <vector>
@@ -10,16 +10,16 @@
 
 namespace ml {
 
-// A single state in the CALM behavior FSM.
-// Each state drives the CALMController with either:
+// A single state in the behavior FSM.
+// Each state drives a controller with either:
 //   - A fixed behavior tag (sampled from the latent library), OR
-//   - An HLC that dynamically produces latent codes
-struct CALMFSMState {
+//   - A task controller that dynamically produces latent codes
+struct FSMState {
     std::string name;
 
     // Behavior source (one or the other):
     std::string behaviorTag;                        // Fixed behavior from latent library
-    std::function<void(Tensor& outLatent)> hlcEval; // Dynamic HLC evaluation (optional)
+    std::function<void(Tensor& outLatent)> hlcEval; // Dynamic task evaluation (optional)
 
     // Transition configuration
     int blendSteps = 15;  // Steps to interpolate latent on entry
@@ -31,30 +31,32 @@ struct CALMFSMState {
     std::string nextState;
 };
 
-// CALM Behavior FSM — composes complex behavior sequences from latent primitives.
+// Behavior FSM — composes complex behavior sequences from latent primitives.
 //
 // Each state either selects a fixed behavior from the latent library or uses
-// an HLC to dynamically produce latent codes. Transitions happen when exit
-// conditions are met, with smooth latent interpolation between states.
+// a task controller to dynamically produce latent codes. Transitions happen when
+// exit conditions are met, with smooth latent interpolation between states.
 //
 // Example "Stealth Attack" FSM:
 //   [crouch_walk] --(dist < 3m)--> [sprint] --(dist < 1m)--> [strike] --(done)--> [idle]
 //
-class CALMBehaviorFSM {
-public:
-    CALMBehaviorFSM() = default;
+namespace calm { class Controller; }
 
-    // Set the CALMController this FSM drives
-    void setController(CALMController* controller) { controller_ = controller; }
+class BehaviorFSM {
+public:
+    BehaviorFSM() = default;
+
+    // Set the controller this FSM drives
+    void setController(calm::Controller* controller) { controller_ = controller; }
 
     // Add a state to the FSM
-    void addState(CALMFSMState state);
+    void addState(FSMState state);
 
     // Set the initial state (must be called before update)
     void start(const std::string& stateName);
 
     // Update the FSM: check exit conditions and transition
-    // Call this once per frame, before CALMController::update()
+    // Call this once per frame, before controller update
     void update();
 
     // Force transition to a specific state
@@ -64,7 +66,7 @@ public:
     const std::string& currentStateName() const { return currentStateName_; }
 
     // Get the current state (nullptr if not started)
-    const CALMFSMState* currentState() const;
+    const FSMState* currentState() const;
 
     // Check if FSM is running
     bool isRunning() const { return !currentStateName_.empty() && controller_ != nullptr; }
@@ -84,8 +86,8 @@ public:
     }
 
 private:
-    CALMController* controller_ = nullptr;
-    std::vector<CALMFSMState> states_;
+    calm::Controller* controller_ = nullptr;
+    std::vector<FSMState> states_;
     std::unordered_map<std::string, size_t> stateMap_;
     std::string currentStateName_;
     bool complete_ = false;
