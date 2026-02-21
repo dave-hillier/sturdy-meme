@@ -54,11 +54,6 @@
 #include "interfaces/IDebugControl.h"
 #include "controls/DebugControlSubsystem.h"
 #include "threading/TaskScheduler.h"
-// Vegetation and weather (advanceBufferSet / endFrame in buildFrame)
-#include "GrassSystem.h"
-#include "WeatherSystem.h"
-#include "LeafSystem.h"
-#include "WaterTileCull.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -479,14 +474,7 @@ VkCommandBuffer Renderer::buildFrame(const Camera& camera, uint32_t imageIndex, 
     systems_->profiler().endGpuFrame(cmd, frame.frameIndex);
     vkCmd.end();
 
-    // Advance buffer sets for next frame (safe before submit — command buffer
-    // already has current frame's buffer references baked in)
-    systems_->grass().advanceBufferSet();
-    systems_->weather().advanceBufferSet();
-    systems_->leaf().advanceBufferSet();
-    if (systems_->hasWaterTileCull()) {
-        systems_->waterTileCull().endFrame(frameIndex);
-    }
+    FrameUpdater::advanceBufferSets(*systems_, frameIndex);
 
     return cmd;
 }

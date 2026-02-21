@@ -5,6 +5,11 @@
 #include "GPUSceneBuffer.h"
 #include "DebugLineSystem.h"
 #include "controls/DebugControlSubsystem.h"
+// advanceBufferSets
+#include "GrassSystem.h"
+#include "WeatherSystem.h"
+#include "LeafSystem.h"
+#include "WaterTileCull.h"
 
 #include "updaters/VegetationUpdater.h"
 #include "updaters/AtmosphereUpdater.h"
@@ -54,6 +59,15 @@ void FrameUpdater::populateGPUSceneBuffer(RendererSystems& systems, const FrameD
 
     sceneBuffer.finalize();
     systems.profiler().endCpuZone("GPUSceneBuffer");
+}
+
+void FrameUpdater::advanceBufferSets(RendererSystems& systems, uint32_t frameIndex) {
+    systems.grass().advanceBufferSet();
+    systems.weather().advanceBufferSet();
+    systems.leaf().advanceBufferSet();
+    if (systems.hasWaterTileCull()) {
+        systems.waterTileCull().endFrame(frameIndex);
+    }
 }
 
 void FrameUpdater::updateDebugLines(RendererSystems& systems, uint32_t frameIndex) {
