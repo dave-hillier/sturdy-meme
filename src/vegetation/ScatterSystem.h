@@ -97,12 +97,6 @@ public:
     size_t getInstanceCount() const { return material_.getInstanceCount(); }
     size_t getMeshVariationCount() const { return material_.getMeshVariationCount(); }
 
-    // Get instances for physics integration
-    const std::vector<SceneObjectInstance>& getInstances() const { return material_.getInstances(); }
-
-    // Get meshes for physics collision shapes
-    const std::vector<Mesh>& getMeshes() const { return material_.getMeshes(); }
-
     // System name for logging/debugging
     const std::string& getName() const { return name_; }
 
