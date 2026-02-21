@@ -20,6 +20,7 @@
 #include "TerrainCameraOptimizer.h"
 #include "TerrainPipelines.h"
 #include "TerrainEffects.h"
+#include "TerrainDescriptorSets.h"
 #include "VirtualTextureSystem.h"
 #include "DescriptorManager.h"
 #include "InitContext.h"
@@ -209,8 +210,7 @@ public:
 
     // Set screen-space shadow buffer for pre-computed shadows
     void setScreenShadowBuffer(vk::ImageView view, vk::Sampler sampler) {
-        screenShadowView_ = view;
-        screenShadowSampler_ = sampler;
+        if (descriptorSets_) descriptorSets_->setScreenShadowBuffer(view, sampler);
     }
 
     // Set caustics texture for underwater light projection
@@ -376,11 +376,6 @@ private:
     bool initInternal(const InitContext& ctx, const TerrainInitParams& params, const TerrainConfig& config);
     void cleanup();
 
-    // Descriptor set creation
-    bool createComputeDescriptorSetLayout();
-    bool createRenderDescriptorSetLayout();
-    bool createDescriptorSets();
-
     // Utility functions
     void extractFrustumPlanes(const glm::mat4& viewProj, glm::vec4 planes[6]);
     void querySubgroupCapabilities();
@@ -413,19 +408,7 @@ private:
     std::unique_ptr<TerrainBuffers> buffers;      // Uniform, indirect, and visibility buffers
     TerrainCameraOptimizer cameraOptimizer;                  // Skip-frame optimization (no destroy needed)
     std::unique_ptr<TerrainPipelines> pipelines;  // All compute and graphics pipelines
-
-    // Descriptor set layouts (needed for descriptor allocation)
-    vk::DescriptorSetLayout computeDescriptorSetLayout;
-    vk::DescriptorSetLayout renderDescriptorSetLayout;
-
-    // Descriptor sets
-    std::vector<vk::DescriptorSet> computeDescriptorSets;  // Per frame
-    std::vector<vk::DescriptorSet> renderDescriptorSets;   // Per frame
-    std::vector<vk::DescriptorSet> shadowDescriptorSets;   // Per frame
-
-    // Screen-space shadow buffer (optional, from ScreenSpaceShadowSystem)
-    vk::ImageView screenShadowView_;
-    vk::Sampler screenShadowSampler_;
+    std::unique_ptr<TerrainDescriptorSets> descriptorSets_;  // Descriptor layouts and per-frame sets
 
     // Configuration
     TerrainConfig config;
