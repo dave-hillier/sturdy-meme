@@ -3,5 +3,9 @@
 class IDebugControl;
 
 namespace GuiDebugTab {
-    void render(IDebugControl& debugControl);
+    void renderVisualizations(IDebugControl& debugControl);
+    void renderPhysicsDebugOptions(IDebugControl& debugControl);
+    void renderOcclusionCulling(IDebugControl& debugControl);
+    void renderSystemInfo();
+    void renderKeyboardShortcuts();
 }

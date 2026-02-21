@@ -4,5 +4,11 @@ class IPostProcessState;
 class ICloudShadowControl;
 
 namespace GuiPostFXTab {
-    void render(IPostProcessState& postProcess, ICloudShadowControl& cloudShadow);
+    void renderHDRPipeline(IPostProcessState& postProcess);
+    void renderCloudShadows(ICloudShadowControl& cloudShadow);
+    void renderBloom(IPostProcessState& postProcess);
+    void renderGodRays(IPostProcessState& postProcess);
+    void renderVolumetricFogSettings(IPostProcessState& postProcess);
+    void renderLocalToneMapping(IPostProcessState& postProcess);
+    void renderExposure(IPostProcessState& postProcess);
 }

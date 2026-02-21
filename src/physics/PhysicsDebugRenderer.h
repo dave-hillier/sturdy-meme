@@ -5,6 +5,7 @@
 #ifdef JPH_DEBUG_RENDERER
 
 #include <Jolt/Renderer/DebugRendererSimple.h>
+#include "PhysicsDebugOptions.h"
 #include <glm/glm.hpp>
 #include <vector>
 #include <mutex>
@@ -31,7 +32,7 @@ struct DebugTriangle {
 // Jolt debug renderer implementation that collects primitives for Vulkan rendering
 class PhysicsDebugRenderer : public JPH::DebugRendererSimple {
 public:
-    PhysicsDebugRenderer();
+    explicit PhysicsDebugRenderer(PhysicsDebugOptions& externalOptions);
     virtual ~PhysicsDebugRenderer() override = default;
 
     // Initialize after Jolt is initialized (must be called before use)
@@ -58,31 +59,12 @@ public:
     // Clear all primitives
     void clear();
 
-    // Visualization options
-    struct Options {
-        bool drawShapes = true;
-        bool drawShapeWireframe = true;
-        bool drawBoundingBox = false;
-        bool drawCenterOfMassTransform = false;
-        bool drawWorldTransform = false;
-        bool drawVelocity = false;
-        bool drawMassAndInertia = false;
-        bool drawSleepStats = false;
-        bool drawConstraints = false;
-        bool drawConstraintLimits = false;
-        bool drawConstraintReferenceFrame = false;
-        bool drawContactPoint = false;
-        bool drawContactNormal = false;
+    // Options are stored externally (on DebugControlSubsystem) so they
+    // persist independently of this renderer's lifetime
+    using Options = PhysicsDebugOptions;
 
-        // Body type filters (static disabled by default - terrain heightfields are huge!)
-        bool drawStaticBodies = false;
-        bool drawDynamicBodies = true;
-        bool drawKinematicBodies = true;
-        bool drawCharacter = true;
-    };
-
-    Options& getOptions() { return options; }
-    const Options& getOptions() const { return options; }
+    Options& getOptions() { return options_; }
+    const Options& getOptions() const { return options_; }
 
 private:
     glm::vec4 toGLM(JPH::ColorArg color) const;
@@ -90,7 +72,7 @@ private:
 
     std::vector<DebugLine> lines;
     std::vector<DebugTriangle> triangles;
-    Options options;
+    Options& options_;
     std::mutex mutex;
     bool initialized = false;
 };

@@ -157,7 +157,11 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
 
         // GPU Flamegraph section
         ImGui::Spacing();
-        if (ImGui::CollapsingHeader("GPU Flamegraph")) {
+        ImGui::Separator();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 0.8f, 1.0f, 1.0f));
+        ImGui::Text("GPU FLAMEGRAPH");
+        ImGui::PopStyleColor();
+        {
             // Capture controls
             bool paused = profiler.isCapturePaused();
             if (paused) {
@@ -283,7 +287,11 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
 
         // CPU Flamegraph section
         ImGui::Spacing();
-        if (ImGui::CollapsingHeader("CPU Flamegraph")) {
+        ImGui::Separator();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
+        ImGui::Text("CPU FLAMEGRAPH");
+        ImGui::PopStyleColor();
+        {
             // Capture controls (shared state with GPU)
             bool paused = profiler.isCapturePaused();
             if (paused) {
@@ -685,79 +693,76 @@ void GuiProfilerTab::render(IProfilerControl& profilerControl) {
     const auto& initResults = InitProfiler::get().getResults();
     if (InitProfiler::get().isFinalized() && !initResults.phases.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.6f, 1.0f, 1.0f));
-        if (ImGui::CollapsingHeader("STARTUP TIMING")) {
-            ImGui::PopStyleColor();
+        ImGui::Text("STARTUP TIMING");
+        ImGui::PopStyleColor();
 
-            // Total init time
-            ImGui::Text("Total: %.1f ms (%.2f s)", initResults.totalTimeMs, initResults.totalTimeMs / 1000.0f);
+        // Total init time
+        ImGui::Text("Total: %.1f ms (%.2f s)", initResults.totalTimeMs, initResults.totalTimeMs / 1000.0f);
 
-            ImGui::Spacing();
+        ImGui::Spacing();
 
-            // Init timing breakdown table
-            if (ImGui::BeginTable("InitTimings", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-                ImGui::TableSetupColumn("Phase", ImGuiTableColumnFlags_WidthStretch);
-                ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-                ImGui::TableSetupColumn("%", ImGuiTableColumnFlags_WidthFixed, 50.0f);
-                ImGui::TableHeadersRow();
+        // Init timing breakdown table
+        if (ImGui::BeginTable("InitTimings", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            ImGui::TableSetupColumn("Phase", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Time (ms)", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+            ImGui::TableSetupColumn("%", ImGuiTableColumnFlags_WidthFixed, 50.0f);
+            ImGui::TableHeadersRow();
 
-                for (const auto& phase : initResults.phases) {
-                    ImGui::TableNextRow();
-
-                    ImGui::TableNextColumn();
-                    // Indent based on depth for hierarchical display
-                    if (phase.depth > 0) {
-                        ImGui::Indent(static_cast<float>(phase.depth) * 12.0f);
-                    }
-                    ImGui::Text("%s", phase.name.c_str());
-                    if (phase.depth > 0) {
-                        ImGui::Unindent(static_cast<float>(phase.depth) * 12.0f);
-                    }
-
-                    ImGui::TableNextColumn();
-                    ImGui::Text("%.1f", phase.timeMs);
-
-                    ImGui::TableNextColumn();
-                    // Color code by percentage
-                    if (phase.percentOfTotal > 30.0f) {
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-                    } else if (phase.percentOfTotal > 15.0f) {
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
-                    } else {
-                        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
-                    }
-                    ImGui::Text("%.1f%%", phase.percentOfTotal);
-                    ImGui::PopStyleColor();
-                }
-
-                ImGui::EndTable();
-            }
-
-            // Visual progress bars for top-level phases only (depth == 0)
-            ImGui::Spacing();
-            ImGui::Text("Top-level phases:");
             for (const auto& phase : initResults.phases) {
-                if (phase.depth == 0) {
-                    float fraction = (initResults.totalTimeMs > 0.0f)
-                        ? (phase.timeMs / initResults.totalTimeMs) : 0.0f;
-                    char label[128];
-                    snprintf(label, sizeof(label), "%s: %.1f ms", phase.name.c_str(), phase.timeMs);
-                    ImGui::ProgressBar(fraction, ImVec2(-1, 0), label);
+                ImGui::TableNextRow();
+
+                ImGui::TableNextColumn();
+                // Indent based on depth for hierarchical display
+                if (phase.depth > 0) {
+                    ImGui::Indent(static_cast<float>(phase.depth) * 12.0f);
                 }
+                ImGui::Text("%s", phase.name.c_str());
+                if (phase.depth > 0) {
+                    ImGui::Unindent(static_cast<float>(phase.depth) * 12.0f);
+                }
+
+                ImGui::TableNextColumn();
+                ImGui::Text("%.1f", phase.timeMs);
+
+                ImGui::TableNextColumn();
+                // Color code by percentage
+                if (phase.percentOfTotal > 30.0f) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+                } else if (phase.percentOfTotal > 15.0f) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.4f, 1.0f));
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.4f, 1.0f, 0.4f, 1.0f));
+                }
+                ImGui::Text("%.1f%%", phase.percentOfTotal);
+                ImGui::PopStyleColor();
             }
 
-            // Init Flamegraph (single capture, with hierarchical phases)
-            ImGui::Spacing();
-            ImGui::Text("Flamegraph:");
-            const auto& initFlamegraph = profiler.getInitFlamegraph();
-            if (!initFlamegraph.isEmpty()) {
-                GuiFlamegraph::Config config;
-                config.barHeight = 22.0f;
-                GuiFlamegraph::render("init_flamegraph", initFlamegraph, config);
-            } else {
-                ImGui::TextDisabled("Init flamegraph not captured");
+            ImGui::EndTable();
+        }
+
+        // Visual progress bars for top-level phases only (depth == 0)
+        ImGui::Spacing();
+        ImGui::Text("Top-level phases:");
+        for (const auto& phase : initResults.phases) {
+            if (phase.depth == 0) {
+                float fraction = (initResults.totalTimeMs > 0.0f)
+                    ? (phase.timeMs / initResults.totalTimeMs) : 0.0f;
+                char label[128];
+                snprintf(label, sizeof(label), "%s: %.1f ms", phase.name.c_str(), phase.timeMs);
+                ImGui::ProgressBar(fraction, ImVec2(-1, 0), label);
             }
+        }
+
+        // Init Flamegraph (single capture, with hierarchical phases)
+        ImGui::Spacing();
+        ImGui::Text("Flamegraph:");
+        const auto& initFlamegraph = profiler.getInitFlamegraph();
+        if (!initFlamegraph.isEmpty()) {
+            GuiFlamegraph::Config config;
+            config.barHeight = 22.0f;
+            GuiFlamegraph::render("init_flamegraph", initFlamegraph, config);
         } else {
-            ImGui::PopStyleColor();
+            ImGui::TextDisabled("Init flamegraph not captured");
         }
     }
 }

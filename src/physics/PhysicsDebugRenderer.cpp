@@ -31,7 +31,8 @@ private:
     const PhysicsDebugRenderer::Options& options;
 };
 
-PhysicsDebugRenderer::PhysicsDebugRenderer() {
+PhysicsDebugRenderer::PhysicsDebugRenderer(PhysicsDebugOptions& externalOptions)
+    : options_(externalOptions) {
     // Don't initialize here - Jolt allocator not yet registered
     // Call init() after Jolt is initialized
 }
@@ -87,27 +88,27 @@ void PhysicsDebugRenderer::endFrame() {
 void PhysicsDebugRenderer::drawBodies(JPH::PhysicsSystem& physicsSystem) {
     // Build draw settings from our options
     JPH::BodyManager::DrawSettings drawSettings;
-    drawSettings.mDrawShape = options.drawShapes;
-    drawSettings.mDrawShapeWireframe = options.drawShapeWireframe;
-    drawSettings.mDrawBoundingBox = options.drawBoundingBox;
-    drawSettings.mDrawCenterOfMassTransform = options.drawCenterOfMassTransform;
-    drawSettings.mDrawWorldTransform = options.drawWorldTransform;
-    drawSettings.mDrawVelocity = options.drawVelocity;
-    drawSettings.mDrawMassAndInertia = options.drawMassAndInertia;
-    drawSettings.mDrawSleepStats = options.drawSleepStats;
+    drawSettings.mDrawShape = options_.drawShapes;
+    drawSettings.mDrawShapeWireframe = options_.drawShapeWireframe;
+    drawSettings.mDrawBoundingBox = options_.drawBoundingBox;
+    drawSettings.mDrawCenterOfMassTransform = options_.drawCenterOfMassTransform;
+    drawSettings.mDrawWorldTransform = options_.drawWorldTransform;
+    drawSettings.mDrawVelocity = options_.drawVelocity;
+    drawSettings.mDrawMassAndInertia = options_.drawMassAndInertia;
+    drawSettings.mDrawSleepStats = options_.drawSleepStats;
 
     // Create body filter to respect our options
-    OptionsBodyFilter bodyFilter(options);
+    OptionsBodyFilter bodyFilter(options_);
 
     // Draw bodies with filter
     physicsSystem.DrawBodies(drawSettings, this, &bodyFilter);
 
     // Draw constraints if enabled
-    if (options.drawConstraints) {
+    if (options_.drawConstraints) {
         physicsSystem.DrawConstraints(this);
     }
 
-    if (options.drawConstraintLimits) {
+    if (options_.drawConstraintLimits) {
         physicsSystem.DrawConstraintLimits(this);
     }
 

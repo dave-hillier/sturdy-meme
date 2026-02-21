@@ -11,20 +11,7 @@
 #include <imgui.h>
 #include <cmath>
 
-void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& settings) {
-    ImGui::Spacing();
-
-    auto& sceneBuilder = playerControl.getSceneBuilder();
-    if (!sceneBuilder.hasCharacter()) {
-        ImGui::TextDisabled("No animated character loaded");
-        return;
-    }
-
-    // Cape section
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.5f, 0.5f, 1.0f));
-    ImGui::Text("CAPE");
-    ImGui::PopStyleColor();
-
+void GuiPlayerTab::renderCape(PlayerSettings& settings) {
     ImGui::Checkbox("Enable Cape", &settings.capeEnabled);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Toggle cape visibility and simulation");
@@ -34,16 +21,9 @@ void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& setting
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Visualize body colliders used for cape collision");
     }
+}
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // Weapons section
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.8f, 0.9f, 1.0f));
-    ImGui::Text("WEAPONS");
-    ImGui::PopStyleColor();
-
+void GuiPlayerTab::renderWeapons(PlayerSettings& settings) {
     ImGui::Checkbox("Show Sword", &settings.showSword);
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Toggle sword visibility in right hand");
@@ -58,209 +38,182 @@ void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& setting
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Show RGB axis indicators on hand bones (R=X, G=Y, B=Z)");
     }
+}
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // Character LOD section
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.9f, 0.5f, 1.0f));
-    ImGui::Text("CHARACTER LOD");
-    ImGui::PopStyleColor();
+void GuiPlayerTab::renderCharacterLOD(IPlayerControl& playerControl, PlayerSettings& settings) {
+    auto& sceneBuilder = playerControl.getSceneBuilder();
+    if (!sceneBuilder.hasCharacter()) {
+        ImGui::TextDisabled("No animated character loaded");
+        return;
+    }
 
     auto& character = sceneBuilder.getAnimatedCharacter();
-    {
-        uint32_t currentLOD = character.getLODLevel();
+    uint32_t currentLOD = character.getLODLevel();
 
-        // LOD level display with color coding
-        const char* lodNames[] = {"LOD0 (High)", "LOD1 (Medium)", "LOD2 (Low)", "LOD3 (Distant)"};
-        ImVec4 lodColors[] = {
-            ImVec4(0.2f, 1.0f, 0.2f, 1.0f),   // Green - high detail
-            ImVec4(0.8f, 0.8f, 0.2f, 1.0f),   // Yellow - medium
-            ImVec4(1.0f, 0.5f, 0.2f, 1.0f),   // Orange - low
-            ImVec4(1.0f, 0.2f, 0.2f, 1.0f)    // Red - distant
-        };
+    const char* lodNames[] = {"LOD0 (High)", "LOD1 (Medium)", "LOD2 (Low)", "LOD3 (Distant)"};
+    ImVec4 lodColors[] = {
+        ImVec4(0.2f, 1.0f, 0.2f, 1.0f),
+        ImVec4(0.8f, 0.8f, 0.2f, 1.0f),
+        ImVec4(1.0f, 0.5f, 0.2f, 1.0f),
+        ImVec4(1.0f, 0.2f, 0.2f, 1.0f)
+    };
 
-        ImGui::Text("Current LOD:");
+    ImGui::Text("Current LOD:");
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text, lodColors[currentLOD]);
+    ImGui::Text("%s", lodNames[currentLOD]);
+    ImGui::PopStyleColor();
+
+    uint32_t activeBones = character.getActiveBoneCount();
+    uint32_t totalBones = character.getTotalBoneCount();
+    ImGui::Text("Active Bones: %u / %u", activeBones, totalBones);
+    if (activeBones < totalBones) {
         ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Text, lodColors[currentLOD]);
-        ImGui::Text("%s", lodNames[currentLOD]);
+        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "(-%u%%)",
+            100 - (activeBones * 100 / totalBones));
+    }
+
+    bool animSkipped = character.isAnimationUpdateSkipped();
+    ImGui::Text("Animation Update:");
+    ImGui::SameLine();
+    if (animSkipped) {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.5f, 1.0f));
+        ImGui::Text("SKIPPED (using cached)");
         ImGui::PopStyleColor();
-
-        // Bone count (skeleton LOD)
-        uint32_t activeBones = character.getActiveBoneCount();
-        uint32_t totalBones = character.getTotalBoneCount();
-        ImGui::Text("Active Bones: %u / %u", activeBones, totalBones);
-        if (activeBones < totalBones) {
-            ImGui::SameLine();
-            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "(-%u%%)",
-                100 - (activeBones * 100 / totalBones));
-        }
-
-        // Animation skip status
-        bool animSkipped = character.isAnimationUpdateSkipped();
-        ImGui::Text("Animation Update:");
-        ImGui::SameLine();
-        if (animSkipped) {
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.5f, 1.0f));
-            ImGui::Text("SKIPPED (using cached)");
-            ImGui::PopStyleColor();
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 1.0f, 0.5f, 1.0f));
-            ImGui::Text("ACTIVE");
-            ImGui::PopStyleColor();
-        }
-
-        ImGui::Spacing();
-
-        // Force LOD override
-        ImGui::Checkbox("Force LOD Level", &settings.forceLODLevel);
-        if (settings.forceLODLevel) {
-            int forcedLOD = static_cast<int>(settings.forcedLOD);
-            if (ImGui::SliderInt("Forced LOD", &forcedLOD, 0, 3, lodNames[forcedLOD])) {
-                settings.forcedLOD = static_cast<uint32_t>(forcedLOD);
-            }
-            character.setLODLevel(settings.forcedLOD);
-
-            // LOD2+ skips animation updates (every 2-4 frames in real system)
-            // For testing, we skip entirely at LOD2+ to make the effect visible
-            bool shouldSkip = (settings.forcedLOD >= 2);
-            character.setSkipAnimationUpdate(shouldSkip);
-
-            ImGui::SameLine();
-            if (shouldSkip) {
-                ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "(anim frozen)");
-            }
-        } else {
-            // When not forcing, ensure animation runs normally
-            character.setSkipAnimationUpdate(false);
-        }
-
-        ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
-            "Test: Move character then force LOD2/3 to see animation freeze");
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 1.0f, 0.5f, 1.0f));
+        ImGui::Text("ACTIVE");
+        ImGui::PopStyleColor();
     }
 
     ImGui::Spacing();
-    ImGui::Separator();
+
+    ImGui::Checkbox("Force LOD Level", &settings.forceLODLevel);
+    int forcedLOD = static_cast<int>(settings.forcedLOD);
+    if (ImGui::SliderInt("Forced LOD", &forcedLOD, 0, 3, lodNames[forcedLOD])) {
+        settings.forcedLOD = static_cast<uint32_t>(forcedLOD);
+    }
+
+    if (settings.forceLODLevel) {
+        character.setLODLevel(settings.forcedLOD);
+        bool shouldSkip = (settings.forcedLOD >= 2);
+        character.setSkipAnimationUpdate(shouldSkip);
+        if (shouldSkip) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "(anim frozen)");
+        }
+    } else {
+        character.setSkipAnimationUpdate(false);
+    }
+
     ImGui::Spacing();
+    ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f),
+        "Test: Move character then force LOD2/3 to see animation freeze");
+}
 
-    // Cape info
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
-    ImGui::Text("CAPE INFO");
-    ImGui::PopStyleColor();
-
+void GuiPlayerTab::renderCapeInfo() {
     ImGui::BulletText("Cloth simulation: Verlet integration");
     ImGui::BulletText("Body colliders: Spheres + Capsules");
     ImGui::BulletText("Attachments: Shoulders + Upper back");
+}
 
-    // NPC LOD section
-    if (auto* npcSim = sceneBuilder.getNPCSimulation()) {
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
+void GuiPlayerTab::renderNPCLOD(IPlayerControl& playerControl) {
+    auto& sceneBuilder = playerControl.getSceneBuilder();
+    auto* npcSim = sceneBuilder.getNPCSimulation();
+    if (!npcSim) {
+        ImGui::TextDisabled("No NPC simulation active");
+        return;
+    }
 
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.9f, 0.7f, 0.5f, 1.0f));
-        ImGui::Text("NPC LOD");
-        ImGui::PopStyleColor();
+    const auto& npcData = npcSim->getData();
+    size_t npcCount = npcData.count();
 
-        const auto& npcData = npcSim->getData();
-        size_t npcCount = npcData.count();
+    if (npcCount == 0) {
+        ImGui::TextDisabled("No NPCs in scene");
+        return;
+    }
 
-        if (npcCount == 0) {
-            ImGui::TextDisabled("No NPCs in scene");
-        } else {
-            // Count NPCs per LOD level
-            uint32_t virtualCount = 0, bulkCount = 0, realCount = 0;
-            for (size_t i = 0; i < npcCount; ++i) {
-                switch (npcData.lodLevels[i]) {
-                    case NPCLODLevel::Virtual: virtualCount++; break;
-                    case NPCLODLevel::Bulk: bulkCount++; break;
-                    case NPCLODLevel::Real: realCount++; break;
-                }
-            }
-
-            // LOD colors
-            ImVec4 colorReal(0.2f, 1.0f, 0.2f, 1.0f);     // Green
-            ImVec4 colorBulk(1.0f, 0.8f, 0.2f, 1.0f);     // Yellow
-            ImVec4 colorVirtual(1.0f, 0.3f, 0.3f, 1.0f);  // Red
-
-            ImGui::Text("Total NPCs: %zu", npcCount);
-
-            // Summary counts
-            ImGui::TextColored(colorReal, "Real (<25m):");
-            ImGui::SameLine();
-            ImGui::Text("%u", realCount);
-            ImGui::SameLine();
-            ImGui::TextColored(colorBulk, "  Bulk (25-50m):");
-            ImGui::SameLine();
-            ImGui::Text("%u", bulkCount);
-            ImGui::SameLine();
-            ImGui::TextColored(colorVirtual, "  Virtual (>50m):");
-            ImGui::SameLine();
-            ImGui::Text("%u", virtualCount);
-
-            ImGui::Spacing();
-
-            // Per-NPC details (collapsible)
-            if (ImGui::TreeNode("NPC Details")) {
-                for (size_t i = 0; i < npcCount; ++i) {
-                    const char* lodName = "Unknown";
-                    ImVec4 lodColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-
-                    switch (npcData.lodLevels[i]) {
-                        case NPCLODLevel::Real:
-                            lodName = "Real";
-                            lodColor = colorReal;
-                            break;
-                        case NPCLODLevel::Bulk:
-                            lodName = "Bulk";
-                            lodColor = colorBulk;
-                            break;
-                        case NPCLODLevel::Virtual:
-                            lodName = "Virtual";
-                            lodColor = colorVirtual;
-                            break;
-                    }
-
-                    ImGui::Text("NPC %zu:", i);
-                    ImGui::SameLine();
-                    ImGui::TextColored(lodColor, "%s", lodName);
-                    ImGui::SameLine();
-                    ImGui::TextDisabled("(frames: %u)", npcData.framesSinceUpdate[i]);
-                }
-                ImGui::TreePop();
-            }
-
-            // LOD toggle
-            bool lodEnabled = npcSim->isLODEnabled();
-            if (ImGui::Checkbox("Enable NPC LOD", &lodEnabled)) {
-                const_cast<NPCSimulation*>(npcSim)->setLODEnabled(lodEnabled);
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Virtual: >50m, no render, update every ~10s\n"
-                                  "Bulk: 25-50m, reduced updates ~1s\n"
-                                  "Real: <25m, full animation every frame");
-            }
+    uint32_t virtualCount = 0, bulkCount = 0, realCount = 0;
+    for (size_t i = 0; i < npcCount; ++i) {
+        switch (npcData.lodLevels[i]) {
+            case NPCLODLevel::Virtual: virtualCount++; break;
+            case NPCLODLevel::Bulk: bulkCount++; break;
+            case NPCLODLevel::Real: realCount++; break;
         }
     }
 
-    // Motion Matching section
+    ImVec4 colorReal(0.2f, 1.0f, 0.2f, 1.0f);
+    ImVec4 colorBulk(1.0f, 0.8f, 0.2f, 1.0f);
+    ImVec4 colorVirtual(1.0f, 0.3f, 0.3f, 1.0f);
+
+    ImGui::Text("Total NPCs: %zu", npcCount);
+
+    ImGui::TextColored(colorReal, "Real (<25m):");
+    ImGui::SameLine();
+    ImGui::Text("%u", realCount);
+    ImGui::SameLine();
+    ImGui::TextColored(colorBulk, "  Bulk (25-50m):");
+    ImGui::SameLine();
+    ImGui::Text("%u", bulkCount);
+    ImGui::SameLine();
+    ImGui::TextColored(colorVirtual, "  Virtual (>50m):");
+    ImGui::SameLine();
+    ImGui::Text("%u", virtualCount);
+
     ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
 
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.3f, 0.8f, 1.0f, 1.0f));
-    ImGui::Text("MOTION MATCHING");
-    ImGui::PopStyleColor();
+    if (ImGui::TreeNode("NPC Details")) {
+        for (size_t i = 0; i < npcCount; ++i) {
+            const char* lodName = "Unknown";
+            ImVec4 lodColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 
-    // character already declared above, reuse it
+            switch (npcData.lodLevels[i]) {
+                case NPCLODLevel::Real:
+                    lodName = "Real";
+                    lodColor = colorReal;
+                    break;
+                case NPCLODLevel::Bulk:
+                    lodName = "Bulk";
+                    lodColor = colorBulk;
+                    break;
+                case NPCLODLevel::Virtual:
+                    lodName = "Virtual";
+                    lodColor = colorVirtual;
+                    break;
+            }
 
-    // Enable/disable motion matching
+            ImGui::Text("NPC %zu:", i);
+            ImGui::SameLine();
+            ImGui::TextColored(lodColor, "%s", lodName);
+            ImGui::SameLine();
+            ImGui::TextDisabled("(frames: %u)", npcData.framesSinceUpdate[i]);
+        }
+        ImGui::TreePop();
+    }
+
+    bool lodEnabled = npcSim->isLODEnabled();
+    if (ImGui::Checkbox("Enable NPC LOD", &lodEnabled)) {
+        const_cast<NPCSimulation*>(npcSim)->setLODEnabled(lodEnabled);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Virtual: >50m, no render, update every ~10s\n"
+                          "Bulk: 25-50m, reduced updates ~1s\n"
+                          "Real: <25m, full animation every frame");
+    }
+}
+
+void GuiPlayerTab::renderMotionMatching(IPlayerControl& playerControl, PlayerSettings& settings) {
+    auto& sceneBuilder = playerControl.getSceneBuilder();
+    if (!sceneBuilder.hasCharacter()) {
+        ImGui::TextDisabled("No animated character loaded");
+        return;
+    }
+
+    auto& character = sceneBuilder.getAnimatedCharacter();
+
     bool wasEnabled = character.isUsingMotionMatching();
     if (ImGui::Checkbox("Enable Motion Matching", &settings.motionMatchingEnabled)) {
         if (settings.motionMatchingEnabled && !wasEnabled) {
-            // Initialize motion matching if not already done
             if (!character.getMotionMatchingController().isDatabaseBuilt()) {
                 character.initializeMotionMatching();
             } else {
@@ -287,123 +240,100 @@ void GuiPlayerTab::render(IPlayerControl& playerControl, PlayerSettings& setting
     // Sync the checkbox with actual state
     settings.motionMatchingEnabled = character.isUsingMotionMatching();
 
-    if (character.isUsingMotionMatching()) {
-        ImGui::Indent();
+    bool mmActive = character.isUsingMotionMatching();
 
-        // Strafe mode section
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.7f, 0.3f, 1.0f));
-        ImGui::Text("CHARACTER FACING");
-        ImGui::PopStyleColor();
-
-        auto& controller = const_cast<MotionMatching::MotionMatchingController&>(
-            character.getMotionMatchingController());
-
-        // Facing mode combo box
-        const char* facingModeItems[] = { "Follow Movement", "Follow Camera", "Follow Target" };
-        int currentFacingMode = static_cast<int>(settings.facingMode);
-        FacingMode prevMode = settings.facingMode;
-        if (ImGui::Combo("Facing Mode", &currentFacingMode, facingModeItems, IM_ARRAYSIZE(facingModeItems))) {
-            settings.facingMode = static_cast<FacingMode>(currentFacingMode);
-            // Both FollowCamera and FollowTarget use strafe-style animation matching
+    // Facing mode
+    const char* facingModeItems[] = { "Follow Movement", "Follow Camera", "Follow Target" };
+    int currentFacingMode = static_cast<int>(settings.facingMode);
+    FacingMode prevMode = settings.facingMode;
+    if (ImGui::Combo("Facing Mode", &currentFacingMode, facingModeItems, IM_ARRAYSIZE(facingModeItems))) {
+        settings.facingMode = static_cast<FacingMode>(currentFacingMode);
+        if (mmActive) {
+            auto& controller = const_cast<MotionMatching::MotionMatchingController&>(
+                character.getMotionMatchingController());
             bool isStrafeMode = (settings.facingMode != FacingMode::FollowMovement);
             controller.setStrafeMode(isStrafeMode);
-            // Clear target when switching away from FollowTarget
-            if (prevMode == FacingMode::FollowTarget && settings.facingMode != FacingMode::FollowTarget) {
-                settings.hasTarget = false;
-            }
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Follow Movement: Character turns to face movement direction\n"
-                              "Follow Camera: Character faces camera (strafe mode)\n"
-                              "Follow Target: Character faces a target position (lock-on)\n\n"
-                              "Quick toggle: CapsLock or B button (gamepad)\n"
-                              "Hold: Middle mouse or Left Trigger");
+        if (prevMode == FacingMode::FollowTarget && settings.facingMode != FacingMode::FollowTarget) {
+            settings.hasTarget = false;
         }
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Follow Movement: Character turns to face movement direction\n"
+                          "Follow Camera: Character faces camera (strafe mode)\n"
+                          "Follow Target: Character faces a target position (lock-on)\n\n"
+                          "Quick toggle: CapsLock or B button (gamepad)\n"
+                          "Hold: Middle mouse or Left Trigger");
+    }
 
-        // Show target info when in FollowTarget mode
-        if (settings.facingMode == FacingMode::FollowTarget) {
-            if (settings.hasTarget) {
-                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
-                    "Target: (%.1f, %.1f, %.1f)",
-                    settings.targetPosition.x, settings.targetPosition.y, settings.targetPosition.z);
-            } else {
-                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Target will be placed 5m ahead");
-            }
+    if (settings.facingMode == FacingMode::FollowTarget) {
+        if (settings.hasTarget) {
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
+                "Target: (%.1f, %.1f, %.1f)",
+                settings.targetPosition.x, settings.targetPosition.y, settings.targetPosition.z);
+        } else {
+            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Target will be placed 5m ahead");
         }
+    }
 
-        // Third-person camera toggle hint
-        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Tab: Toggle 3rd Person Camera");
-        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "P: Toggle Orbit Camera");
+    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Tab: Toggle 3rd Person Camera");
+    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "P: Toggle Orbit Camera");
 
-        // Facing mode indicator
-        if (settings.facingMode == FacingMode::FollowCamera) {
-            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "FOLLOW CAMERA ACTIVE");
-        } else if (settings.facingMode == FacingMode::FollowTarget && settings.hasTarget) {
-            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "FOLLOW TARGET ACTIVE");
-        }
+    if (settings.facingMode == FacingMode::FollowCamera) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "FOLLOW CAMERA ACTIVE");
+    } else if (settings.facingMode == FacingMode::FollowTarget && settings.hasTarget) {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "FOLLOW TARGET ACTIVE");
+    }
 
-        ImGui::Separator();
-        ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
 
-        // Debug visualization options
-        ImGui::Checkbox("Show Trajectory", &settings.showMotionMatchingTrajectory);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Visualize predicted (cyan) and matched (green) trajectories");
-        }
+    ImGui::Checkbox("Show Trajectory", &settings.showMotionMatchingTrajectory);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Visualize predicted (cyan) and matched (green) trajectories");
+    }
 
-        ImGui::Checkbox("Show Features", &settings.showMotionMatchingFeatures);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Show feature bone positions used for matching");
-        }
+    ImGui::Checkbox("Show Features", &settings.showMotionMatchingFeatures);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Show feature bone positions used for matching");
+    }
 
-        ImGui::Checkbox("Show Stats", &settings.showMotionMatchingStats);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Display motion matching cost statistics");
-        }
+    ImGui::Checkbox("Show Stats", &settings.showMotionMatchingStats);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Display motion matching cost statistics");
+    }
 
-        ImGui::Spacing();
+    ImGui::Spacing();
 
-        // Motion matching statistics
-        const auto& stats = character.getMotionMatchingStats();
-        const auto& playback = character.getMotionMatchingController().getPlaybackState();
+    const auto& stats = character.getMotionMatchingStats();
 
-        ImGui::Text("Current Clip:");
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.2f, 1.0f), "%s", stats.currentClipName.c_str());
+    ImGui::Text("Current Clip:");
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.2f, 1.0f), "%s", stats.currentClipName.c_str());
 
-        ImGui::Text("Clip Time: %.2fs", stats.currentClipTime);
+    ImGui::Text("Clip Time: %.2fs", stats.currentClipTime);
 
-        // Cost display with color coding
-        float costThreshold = 2.0f;
-        ImVec4 costColor = stats.lastMatchCost < costThreshold ?
-                           ImVec4(0.2f, 1.0f, 0.2f, 1.0f) :
-                           ImVec4(1.0f, 0.5f, 0.2f, 1.0f);
+    float costThreshold = 2.0f;
+    ImVec4 costColor = stats.lastMatchCost < costThreshold ?
+                       ImVec4(0.2f, 1.0f, 0.2f, 1.0f) :
+                       ImVec4(1.0f, 0.5f, 0.2f, 1.0f);
 
-        ImGui::Text("Match Cost:");
-        ImGui::SameLine();
-        ImGui::TextColored(costColor, "%.3f", stats.lastMatchCost);
+    ImGui::Text("Match Cost:");
+    ImGui::SameLine();
+    ImGui::TextColored(costColor, "%.3f", stats.lastMatchCost);
 
-        if (ImGui::TreeNode("Cost Breakdown")) {
-            ImGui::Text("Trajectory: %.3f", stats.lastTrajectoryCost);
-            ImGui::Text("Pose: %.3f", stats.lastPoseCost);
-            ImGui::Text("Heading: %.3f", stats.lastHeadingCost);
-            ImGui::Text("Bias: %.3f", stats.lastBiasCost);
-            ImGui::Text("Matches/sec: %zu", stats.matchesThisSecond);
-            ImGui::Text("Database poses: %zu", stats.posesSearched);
-            ImGui::TreePop();
-        }
+    ImGui::Text("Trajectory: %.3f", stats.lastTrajectoryCost);
+    ImGui::Text("Pose: %.3f", stats.lastPoseCost);
+    ImGui::Text("Heading: %.3f", stats.lastHeadingCost);
+    ImGui::Text("Bias: %.3f", stats.lastBiasCost);
+    ImGui::Text("Matches/sec: %zu", stats.matchesThisSecond);
+    ImGui::Text("Database poses: %zu", stats.posesSearched);
 
-        ImGui::Unindent();
-    } else {
-        ImGui::TextDisabled("Enable to see motion matching options");
-
-        // Show database info if available
-        const auto& controller = character.getMotionMatchingController();
-        if (controller.isDatabaseBuilt()) {
-            const auto& db = controller.getDatabase();
-            ImGui::Text("Database: %zu poses from %zu clips",
-                       db.getPoseCount(), db.getClipCount());
-        }
+    const auto& controller = character.getMotionMatchingController();
+    if (controller.isDatabaseBuilt()) {
+        const auto& db = controller.getDatabase();
+        ImGui::Text("Database: %zu poses from %zu clips",
+                   db.getPoseCount(), db.getClipCount());
     }
 }
 

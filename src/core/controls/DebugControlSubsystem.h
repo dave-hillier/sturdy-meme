@@ -1,6 +1,7 @@
 #pragma once
 
 #include "interfaces/IDebugControl.h"
+#include "physics/PhysicsDebugOptions.h"
 
 class DebugLineSystem;
 class HiZSystem;
@@ -29,6 +30,9 @@ public:
 
     void setPhysicsDebugEnabled(bool enabled) override { physicsDebugEnabled_ = enabled; }
     bool isPhysicsDebugEnabled() const override { return physicsDebugEnabled_; }
+
+    PhysicsDebugOptions& getPhysicsDebugOptions() override { return physicsDebugOptions_; }
+    const PhysicsDebugOptions& getPhysicsDebugOptions() const override { return physicsDebugOptions_; }
 
 #ifdef JPH_DEBUG_RENDERER
     PhysicsDebugRenderer* getPhysicsDebugRenderer() override;
@@ -71,6 +75,7 @@ private:
     bool showCascadeDebug_ = false;
     bool showSnowDepthDebug_ = false;
     bool physicsDebugEnabled_ = false;
+    PhysicsDebugOptions physicsDebugOptions_;
     bool roadRiverVisEnabled_ = false;  // Default off - expensive visualization
     bool showRoads_ = true;   // When enabled, show roads by default
     bool showRivers_ = true;  // When enabled, show rivers by default

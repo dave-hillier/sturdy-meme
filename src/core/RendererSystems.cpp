@@ -311,7 +311,8 @@ CoreResources RendererSystems::getCoreResources(uint32_t framesInFlight) const {
 
 #ifdef JPH_DEBUG_RENDERER
 void RendererSystems::createPhysicsDebugRenderer(const InitContext& /*ctx*/, VkRenderPass /*hdrRenderPass*/) {
-    auto renderer = std::make_unique<PhysicsDebugRenderer>();
+    auto renderer = std::make_unique<PhysicsDebugRenderer>(
+        debugControlSubsystem().getPhysicsDebugOptions());
     renderer->init();
     registry_.add<PhysicsDebugRenderer>(std::move(renderer));
 }

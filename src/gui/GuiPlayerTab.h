@@ -45,7 +45,12 @@ struct PlayerSettings {
 };
 
 namespace GuiPlayerTab {
-    void render(IPlayerControl& playerControl, PlayerSettings& settings);
+    void renderCape(PlayerSettings& settings);
+    void renderWeapons(PlayerSettings& settings);
+    void renderCharacterLOD(IPlayerControl& playerControl, PlayerSettings& settings);
+    void renderCapeInfo();
+    void renderNPCLOD(IPlayerControl& playerControl);
+    void renderMotionMatching(IPlayerControl& playerControl, PlayerSettings& settings);
 
     // Render motion matching debug overlay (trajectory visualization)
     void renderMotionMatchingOverlay(IPlayerControl& playerControl, const Camera& camera,

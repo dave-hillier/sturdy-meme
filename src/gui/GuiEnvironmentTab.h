@@ -12,5 +12,9 @@ struct EnvironmentTabState {
 };
 
 namespace GuiEnvironmentTab {
-    void render(IEnvironmentControl& envControl, EnvironmentTabState& state);
+    void renderFroxelFog(IEnvironmentControl& envControl);
+    void renderHeightFog(IEnvironmentControl& envControl, EnvironmentTabState& state);
+    void renderAtmosphere(IEnvironmentControl& envControl, EnvironmentTabState& state);
+    void renderLeaves(IEnvironmentControl& envControl);
+    void renderClouds(IEnvironmentControl& envControl);
 }

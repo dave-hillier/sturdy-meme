@@ -78,15 +78,11 @@ private:
     void renderPositionPanel(const Camera& camera);
     void renderTimeWindow(GuiInterfaces& ui);
     void renderWeatherWindow(GuiInterfaces& ui);
-    void renderEnvironmentWindow(GuiInterfaces& ui);
-    void renderPostFXWindow(GuiInterfaces& ui);
     void renderTerrainWindow(GuiInterfaces& ui);
     void renderWaterWindow(GuiInterfaces& ui);
     void renderTreesWindow(GuiInterfaces& ui);
     void renderGrassWindow(GuiInterfaces& ui);
-    void renderPlayerWindow(GuiInterfaces& ui);
     void renderIKWindow(GuiInterfaces& ui, const Camera& camera);
-    void renderDebugWindow(GuiInterfaces& ui);
     void renderPerformanceWindow(GuiInterfaces& ui);
     void renderProfilerWindow(GuiInterfaces& ui);
     void renderTileLoaderWindow(GuiInterfaces& ui, const Camera& camera);
@@ -120,26 +116,38 @@ private:
 
     // Window visibility states for menu-based UI
     struct WindowStates {
+        // View
         bool showDashboard = true;
         bool showPosition = true;
+
+        // Grouped windows
         bool showTime = false;
         bool showWeather = false;
         bool showEnvironment = false;
         bool showPostFX = false;
+        bool showCharacter = false;
+        bool showDebug = false;
+
+        // Rendering - Other
         bool showTerrain = false;
         bool showWater = false;
         bool showTrees = false;
         bool showGrass = false;
-        bool showPlayer = false;
+
+        // Character - IK is separate (large enough)
         bool showIK = false;
-        bool showDebug = false;
+
+        // Scene
+        bool showSceneGraph = false;
+        bool showSceneEditor = false;
+        bool showHierarchy = false;
+        bool showInspector = false;
+
+        // Debug - standalone
+        bool showPhysicsDebug = false;
         bool showPerformance = false;
         bool showProfiler = false;
         bool showTileLoader = false;
-        bool showSceneGraph = false;
-        bool showSceneEditor = false;  // Unity-like scene editor
-        bool showHierarchy = false;     // ECS hierarchy panel (independent dockable window)
-        bool showInspector = false;     // Entity inspector panel (independent dockable window)
     } windowStates;
 
     // Track whether the default dock layout has been applied

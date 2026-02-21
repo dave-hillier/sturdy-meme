@@ -4,6 +4,7 @@
 #include <functional>
 
 class DebugLineSystem;
+struct PhysicsDebugOptions;
 
 #ifdef JPH_DEBUG_RENDERER
 class PhysicsDebugRenderer;
@@ -28,6 +29,10 @@ public:
     // Physics debug rendering
     virtual void setPhysicsDebugEnabled(bool enabled) = 0;
     virtual bool isPhysicsDebugEnabled() const = 0;
+
+    // Physics debug options (independent of renderer lifetime)
+    virtual PhysicsDebugOptions& getPhysicsDebugOptions() = 0;
+    virtual const PhysicsDebugOptions& getPhysicsDebugOptions() const = 0;
 
 #ifdef JPH_DEBUG_RENDERER
     virtual PhysicsDebugRenderer* getPhysicsDebugRenderer() = 0;
