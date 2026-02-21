@@ -11,6 +11,8 @@
 #include "GuiPlayerTab.h"
 #include "GuiEnvironmentTab.h"
 #include "GuiSceneGraphTab.h"
+#include "GuiTileLoaderTab.h"
+#include "GuiDashboard.h"
 #include "GuiInterfaces.h"
 #include "SceneEditorState.h"
 
@@ -71,9 +73,8 @@ private:
                       VkRenderPass renderPass, uint32_t imageCount);
     void cleanup();
 
-    void setupStyle();
     void renderMainMenuBar();
-    void renderDashboard(GuiInterfaces& interfaces, const Camera& camera, float fps);
+    void renderDashboard(GuiInterfaces& interfaces, const Camera& camera, float deltaTime, float fps);
     void renderPositionPanel(const Camera& camera);
     void renderTimeWindow(GuiInterfaces& ui);
     void renderWeatherWindow(GuiInterfaces& ui);
@@ -111,10 +112,11 @@ private:
     // Scene editor state (Unity-like hierarchy + inspector)
     SceneEditorState sceneEditorState;
 
-    // Cached performance metrics
-    float frameTimeHistory[120] = {0};
-    int frameTimeIndex = 0;
-    float avgFrameTime = 0.0f;
+    // Dashboard state (frame time tracking)
+    GuiDashboard::State dashboardState;
+
+    // Tile loader state
+    GuiTileLoaderTab::State tileLoaderState;
 
     // Window visibility states for menu-based UI
     struct WindowStates {
@@ -142,12 +144,4 @@ private:
 
     // Track whether the default dock layout has been applied
     bool dockLayoutInitialized_ = false;
-
-    // Tile loader visualization mode
-    enum class TileViewMode {
-        GPU,      // Active GPU tiles (loaded with GPU resources)
-        CPU,      // All tiles with CPU data (includes GPU + CPU-only + base LOD)
-        Physics   // Physics collision tiles (TODO: requires exposing PhysicsTerrainTileManager)
-    };
-    TileViewMode tileViewMode_ = TileViewMode::GPU;
 };

@@ -220,6 +220,10 @@ set(SOURCES
     src/water/WaterSystemGroup.cpp
     # GUI
     src/gui/GuiSystem.cpp
+    src/gui/GuiStyle.cpp
+    src/gui/GuiDashboard.cpp
+    src/gui/GuiPositionPanel.cpp
+    src/gui/GuiTileLoaderTab.cpp
     src/gui/GuiTimeTab.cpp
     src/gui/GuiWeatherTab.cpp
     src/gui/GuiEnvironmentTab.cpp

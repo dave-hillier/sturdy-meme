@@ -19,7 +19,11 @@
 #include "core/interfaces/IPlayerControl.h"
 #include "EnvironmentSettings.h"
 
-// GUI tab headers
+// GUI module headers
+#include "GuiStyle.h"
+#include "GuiDashboard.h"
+#include "GuiPositionPanel.h"
+#include "GuiTileLoaderTab.h"
 #include "GuiTimeTab.h"
 #include "GuiWeatherTab.h"
 #include "GuiEnvironmentTab.h"
@@ -39,23 +43,11 @@
 #include "GuiInspectorPanel.h"
 #include "GuiGizmo.h"
 
-#include "ecs/World.h"
-#include "ecs/Components.h"
-
-#include "terrain/TerrainSystem.h"
-#include "terrain/TerrainTileCache.h"
-#include "physics/PhysicsTerrainTileManager.h"
-
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
 #include <vulkan/vulkan.hpp>
-
-#include <cmath>
-#include <algorithm>
-#include <unordered_map>
-#include <string>
 
 static void checkVkResult(VkResult err) {
     if (err != VK_SUCCESS) {
@@ -80,8 +72,6 @@ std::unique_ptr<GuiSystem> GuiSystem::create(SDL_Window* window, VkInstance inst
 GuiSystem::~GuiSystem() {
     cleanup();
 }
-
-// Note: Move operations are deleted - GuiSystem is stored via unique_ptr only
 
 bool GuiSystem::initInternal(SDL_Window* window, VkInstance instance, VkPhysicalDevice physicalDevice,
                               VkDevice device, uint32_t graphicsQueueFamily, VkQueue graphicsQueue,
@@ -145,7 +135,7 @@ bool GuiSystem::initInternal(SDL_Window* window, VkInstance instance, VkPhysical
     }
 
     // Setup custom style
-    setupStyle();
+    GuiStyle::apply();
 
     SDL_Log("ImGui initialized successfully");
     return true;
@@ -165,114 +155,6 @@ void GuiSystem::cleanup() {
     device_ = VK_NULL_HANDLE;
 }
 
-void GuiSystem::setupStyle() {
-    ImGuiStyle& style = ImGui::GetStyle();
-    ImVec4* colors = style.Colors;
-
-    // Modern dark theme with blue accent
-    ImVec4 bgDark = ImVec4(0.08f, 0.08f, 0.10f, 0.95f);
-    ImVec4 bgMid = ImVec4(0.12f, 0.12f, 0.14f, 1.0f);
-    ImVec4 bgLight = ImVec4(0.18f, 0.18f, 0.22f, 1.0f);
-    ImVec4 accent = ImVec4(0.26f, 0.59f, 0.98f, 1.0f);
-    ImVec4 accentHover = ImVec4(0.36f, 0.69f, 1.0f, 1.0f);
-    ImVec4 accentActive = ImVec4(0.16f, 0.49f, 0.88f, 1.0f);
-    ImVec4 textBright = ImVec4(0.95f, 0.95f, 0.97f, 1.0f);
-    ImVec4 textDim = ImVec4(0.60f, 0.60f, 0.65f, 1.0f);
-
-    colors[ImGuiCol_WindowBg] = bgDark;
-    colors[ImGuiCol_PopupBg] = bgMid;
-    colors[ImGuiCol_Border] = ImVec4(0.25f, 0.25f, 0.30f, 0.50f);
-    colors[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-
-    colors[ImGuiCol_FrameBg] = bgMid;
-    colors[ImGuiCol_FrameBgHovered] = bgLight;
-    colors[ImGuiCol_FrameBgActive] = ImVec4(0.22f, 0.22f, 0.28f, 1.0f);
-
-    colors[ImGuiCol_TitleBg] = bgDark;
-    colors[ImGuiCol_TitleBgActive] = bgMid;
-    colors[ImGuiCol_TitleBgCollapsed] = bgDark;
-
-    colors[ImGuiCol_MenuBarBg] = bgMid;
-    colors[ImGuiCol_ScrollbarBg] = bgDark;
-    colors[ImGuiCol_ScrollbarGrab] = bgLight;
-    colors[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.28f, 0.28f, 0.34f, 1.0f);
-    colors[ImGuiCol_ScrollbarGrabActive] = accent;
-
-    colors[ImGuiCol_CheckMark] = accent;
-    colors[ImGuiCol_SliderGrab] = accent;
-    colors[ImGuiCol_SliderGrabActive] = accentActive;
-
-    colors[ImGuiCol_Button] = bgLight;
-    colors[ImGuiCol_ButtonHovered] = ImVec4(0.28f, 0.28f, 0.34f, 1.0f);
-    colors[ImGuiCol_ButtonActive] = accent;
-
-    colors[ImGuiCol_Header] = ImVec4(0.20f, 0.20f, 0.24f, 1.0f);
-    colors[ImGuiCol_HeaderHovered] = ImVec4(0.26f, 0.26f, 0.32f, 1.0f);
-    colors[ImGuiCol_HeaderActive] = accent;
-
-    colors[ImGuiCol_Separator] = ImVec4(0.25f, 0.25f, 0.30f, 0.50f);
-    colors[ImGuiCol_SeparatorHovered] = accent;
-    colors[ImGuiCol_SeparatorActive] = accentActive;
-
-    colors[ImGuiCol_ResizeGrip] = ImVec4(0.26f, 0.59f, 0.98f, 0.20f);
-    colors[ImGuiCol_ResizeGripHovered] = accentHover;
-    colors[ImGuiCol_ResizeGripActive] = accentActive;
-
-    colors[ImGuiCol_Tab] = bgLight;
-    colors[ImGuiCol_TabHovered] = accentHover;
-    colors[ImGuiCol_TabSelected] = accent;
-    colors[ImGuiCol_TabDimmed] = bgMid;
-    colors[ImGuiCol_TabDimmedSelected] = bgLight;
-
-    colors[ImGuiCol_PlotLines] = accent;
-    colors[ImGuiCol_PlotLinesHovered] = accentHover;
-    colors[ImGuiCol_PlotHistogram] = accent;
-    colors[ImGuiCol_PlotHistogramHovered] = accentHover;
-
-    colors[ImGuiCol_TableHeaderBg] = bgMid;
-    colors[ImGuiCol_TableBorderStrong] = ImVec4(0.25f, 0.25f, 0.30f, 1.0f);
-    colors[ImGuiCol_TableBorderLight] = ImVec4(0.20f, 0.20f, 0.24f, 1.0f);
-    colors[ImGuiCol_TableRowBg] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
-    colors[ImGuiCol_TableRowBgAlt] = ImVec4(1.0f, 1.0f, 1.0f, 0.02f);
-
-    colors[ImGuiCol_Text] = textBright;
-    colors[ImGuiCol_TextDisabled] = textDim;
-    colors[ImGuiCol_TextSelectedBg] = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
-
-    colors[ImGuiCol_DragDropTarget] = accentHover;
-    colors[ImGuiCol_NavHighlight] = accent;
-
-    // Rounding and spacing for modern look
-    style.WindowRounding = 8.0f;
-    style.ChildRounding = 6.0f;
-    style.FrameRounding = 4.0f;
-    style.PopupRounding = 6.0f;
-    style.ScrollbarRounding = 8.0f;
-    style.GrabRounding = 4.0f;
-    style.TabRounding = 4.0f;
-
-    style.WindowPadding = ImVec2(12, 12);
-    style.FramePadding = ImVec2(8, 4);
-    style.ItemSpacing = ImVec2(8, 6);
-    style.ItemInnerSpacing = ImVec2(6, 4);
-    style.IndentSpacing = 20.0f;
-
-    style.ScrollbarSize = 12.0f;
-    style.GrabMinSize = 10.0f;
-
-    style.WindowBorderSize = 1.0f;
-    style.ChildBorderSize = 1.0f;
-    style.PopupBorderSize = 1.0f;
-    style.FrameBorderSize = 0.0f;
-    style.TabBorderSize = 0.0f;
-
-    style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
-    style.WindowMenuButtonPosition = ImGuiDir_None;
-
-    // Scale for high DPI
-    style.ScaleAllSizes(1.0f);
-}
-
 void GuiSystem::processEvent(const SDL_Event& event) {
     ImGui_ImplSDL3_ProcessEvent(&event);
 }
@@ -285,17 +167,6 @@ void GuiSystem::beginFrame() {
 
 void GuiSystem::render(GuiInterfaces& ui, const Camera& camera, float deltaTime, float fps) {
     if (!visible) return;
-
-    // Update frame time history
-    frameTimeHistory[frameTimeIndex] = deltaTime * 1000.0f;
-    frameTimeIndex = (frameTimeIndex + 1) % 120;
-
-    // Calculate average
-    float sum = 0.0f;
-    for (int i = 0; i < 120; i++) {
-        sum += frameTimeHistory[i];
-    }
-    avgFrameTime = sum / 120.0f;
 
     // Create main viewport dockspace - allows all windows to be freely dockable
     ImGuiID mainDockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(),
@@ -324,7 +195,7 @@ void GuiSystem::render(GuiInterfaces& ui, const Camera& camera, float deltaTime,
 
     // Render individual windows based on visibility state
     if (windowStates.showDashboard) {
-        renderDashboard(ui, camera, fps);
+        renderDashboard(ui, camera, deltaTime, fps);
     }
     if (windowStates.showPosition) {
         renderPositionPanel(camera);
@@ -387,42 +258,7 @@ void GuiSystem::render(GuiInterfaces& ui, const Camera& camera, float deltaTime,
     // Independent dockable Hierarchy and Inspector panels
     if (windowStates.showHierarchy) {
         if (ImGui::Begin("Hierarchy", &windowStates.showHierarchy, ImGuiWindowFlags_MenuBar)) {
-            // Create entity menu bar within the hierarchy window
-            if (ImGui::BeginMenuBar()) {
-                if (ImGui::BeginMenu("Create")) {
-                    ecs::World* world = ui.scene.getECSWorld();
-                    if (world) {
-                        if (ImGui::MenuItem("Empty Entity")) {
-                            ecs::Entity e = world->create();
-                            world->add<ecs::Transform>(e);
-                            world->add<ecs::LocalTransform>(e);
-                            world->add<ecs::DebugName>(e, "Empty");
-                            sceneEditorState.select(e);
-                        }
-                        ImGui::Separator();
-                        if (ImGui::MenuItem("Point Light")) {
-                            ecs::Entity e = world->create();
-                            world->add<ecs::Transform>(e);
-                            world->add<ecs::LocalTransform>(e);
-                            world->add<ecs::PointLightComponent>(e, glm::vec3(1.0f), 1.0f, 10.0f);
-                            world->add<ecs::LightSourceTag>(e);
-                            world->add<ecs::DebugName>(e, "New Point Light");
-                            sceneEditorState.select(e);
-                        }
-                        if (ImGui::MenuItem("Spot Light")) {
-                            ecs::Entity e = world->create();
-                            world->add<ecs::Transform>(e);
-                            world->add<ecs::LocalTransform>(e);
-                            world->add<ecs::SpotLightComponent>(e, glm::vec3(1.0f), 1.0f);
-                            world->add<ecs::LightSourceTag>(e);
-                            world->add<ecs::DebugName>(e, "New Spot Light");
-                            sceneEditorState.select(e);
-                        }
-                    }
-                    ImGui::EndMenu();
-                }
-                ImGui::EndMenuBar();
-            }
+            GuiHierarchyPanel::renderCreateMenuBar(ui.scene, sceneEditorState);
             GuiHierarchyPanel::render(ui.scene, sceneEditorState);
         }
         ImGui::End();
@@ -517,64 +353,12 @@ void GuiSystem::renderMainMenuBar() {
     }
 }
 
-void GuiSystem::renderDashboard(GuiInterfaces& ui, const Camera& camera, float fps) {
+void GuiSystem::renderDashboard(GuiInterfaces& ui, const Camera& camera, float deltaTime, float fps) {
     ImGui::SetNextWindowPos(ImVec2(20, 40), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(280, 200), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Dashboard", &windowStates.showDashboard)) {
-        // FPS and frame time in columns
-        ImGui::Columns(2, nullptr, false);
-        ImGui::SetColumnWidth(0, 140);
-
-        ImGui::Text("FPS");
-        ImGui::PushStyleColor(ImGuiCol_Text, fps > 55.0f ? ImVec4(0.4f, 0.9f, 0.4f, 1.0f) :
-                                              fps > 30.0f ? ImVec4(0.9f, 0.9f, 0.4f, 1.0f) :
-                                                            ImVec4(0.9f, 0.4f, 0.4f, 1.0f));
-        ImGui::SameLine(60);
-        ImGui::Text("%.0f", fps);
-        ImGui::PopStyleColor();
-
-        ImGui::NextColumn();
-
-        ImGui::Text("Frame");
-        ImGui::SameLine(50);
-        ImGui::Text("%.2f ms", avgFrameTime);
-
-        ImGui::Columns(1);
-
-        // Frame time graph
-        ImGui::PlotLines("##frametime", frameTimeHistory, 120, frameTimeIndex,
-                         nullptr, 0.0f, 33.3f, ImVec2(-1, 35));
-
-        // Quick stats
-        ImGui::Columns(2, nullptr, false);
-        ImGui::SetColumnWidth(0, 140);
-
-        uint32_t triCount = ui.terrain.getTerrainNodeCount();
-        ImGui::Text("Terrain");
-        ImGui::SameLine(60);
-        if (triCount >= 1000000) {
-            ImGui::Text("%.2fM", triCount / 1000000.0f);
-        } else if (triCount >= 1000) {
-            ImGui::Text("%.0fK", triCount / 1000.0f);
-        } else {
-            ImGui::Text("%u", triCount);
-        }
-
-        ImGui::NextColumn();
-
-        float tod = ui.time.getTimeOfDay();
-        int h = static_cast<int>(tod * 24.0f);
-        int m = static_cast<int>((tod * 24.0f - h) * 60.0f);
-        ImGui::Text("Time");
-        ImGui::SameLine(40);
-        ImGui::Text("%02d:%02d", h, m);
-
-        ImGui::Columns(1);
-
-        // Camera position
-        glm::vec3 pos = camera.getPosition();
-        ImGui::Text("Pos: %.0f, %.0f, %.0f", pos.x, pos.y, pos.z);
+        GuiDashboard::render(ui.terrain, ui.time, camera, deltaTime, fps, dashboardState);
     }
     ImGui::End();
 }
@@ -585,117 +369,7 @@ void GuiSystem::renderPositionPanel(const Camera& camera) {
     ImGui::SetNextWindowSize(ImVec2(180, 280), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Position", &windowStates.showPosition)) {
-        // Position section
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.8f, 1.0f, 1.0f));
-        ImGui::Text("POSITION");
-        ImGui::PopStyleColor();
-
-        glm::vec3 pos = camera.getPosition();
-        ImGui::Text("X: %.1f", pos.x);
-        ImGui::Text("Y: %.1f", pos.y);
-        ImGui::Text("Z: %.1f", pos.z);
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        // Orientation section
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.7f, 0.5f, 1.0f));
-        ImGui::Text("ORIENTATION");
-        ImGui::PopStyleColor();
-
-        float yaw = camera.getYaw();
-        float pitch = camera.getPitch();
-
-        ImGui::Text("Yaw:   %.1f", yaw);
-        ImGui::Text("Pitch: %.1f", pitch);
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        // Compass section
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.9f, 0.6f, 1.0f));
-        ImGui::Text("COMPASS");
-        ImGui::PopStyleColor();
-
-        // Draw compass
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        ImVec2 compassCenter = ImGui::GetCursorScreenPos();
-        float compassRadius = 50.0f;
-        compassCenter.x += compassRadius + 10;
-        compassCenter.y += compassRadius + 5;
-
-        // Background circle
-        drawList->AddCircleFilled(compassCenter, compassRadius, IM_COL32(40, 40, 50, 200));
-        drawList->AddCircle(compassCenter, compassRadius, IM_COL32(100, 100, 120, 255), 32, 2.0f);
-
-        // Cardinal direction markers
-        const float PI = 3.14159265358979323846f;
-        // North is at yaw = -90 in this coordinate system (negative Z direction)
-        // Adjust so compass shows correct heading
-        float northAngle = (-90.0f - yaw) * PI / 180.0f;
-
-        // Draw cardinal points (N, E, S, W)
-        const char* cardinals[] = {"N", "E", "S", "W"};
-        ImU32 cardinalColors[] = {
-            IM_COL32(255, 80, 80, 255),   // N - Red
-            IM_COL32(200, 200, 200, 255), // E - White
-            IM_COL32(200, 200, 200, 255), // S - White
-            IM_COL32(200, 200, 200, 255)  // W - White
-        };
-
-        for (int i = 0; i < 4; i++) {
-            float angle = northAngle + i * PI / 2.0f;
-            float textRadius = compassRadius - 12.0f;
-            ImVec2 textPos(
-                compassCenter.x + std::sin(angle) * textRadius - 4,
-                compassCenter.y - std::cos(angle) * textRadius - 6
-            );
-            drawList->AddText(textPos, cardinalColors[i], cardinals[i]);
-        }
-
-        // Draw tick marks for 8 directions
-        for (int i = 0; i < 8; i++) {
-            float angle = northAngle + i * PI / 4.0f;
-            float innerRadius = (i % 2 == 0) ? compassRadius - 20.0f : compassRadius - 14.0f;
-            float outerRadius = compassRadius - 4.0f;
-            ImVec2 inner(
-                compassCenter.x + std::sin(angle) * innerRadius,
-                compassCenter.y - std::cos(angle) * innerRadius
-            );
-            ImVec2 outer(
-                compassCenter.x + std::sin(angle) * outerRadius,
-                compassCenter.y - std::cos(angle) * outerRadius
-            );
-            ImU32 tickColor = (i % 2 == 0) ? IM_COL32(150, 150, 160, 255) : IM_COL32(80, 80, 90, 255);
-            drawList->AddLine(inner, outer, tickColor, 1.5f);
-        }
-
-        // Draw direction indicator (points where camera is looking)
-        float indicatorLength = compassRadius - 8.0f;
-        ImVec2 indicatorTip(
-            compassCenter.x,
-            compassCenter.y - indicatorLength
-        );
-
-        // Triangle indicator pointing up (camera forward direction)
-        ImVec2 tri1(compassCenter.x, compassCenter.y - indicatorLength);
-        ImVec2 tri2(compassCenter.x - 6, compassCenter.y - indicatorLength + 18);
-        ImVec2 tri3(compassCenter.x + 6, compassCenter.y - indicatorLength + 18);
-        drawList->AddTriangleFilled(tri1, tri2, tri3, IM_COL32(255, 200, 100, 255));
-
-        // Center dot
-        drawList->AddCircleFilled(compassCenter, 4.0f, IM_COL32(200, 200, 220, 255));
-
-        // Reserve space for compass
-        ImGui::Dummy(ImVec2(compassRadius * 2 + 20, compassRadius * 2 + 15));
-
-        // Heading display
-        // Normalize yaw to 0-360 range for bearing display
-        float bearing = std::fmod(-yaw + 90.0f, 360.0f);
-        if (bearing < 0) bearing += 360.0f;
-        ImGui::Text("Bearing: %.0f", bearing);
+        GuiPositionPanel::render(camera);
     }
     ImGui::End();
 }
@@ -836,265 +510,7 @@ void GuiSystem::renderTileLoaderWindow(GuiInterfaces& ui, const Camera& camera) 
     ImGui::SetNextWindowSize(ImVec2(560, 650), ImGuiCond_FirstUseEver);
 
     if (ImGui::Begin("Tile Loader", &windowStates.showTileLoader)) {
-        const TerrainTileCache* tileCache = ui.terrain.getTerrainSystem().getTileCache();
-
-        if (!tileCache) {
-            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Tile cache not enabled");
-            ImGui::End();
-            return;
-        }
-
-        // Mode selection
-        ImGui::Text("View Mode:");
-        ImGui::SameLine();
-        if (ImGui::RadioButton("GPU", tileViewMode_ == TileViewMode::GPU)) {
-            tileViewMode_ = TileViewMode::GPU;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Active GPU tiles (uploaded to VRAM for shader sampling)");
-        }
-        ImGui::SameLine();
-        if (ImGui::RadioButton("CPU", tileViewMode_ == TileViewMode::CPU)) {
-            tileViewMode_ = TileViewMode::CPU;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("All tiles with CPU data (includes GPU tiles + CPU-only + base LOD)");
-        }
-        ImGui::SameLine();
-        bool hasPhysics = ui.physicsTerrainTiles != nullptr;
-        ImGui::BeginDisabled(!hasPhysics);
-        if (ImGui::RadioButton("Physics", tileViewMode_ == TileViewMode::Physics)) {
-            tileViewMode_ = TileViewMode::Physics;
-        }
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(hasPhysics ?
-                "Physics collision tiles (Jolt heightfield bodies)" :
-                "Physics not initialized");
-        }
-
-        ImGui::Spacing();
-
-        // Grid configuration
-        constexpr int GRID_SIZE = 32;
-        constexpr float CELL_SIZE = 16.0f;
-
-        // LOD colors (distinct colors for each LOD level)
-        const ImU32 lodColors[] = {
-            IM_COL32(80, 200, 80, 255),   // LOD0 - Green (highest detail)
-            IM_COL32(80, 150, 220, 255),  // LOD1 - Blue
-            IM_COL32(220, 180, 60, 255),  // LOD2 - Yellow/Orange
-            IM_COL32(180, 80, 180, 255),  // LOD3 - Purple (lowest detail)
-        };
-        const ImU32 emptyColor = IM_COL32(40, 40, 50, 255);
-        const ImU32 gridLineColor = IM_COL32(60, 60, 70, 255);
-        const ImU32 playerColor = IM_COL32(255, 100, 100, 255);
-
-        // Get camera position for player marker
-        glm::vec3 camPos = camera.getPosition();
-        float terrainSize = tileCache->getTerrainSize();
-
-        // Calculate player grid position (0-31)
-        float playerGridX = (camPos.x / terrainSize + 0.5f) * GRID_SIZE;
-        float playerGridZ = (camPos.z / terrainSize + 0.5f) * GRID_SIZE;
-
-        // Legend
-        ImGui::Text("LOD Legend:");
-        ImGui::SameLine();
-        for (int i = 0; i < 4; i++) {
-            ImGui::SameLine();
-            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::ColorConvertU32ToFloat4(lodColors[i]));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::ColorConvertU32ToFloat4(lodColors[i]));
-            ImGui::SmallButton(std::to_string(i).c_str());
-            ImGui::PopStyleColor(2);
-        }
-
-        ImGui::Spacing();
-
-        // Player position info
-        ImGui::Text("Camera: (%.0f, %.0f, %.0f)", camPos.x, camPos.y, camPos.z);
-        ImGui::Text("Grid pos: (%.1f, %.1f)", playerGridX, playerGridZ);
-
-        // Create a lookup for loaded tiles: key = (x << 16 | z), value = lod
-        std::unordered_map<uint32_t, uint32_t> tileMap;  // (x,z) -> lod at LOD0 grid scale
-
-        // Get tiles based on view mode
-        uint32_t tileCount = 0;
-        if (tileViewMode_ == TileViewMode::GPU) {
-            const auto& activeTiles = tileCache->getActiveTiles();
-            tileCount = static_cast<uint32_t>(activeTiles.size());
-
-            // Process tiles in order: LOD3 -> LOD2 -> LOD1 -> LOD0
-            // This ensures finer detail always overwrites coarser
-            for (int targetLod = 3; targetLod >= 0; targetLod--) {
-                for (const TerrainTile* tile : activeTiles) {
-                    if (!tile || !tile->loaded || tile->lod != static_cast<uint32_t>(targetLod)) continue;
-
-                    uint32_t lod = tile->lod;
-                    int scale = 1 << lod;
-                    int baseX = tile->coord.x * scale;
-                    int baseZ = tile->coord.z * scale;
-
-                    for (int dz = 0; dz < scale; dz++) {
-                        for (int dx = 0; dx < scale; dx++) {
-                            int gx = baseX + dx;
-                            int gz = baseZ + dz;
-                            if (gx >= 0 && gx < GRID_SIZE && gz >= 0 && gz < GRID_SIZE) {
-                                uint32_t key = (static_cast<uint32_t>(gx) << 16) | static_cast<uint32_t>(gz);
-                                // Just overwrite - we process coarse first, fine last
-                                tileMap[key] = lod;
-                            }
-                        }
-                    }
-                }
-            }
-        } else if (tileViewMode_ == TileViewMode::CPU) {
-            auto cpuTiles = tileCache->getAllCPUTiles();
-            tileCount = static_cast<uint32_t>(cpuTiles.size());
-
-            // Count tiles per LOD for diagnostics
-            int lodCounts[4] = {0, 0, 0, 0};
-            for (const TerrainTile* tile : cpuTiles) {
-                if (tile && tile->lod < 4) lodCounts[tile->lod]++;
-            }
-            ImGui::Text("  Tiles: LOD0=%d LOD1=%d LOD2=%d LOD3=%d",
-                       lodCounts[0], lodCounts[1], lodCounts[2], lodCounts[3]);
-
-            // Button to copy tile info to clipboard
-            if (ImGui::Button("Copy Tiles to Clipboard")) {
-                std::string tileInfo;
-                for (int lod = 0; lod < 4; lod++) {
-                    tileInfo += "LOD" + std::to_string(lod) + ":\n";
-                    for (const TerrainTile* tile : cpuTiles) {
-                        if (tile && tile->lod == static_cast<uint32_t>(lod)) {
-                            int scale = 1 << lod;
-                            int baseX = tile->coord.x * scale;
-                            int baseZ = tile->coord.z * scale;
-                            tileInfo += "  coord(" + std::to_string(tile->coord.x) + "," + std::to_string(tile->coord.z) + ")";
-                            tileInfo += " -> grid(" + std::to_string(baseX) + "-" + std::to_string(baseX + scale - 1);
-                            tileInfo += "," + std::to_string(baseZ) + "-" + std::to_string(baseZ + scale - 1) + ")\n";
-                        }
-                    }
-                }
-                ImGui::SetClipboardText(tileInfo.c_str());
-            }
-
-            // Process tiles in order: LOD3 -> LOD2 -> LOD1 -> LOD0
-            // This ensures finer detail always overwrites coarser
-            for (int targetLod = 3; targetLod >= 0; targetLod--) {
-                for (const TerrainTile* tile : cpuTiles) {
-                    if (!tile || tile->lod != static_cast<uint32_t>(targetLod)) continue;
-
-                    uint32_t lod = tile->lod;
-                    int scale = 1 << lod;
-                    int baseX = tile->coord.x * scale;
-                    int baseZ = tile->coord.z * scale;
-
-                    for (int dz = 0; dz < scale; dz++) {
-                        for (int dx = 0; dx < scale; dx++) {
-                            int gx = baseX + dx;
-                            int gz = baseZ + dz;
-                            if (gx >= 0 && gx < GRID_SIZE && gz >= 0 && gz < GRID_SIZE) {
-                                uint32_t key = (static_cast<uint32_t>(gx) << 16) | static_cast<uint32_t>(gz);
-                                // Just overwrite - we process coarse first, fine last
-                                tileMap[key] = lod;
-                            }
-                        }
-                    }
-                }
-            }
-        } else if (tileViewMode_ == TileViewMode::Physics && ui.physicsTerrainTiles) {
-            const auto& physicsTiles = ui.physicsTerrainTiles->getLoadedTiles();
-            tileCount = static_cast<uint32_t>(physicsTiles.size());
-
-            // Process tiles in order: LOD3 -> LOD2 -> LOD1 -> LOD0
-            // This ensures finer detail always overwrites coarser
-            for (int targetLod = 3; targetLod >= 0; targetLod--) {
-                for (const auto& [key, entry] : physicsTiles) {
-                    if (entry.lod != static_cast<uint32_t>(targetLod)) continue;
-
-                    uint32_t lod = entry.lod;
-                    int scale = 1 << lod;
-                    int baseX = entry.tileX * scale;
-                    int baseZ = entry.tileZ * scale;
-
-                    for (int dz = 0; dz < scale; dz++) {
-                        for (int dx = 0; dx < scale; dx++) {
-                            int gx = baseX + dx;
-                            int gz = baseZ + dz;
-                            if (gx >= 0 && gx < GRID_SIZE && gz >= 0 && gz < GRID_SIZE) {
-                                uint32_t mapKey = (static_cast<uint32_t>(gx) << 16) | static_cast<uint32_t>(gz);
-                                // Just overwrite - we process coarse first, fine last
-                                tileMap[mapKey] = lod;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Tile statistics
-        const char* modeLabel = (tileViewMode_ == TileViewMode::GPU) ? "GPU" :
-                               (tileViewMode_ == TileViewMode::CPU) ? "CPU" : "Physics";
-        ImGui::Text("%s tiles: %u / %u", modeLabel, tileCount, 64u);
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        // Draw the tile grid
-        ImDrawList* drawList = ImGui::GetWindowDrawList();
-        ImVec2 gridOrigin = ImGui::GetCursorScreenPos();
-
-        // Draw cells
-        for (int z = 0; z < GRID_SIZE; z++) {
-            for (int x = 0; x < GRID_SIZE; x++) {
-                ImVec2 cellMin(gridOrigin.x + x * CELL_SIZE, gridOrigin.y + z * CELL_SIZE);
-                ImVec2 cellMax(cellMin.x + CELL_SIZE, cellMin.y + CELL_SIZE);
-
-                uint32_t key = (static_cast<uint32_t>(x) << 16) | static_cast<uint32_t>(z);
-                auto it = tileMap.find(key);
-
-                ImU32 color = emptyColor;
-                if (it != tileMap.end()) {
-                    uint32_t lod = it->second;
-                    if (lod < 4) {
-                        color = lodColors[lod];
-                    }
-                }
-
-                drawList->AddRectFilled(cellMin, cellMax, color);
-                drawList->AddRect(cellMin, cellMax, gridLineColor);
-
-                // Tooltip on hover showing cell coords and LOD
-                if (ImGui::IsMouseHoveringRect(cellMin, cellMax)) {
-                    ImGui::BeginTooltip();
-                    ImGui::Text("Cell (%d, %d)", x, z);
-                    if (it != tileMap.end()) {
-                        ImGui::Text("LOD: %u", it->second);
-                    } else {
-                        ImGui::Text("Empty");
-                    }
-                    ImGui::EndTooltip();
-                }
-            }
-        }
-
-        // Draw player marker
-        if (playerGridX >= 0 && playerGridX < GRID_SIZE &&
-            playerGridZ >= 0 && playerGridZ < GRID_SIZE) {
-            ImVec2 playerPos(
-                gridOrigin.x + playerGridX * CELL_SIZE,
-                gridOrigin.y + playerGridZ * CELL_SIZE
-            );
-            // Draw a crosshair/circle for player
-            float markerRadius = CELL_SIZE * 0.4f;
-            drawList->AddCircleFilled(playerPos, markerRadius, playerColor);
-            drawList->AddCircle(playerPos, markerRadius + 1, IM_COL32(255, 255, 255, 200), 12, 2.0f);
-        }
-
-        // Reserve space for the grid
-        ImGui::Dummy(ImVec2(GRID_SIZE * CELL_SIZE, GRID_SIZE * CELL_SIZE));
+        GuiTileLoaderTab::render(ui.terrain, ui.physicsTerrainTiles, camera, tileLoaderState);
     }
     ImGui::End();
 }
