@@ -34,22 +34,24 @@ void Castle::adjustShape() {
             minR = std::min(minR, r);
             maxR = std::max(maxR, r);
         }
-        return {std::sqrt(minR), std::sqrt(maxR)};
+        return {minR, maxR};
     };
 
     auto [minRadius, maxRadius] = calcRadii();
 
     // Bloat if minimum dimension < 10 (mfcg.js line 12491)
-    while (minRadius < 10.0) {
+    int bloatIter = 0;
+    while (minRadius < 10.0 && bloatIter++ < 1000) {
         SDL_Log("Bloating the citadel... (minRadius=%.2f)", minRadius);
 
         double bloatRadius = 2.0 * std::max(15.0, maxRadius);
 
         // Move all vertices away from center (power law)
+        // mfcg.js: q = Math.pow(q / k, -.25) — negative exponent expands inward vertices
         for (size_t i = 0; i < patch->shape.length(); ++i) {
             geom::Point& v = patch->shape[i];
             double dist = geom::Point::distance(v, center);
-            if (dist < bloatRadius) {
+            if (dist > 0.001 && dist < bloatRadius) {
                 geom::Point dir = v.subtract(center);
                 double factor = std::pow(dist / bloatRadius, -0.25);
                 v = geom::Point(center.x + dir.x * factor, center.y + dir.y * factor);
