@@ -8,21 +8,25 @@
 #include <vector>
 #include <string>
 #include <memory>
-#include <array>
 #include <optional>
 
 #include "TreeSpatialIndex.h"
 #include "TreeCullingTypes.h"
 #include "CullCommon.h"
+#include "CellCullStage.h"
+#include "TreeFilterStage.h"
+#include "LeafCullPhase3Stage.h"
 #include "DescriptorManager.h"
-#include "PerFrameBuffer.h"
 #include "FrameIndexedBuffers.h"
 
 // Forward declarations
 class TreeSystem;
 class TreeLODSystem;
 
-// Encapsulates all tree leaf culling compute pipelines and buffers
+// Orchestrates three-phase GPU-driven leaf culling:
+//   Phase 1 (CellCullStage): Frustum-cull spatial index cells
+//   Phase 2 (TreeFilterStage): Filter trees in visible cells
+//   Phase 3 (LeafCullPhase3Stage): Cull individual leaf instances
 class TreeLeafCulling {
 public:
     // Passkey for controlled construction via make_unique
@@ -69,7 +73,7 @@ public:
                        const glm::vec4* frustumPlanes);
 
     // Check if culling is enabled
-    bool isEnabled() const { return cellCullPipeline_.has_value(); }
+    bool isEnabled() const { return cellCullStage_.pipeline.has_value(); }
     bool isSpatialIndexEnabled() const { return spatialIndex_ != nullptr && spatialIndex_->isValid(); }
 
     // Set culling parameters
@@ -77,9 +81,6 @@ public:
     const CullingParams& getParams() const { return params_; }
 
     // Get output buffers for rendering (indexed by frameIndex for proper triple-buffering)
-    // IMPORTANT: Always pass the same frameIndex used for recordCulling() to ensure
-    // compute and graphics passes use the same buffer set.
-    // Uses FrameIndexedBuffers to enforce this pattern and prevent desync bugs.
     VkBuffer getOutputBuffer(uint32_t frameIndex) const {
         return cullOutputBuffers_.getVk(frameIndex);
     }
@@ -93,17 +94,9 @@ public:
 
     VkDevice getDevice() const { return device_; }
 
-
 private:
     bool init(const InitInfo& info);
-
     bool createSharedOutputBuffers(uint32_t numTrees);
-    bool createCellCullPipeline();
-    bool createCellCullBuffers();
-    bool createTreeFilterPipeline();
-    bool createTreeFilterBuffers(uint32_t maxTrees);
-    bool createTwoPhaseLeafCullPipeline();
-    bool createTwoPhaseLeafCullDescriptorSets();
 
     const vk::raii::Device* raiiDevice_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
@@ -116,15 +109,11 @@ private:
 
     CullingParams params_;
 
-    // =========================================================================
-    // Shared Output Buffers
-    // =========================================================================
-    // Triple-buffered output buffers using FrameIndexedBuffers for type-safe access.
+    // Shared output buffers
     BufferUtils::FrameIndexedBuffers cullOutputBuffers_;
     BufferUtils::FrameIndexedBuffers cullIndirectBuffers_;
     vk::DeviceSize cullOutputBufferSize_ = 0;
 
-    // Triple-buffered tree data buffers to prevent race conditions.
     BufferUtils::FrameIndexedBuffers treeDataBuffers_;
     BufferUtils::FrameIndexedBuffers treeRenderDataBuffers_;
     VkDeviceSize treeDataBufferSize_ = 0;
@@ -133,51 +122,11 @@ private:
     uint32_t numTreesForIndirect_ = 0;
     uint32_t maxLeavesPerType_ = 0;
 
-    // =========================================================================
-    // Spatial Index & Cell Culling
-    // =========================================================================
+    // Spatial index
     std::unique_ptr<TreeSpatialIndex> spatialIndex_;
 
-    std::optional<vk::raii::Pipeline> cellCullPipeline_;
-    std::optional<vk::raii::PipelineLayout> cellCullPipelineLayout_;
-    std::optional<vk::raii::DescriptorSetLayout> cellCullDescriptorSetLayout_;
-    std::vector<VkDescriptorSet> cellCullDescriptorSets_;
-
-    // Triple-buffered intermediate buffers to prevent race conditions.
-    // These are reset and written each frame, so they must be triple-buffered
-    // to avoid frame N+1 overwriting data that frame N is still reading.
-    BufferUtils::FrameIndexedBuffers visibleCellBuffers_;
-    VkDeviceSize visibleCellBufferSize_ = 0;
-
-    BufferUtils::FrameIndexedBuffers cellCullIndirectBuffers_;
-
-    BufferUtils::PerFrameBufferSet cellCullUniformBuffers_;  // CullingUniforms at binding 3
-    BufferUtils::PerFrameBufferSet cellCullParamsBuffers_;  // CellCullParams at binding 4
-
-    // =========================================================================
-    // Tree Filtering (Two-Phase Culling)
-    // =========================================================================
-    std::optional<vk::raii::Pipeline> treeFilterPipeline_;
-    std::optional<vk::raii::PipelineLayout> treeFilterPipelineLayout_;
-    std::optional<vk::raii::DescriptorSetLayout> treeFilterDescriptorSetLayout_;
-    std::vector<VkDescriptorSet> treeFilterDescriptorSets_;
-
-    BufferUtils::PerFrameBufferSet treeFilterUniformBuffers_;  // CullingUniforms at binding 6
-    BufferUtils::PerFrameBufferSet treeFilterParamsBuffers_;  // TreeFilterParams at binding 7
-
-    std::optional<vk::raii::Pipeline> twoPhaseLeafCullPipeline_;
-    std::optional<vk::raii::PipelineLayout> twoPhaseLeafCullPipelineLayout_;
-    std::optional<vk::raii::DescriptorSetLayout> twoPhaseLeafCullDescriptorSetLayout_;
-    std::vector<VkDescriptorSet> twoPhaseLeafCullDescriptorSets_;
-
-    BufferUtils::PerFrameBufferSet leafCullP3UniformBuffers_;  // CullingUniforms at binding 5
-    BufferUtils::PerFrameBufferSet leafCullP3ParamsBuffers_;  // LeafCullP3Params at binding 6
-
-    // Triple-buffered intermediate buffers for two-phase culling
-    BufferUtils::FrameIndexedBuffers visibleTreeBuffers_;
-    VkDeviceSize visibleTreeBufferSize_ = 0;
-    uint32_t maxVisibleTrees_ = 0;  // Buffer capacity for bounds checking in shader
-
-    BufferUtils::FrameIndexedBuffers leafCullIndirectDispatchBuffers_;
-
+    // Pipeline stages
+    CellCullStage cellCullStage_;
+    TreeFilterStage treeFilterStage_;
+    LeafCullPhase3Stage leafCullPhase3Stage_;
 };

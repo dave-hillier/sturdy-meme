@@ -155,6 +155,9 @@ set(SOURCES
     src/vegetation/TreeOptions.cpp
     src/vegetation/TreeRenderer.cpp
     src/vegetation/TreeLeafCulling.cpp
+    src/vegetation/CellCullStage.cpp
+    src/vegetation/TreeFilterStage.cpp
+    src/vegetation/LeafCullPhase3Stage.cpp
     src/vegetation/TreeBranchCulling.cpp
     src/vegetation/TreeImpostorAtlas.cpp
     src/vegetation/TreeImpostorAtlasCapture.cpp
