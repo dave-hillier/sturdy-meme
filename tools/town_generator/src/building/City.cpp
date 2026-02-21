@@ -595,6 +595,12 @@ void City::buildWalls() {
     std::vector<Cell*> citadelPatches;
     std::vector<geom::PointPtr> reservedPoints;  // Points that shouldn't be modified (by pointer identity)
 
+    // Reserve water edge vertices to prevent gates on the coast
+    // (faithful to mfcg.js buildWalls: excludePoints = this.waterEdge.slice())
+    for (size_t i = 0; i < waterEdge.length(); ++i) {
+        reservedPoints.push_back(waterEdge.ptr(i));
+    }
+
     if (citadelNeeded && wallsNeeded && !inner.empty()) {
         // Use the first inner patch (closest to center) for citadel
         citadelPatch = inner[0];
