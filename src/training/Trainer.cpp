@@ -1,4 +1,5 @@
 #include "Trainer.h"
+#include "TrainingVisualizer.h"
 
 #include <SDL3/SDL_log.h>
 #include <algorithm>
@@ -7,6 +8,8 @@
 #include <numeric>
 
 namespace fs = std::filesystem;
+
+Trainer::~Trainer() = default;
 
 Trainer::Trainer(const TrainerConfig& config)
     : config_(config)
@@ -74,6 +77,15 @@ Trainer::Trainer(const TrainerConfig& config)
 
     SDL_Log("Trainer: %zu environments initialized, buffer capacity=%zu",
             config.numEnvs, bufferSize);
+
+    // Create visualizer if requested
+    if (config_.visualize) {
+        TrainingVisualizer::Config vizConfig;
+        vizConfig.maxVisible = std::min(config.numEnvs, size_t(16));
+        visualizer_ = std::make_unique<TrainingVisualizer>(vizConfig);
+        SDL_Log("Trainer: visualization enabled, showing %zu environments",
+                vizConfig.maxVisible);
+    }
 }
 
 void Trainer::train() {
@@ -83,18 +95,28 @@ void Trainer::train() {
     fs::create_directories(config_.outputDir);
 
     for (size_t iter = 0; iter < config_.totalIterations; ++iter) {
-        // 1. Collect rollouts
+        // 1. Render current state (before collecting new rollouts)
+        if (visualizer_ && visualizer_->isOpen()) {
+            if (!visualizer_->pollEvents()) {
+                SDL_Log("Trainer: visualization window closed, continuing without viz");
+                visualizer_.reset();
+            } else {
+                renderFrame(iter);
+            }
+        }
+
+        // 2. Collect rollouts
         collectRollouts();
 
-        // 2. PPO update
+        // 3. PPO update
         ppoUpdate();
 
-        // 3. Logging
+        // 4. Logging
         if ((iter + 1) % config_.logInterval == 0) {
             logStats(iter + 1);
         }
 
-        // 4. Save checkpoint
+        // 5. Save checkpoint
         if ((iter + 1) % config_.saveInterval == 0) {
             std::string path = config_.outputDir + "/policy_weights.bin";
             saveCheckpoint(path);
@@ -272,6 +294,28 @@ void Trainer::ppoUpdate() {
 
 void Trainer::saveCheckpoint(const std::string& path) const {
     policy_->saveWeights(path);
+}
+
+void Trainer::renderFrame(size_t iteration) {
+    if (!visualizer_ || !visualizer_->isOpen()) return;
+
+    visualizer_->beginFrame();
+    visualizer_->drawGround();
+
+    // Draw each visible environment's ragdoll
+    size_t numVisible = std::min(config_.numEnvs, size_t(16));
+    std::vector<ArticulatedBody::PartState> states;
+
+    for (size_t e = 0; e < numVisible; ++e) {
+        envs_[e]->getBodyStates(states);
+        if (!states.empty()) {
+            visualizer_->drawRagdoll(e, states);
+        }
+    }
+
+    visualizer_->drawStats(iteration, stats_.meanReward, stats_.meanEpisodeLen,
+                           stats_.policyLoss, stats_.valueLoss, stats_.episodesCompleted);
+    visualizer_->endFrame();
 }
 
 void Trainer::logStats(size_t iteration) const {

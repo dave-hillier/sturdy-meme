@@ -48,6 +48,9 @@ public:
     // Get current state for value function estimation
     const std::vector<float>& currentObservation() const { return observation_; }
 
+    // Get current body part states for visualization
+    void getBodyStates(std::vector<ArticulatedBody::PartState>& states) const;
+
 private:
     void createPhysicsWorld();
     void spawnRagdoll(const glm::vec3& position);

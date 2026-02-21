@@ -15,6 +15,7 @@ static void printUsage(const char* argv0) {
     SDL_Log("  --rollout-steps <n>  Steps per env per rollout (default: 64)");
     SDL_Log("  --lr <f>             Policy learning rate (default: 3e-4)");
     SDL_Log("  --resume <path>      Resume from checkpoint weights");
+    SDL_Log("  --visualize          Show real-time training visualization");
     SDL_Log("  --help               Show this message");
 }
 
@@ -37,6 +38,8 @@ int main(int argc, char* argv[]) {
             config.policyLR = std::atof(argv[++i]);
         } else if (std::strcmp(argv[i], "--resume") == 0 && i + 1 < argc) {
             resumePath = argv[++i];
+        } else if (std::strcmp(argv[i], "--visualize") == 0) {
+            config.visualize = true;
         } else if (std::strcmp(argv[i], "--help") == 0) {
             printUsage(argv[0]);
             return 0;

@@ -126,6 +126,14 @@ TrainingEnv::StepResult TrainingEnv::step(const float* action) {
     return result;
 }
 
+void TrainingEnv::getBodyStates(std::vector<ArticulatedBody::PartState>& states) const {
+    if (ragdoll_ && ragdoll_->isValid() && physics_) {
+        ragdoll_->getState(states, *physics_);
+    } else {
+        states.clear();
+    }
+}
+
 void TrainingEnv::spawnRagdoll(const glm::vec3& position) {
     ragdoll_ = std::make_unique<ArticulatedBody>();
     auto config = createTrainingHumanoidConfig();

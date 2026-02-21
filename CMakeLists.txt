@@ -674,6 +674,7 @@ add_executable(train_unicon
     src/training/MotionClip.cpp
     src/training/RewardFunction.cpp
     src/training/RolloutBuffer.cpp
+    src/training/TrainingVisualizer.cpp
     # Shared physics (no Vulkan deps after HumanoidConfig extraction)
     src/physics/PhysicsSystem.cpp
     src/physics/ArticulatedBody.cpp

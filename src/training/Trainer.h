@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+class TrainingVisualizer;
+
 struct TrainerConfig {
     // Environment
     size_t numEnvs = 32;
@@ -33,11 +35,15 @@ struct TrainerConfig {
     size_t saveInterval = 50;
     std::string outputDir = "generated/unicon";
     std::string motionDir = "assets/motions";
+
+    // Visualization
+    bool visualize = false;
 };
 
 class Trainer {
 public:
     explicit Trainer(const TrainerConfig& config);
+    ~Trainer();
 
     // Run the full training loop.
     void train();
@@ -48,6 +54,7 @@ public:
 private:
     void collectRollouts();
     void ppoUpdate();
+    void renderFrame(size_t iteration);
     void logStats(size_t iteration) const;
 
     TrainerConfig config_;
@@ -62,6 +69,9 @@ private:
 
     // Rollout storage
     std::unique_ptr<RolloutBuffer> buffer_;
+
+    // Visualization
+    std::unique_ptr<TrainingVisualizer> visualizer_;
 
     // Per-env state
     std::vector<std::vector<float>> envObs_;
