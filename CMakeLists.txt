@@ -293,6 +293,10 @@ set(SOURCES
     src/ml/calm/LowLevelController.cpp
     src/ml/calm/Controller.cpp
     src/ml/calm/ModelLoader.cpp
+    # Training
+    src/training/CharacterEnv.cpp
+    src/training/RewardComputer.cpp
+    src/training/VecEnv.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -321,6 +325,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/subdivision
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/training
     ${CMAKE_CURRENT_SOURCE_DIR}/src/vegetation
     ${CMAKE_CURRENT_SOURCE_DIR}/src/water
     ${CMAKE_CURRENT_SOURCE_DIR}/generated

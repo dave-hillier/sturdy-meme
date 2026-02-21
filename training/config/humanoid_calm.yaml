@@ -1,0 +1,105 @@
+# CALM (Conditional Adversarial Latent Models) training configuration
+# Full CALM pipeline: LLC + Encoder + HLC training.
+
+environment:
+  num_envs: 4096
+  sim_timestep: 0.016667  # 1/60
+  sim_substeps: 2
+  early_termination_height: 0.3
+  max_episode_steps: 300
+
+skeleton:
+  path: data/characters/humanoid.glb
+
+motions:
+  manifest: data/calm/motions/manifest.yaml
+
+# Latent space
+latent:
+  dim: 64
+  encoder_obs_steps: 10
+  policy_obs_steps: 2
+
+# LLC policy (style-conditioned)
+policy:
+  style_mlp:
+    input_dim: 64       # latent_dim
+    hidden_sizes: [256, 128]
+    output_dim: 64
+    activation: tanh
+  main_mlp:
+    hidden_sizes: [1024, 512]
+    activation: relu
+  mu_head:
+    hidden_size: 256
+    activation: none
+  log_std_init: -1.0
+
+# Value network
+value:
+  hidden_sizes: [1024, 512, 256]
+  activation: relu
+
+# AMP discriminator
+discriminator:
+  hidden_sizes: [1024, 512]
+  activation: relu
+
+# Motion encoder
+encoder:
+  hidden_sizes: [1024, 512]
+  output_dim: 64       # latent_dim
+  activation: relu
+  normalize_output: true  # L2 normalize
+
+# PPO hyperparameters
+ppo:
+  learning_rate: 0.0003
+  clip_epsilon: 0.2
+  entropy_coeff: 0.01
+  value_coeff: 0.5
+  max_grad_norm: 1.0
+  gamma: 0.99
+  gae_lambda: 0.95
+  num_epochs: 5
+  num_minibatches: 4
+  steps_per_epoch: 32
+
+# AMP discriminator training
+amp:
+  learning_rate: 0.0001
+  grad_penalty_weight: 10.0
+  style_reward_weight: 0.5
+  task_reward_weight: 0.5
+
+# Encoder training
+encoder_training:
+  learning_rate: 0.0001
+  contrastive_margin: 1.0
+  positive_window: 30     # frames within same clip are positive pairs
+  negative_clips: 4       # number of negative clip samples
+
+# HLC training (Phase 2 — frozen LLC)
+hlc:
+  heading:
+    hidden_sizes: [512, 256]
+    learning_rate: 0.0003
+    task_obs_dim: 2       # sin(angle), cos(angle)
+  location:
+    hidden_sizes: [512, 256]
+    learning_rate: 0.0003
+    task_obs_dim: 3       # relative target position
+  strike:
+    hidden_sizes: [512, 256]
+    learning_rate: 0.0003
+    task_obs_dim: 6       # target position + hand position
+
+# Training schedule
+training:
+  # Phase 1: LLC + Encoder
+  llc_epochs: 5000
+  # Phase 2: HLC (with frozen LLC)
+  hlc_epochs: 2000
+  checkpoint_interval: 50
+  log_interval: 10
+  output_dir: checkpoints/calm/
