@@ -303,6 +303,9 @@ struct LeafType {
     std::string typeName;     // String key for texture lookup (e.g. "oak", "pine")
 };
 
+// Zero-size tag for the currently selected/editable tree
+struct TreeSelected {};
+
 // =============================================================================
 // LOD Component
 // =============================================================================

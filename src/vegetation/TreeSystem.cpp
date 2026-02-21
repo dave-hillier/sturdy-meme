@@ -750,12 +750,26 @@ void TreeSystem::selectTree(int index) {
     // Deselect previous
     if (selectedTreeIndex_ >= 0 && selectedTreeIndex_ < static_cast<int>(treeInstances_.size())) {
         treeInstances_[selectedTreeIndex_].isSelected = false;
+        // Remove ECS tag from previous selection
+        if (world_ && static_cast<size_t>(selectedTreeIndex_) < treeEntities_.size()) {
+            ecs::Entity prev = treeEntities_[selectedTreeIndex_];
+            if (prev != ecs::NullEntity && world_->has<ecs::TreeSelected>(prev)) {
+                world_->remove<ecs::TreeSelected>(prev);
+            }
+        }
     }
 
     // Select new
     if (index >= 0 && index < static_cast<int>(treeInstances_.size())) {
         selectedTreeIndex_ = index;
         treeInstances_[index].isSelected = true;
+        // Add ECS tag to new selection
+        if (world_ && static_cast<size_t>(index) < treeEntities_.size()) {
+            ecs::Entity e = treeEntities_[index];
+            if (e != ecs::NullEntity && !world_->has<ecs::TreeSelected>(e)) {
+                world_->add<ecs::TreeSelected>(e);
+            }
+        }
     } else {
         selectedTreeIndex_ = -1;
     }
