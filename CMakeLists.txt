@@ -199,6 +199,10 @@ set(SOURCES
     src/terrain/TerrainCBT.cpp
     src/terrain/TerrainMeshlet.cpp
     src/terrain/TerrainTileCache.cpp
+    src/terrain/TileArrayManager.cpp
+    src/terrain/HoleMaskManager.cpp
+    src/terrain/TileInfoBuffer.cpp
+    src/terrain/BaseHeightMap.cpp
     src/terrain/ErosionDataLoader.cpp
     src/terrain/RoadNetworkLoader.cpp
     src/terrain/virtual_texture/VirtualTextureCache.cpp

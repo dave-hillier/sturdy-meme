@@ -1,8 +1,8 @@
 #include "TerrainTileCache.h"
 #include "TerrainHeight.h"
-#include "CommandBufferUtils.h"
-#include "VmaBufferFactory.h"
-#include "SamplerFactory.h"
+#include "core/vulkan/CommandBufferUtils.h"
+#include "core/vulkan/VmaBufferFactory.h"
+#include "core/vulkan/SamplerFactory.h"
 #include "core/ImageBuilder.h"
 #include <SDL3/SDL.h>
 #include <vulkan/vulkan.hpp>
@@ -55,87 +55,32 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
     }
     sampler_ = std::move(*sampler);
 
-    // Create tile info buffers for shader using VulkanResourceFactory (triple-buffered)
-    // Layout: uint activeTileCount, uint padding[3], TileInfoGPU tiles[MAX_ACTIVE_TILES]
-    VkDeviceSize bufferSize = sizeof(uint32_t) * 4 + MAX_ACTIVE_TILES * sizeof(TileInfoGPU);
-    tileInfoBuffers_.resize(FRAMES_IN_FLIGHT);
-    for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
-        if (!VmaBufferFactory::createStorageBufferHostReadable(allocator, bufferSize, tileInfoBuffers_[i])) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create tile info buffer %u", i);
+    // Initialize tile array manager
+    {
+        TileArrayManager::InitInfo arrayInfo{};
+        arrayInfo.device = device;
+        arrayInfo.allocator = allocator;
+        arrayInfo.graphicsQueue = graphicsQueue;
+        arrayInfo.commandPool = commandPool;
+        arrayInfo.storedTileResolution = storedTileResolution;
+        arrayInfo.maxLayers = MAX_ACTIVE_TILES;
+        if (!tileArray_.init(arrayInfo)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to init TileArrayManager");
             return false;
         }
-        tileInfoMappedPtrs_[i] = tileInfoBuffers_[i].map();
     }
 
-    // Create tile array image (2D array texture with MAX_ACTIVE_TILES layers)
-    // Use storedTileResolution which includes overlap for seamless sampling
+    // Initialize tile info buffer
     {
-        ManagedImage image;
-        if (!ImageBuilder(allocator)
-                .setExtent(storedTileResolution, storedTileResolution)
-                .setFormat(VK_FORMAT_R32_SFLOAT)
-                .setArrayLayers(MAX_ACTIVE_TILES)
-                .setUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-                .build(device, image, tileArrayView)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create tile array image");
+        TileInfoBuffer::InitInfo bufInfo{};
+        bufInfo.allocator = allocator;
+        bufInfo.maxActiveTiles = MAX_ACTIVE_TILES;
+        if (!tileInfoBuffer_.init(bufInfo)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to init TileInfoBuffer");
             return false;
         }
-        image.releaseToRaw(tileArrayImage, tileArrayAllocation);
+        tileInfoBuffer_.initializeAllFrames();
     }
-
-    // Transition tile array to shader read layout
-    {
-        VkCommandBuffer cmd;
-        auto cmdAllocInfo = vk::CommandBufferAllocateInfo{}
-            .setCommandPool(commandPool)
-            .setLevel(vk::CommandBufferLevel::ePrimary)
-            .setCommandBufferCount(1);
-        vkAllocateCommandBuffers(device, reinterpret_cast<const VkCommandBufferAllocateInfo*>(&cmdAllocInfo), &cmd);
-
-        auto beginInfo = vk::CommandBufferBeginInfo{}
-            .setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
-        vkBeginCommandBuffer(cmd, reinterpret_cast<const VkCommandBufferBeginInfo*>(&beginInfo));
-
-        vk::CommandBuffer vkCmd(cmd);
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlags{})
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eUndefined)
-            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(tileArrayImage)
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(0)
-                .setLayerCount(MAX_ACTIVE_TILES));
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
-                              vk::PipelineStageFlagBits::eVertexShader,
-                              {}, {}, {}, barrier);
-
-        vkEndCommandBuffer(cmd);
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmd;
-        vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(graphicsQueue);
-        vkFreeCommandBuffers(device, commandPool, 1, &cmd);
-    }
-
-    // Initialize all tile info buffers with activeTileCount = 0
-    // This ensures shaders don't read garbage if they run before first updateActiveTiles()
-    for (uint32_t i = 0; i < FRAMES_IN_FLIGHT; i++) {
-        currentFrameIndex_ = i;
-        updateTileInfoBuffer();
-    }
-    currentFrameIndex_ = 0;
-
-    // Initialize all array layers as free
-    freeArrayLayers_.fill(true);
 
     SDL_Log("TerrainTileCache initialized: %s", cacheDirectory.c_str());
     SDL_Log("  Terrain size: %.0fm, Tile resolution: %u (stored: %u with overlap), LOD levels: %u",
@@ -143,18 +88,27 @@ bool TerrainTileCache::initInternal(const InitInfo& info) {
     SDL_Log("  LOD0 grid: %ux%u tiles", tilesX, tilesZ);
 
     // Load all base LOD tiles synchronously at startup
-    // These tiles cover the entire terrain and provide fallback height data
     if (!loadBaseLODTiles()) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "TerrainTileCache: Failed to load base LOD tiles");
         return false;
     }
 
-    // Initialize hole mask array (tiled, same layer count as height tiles)
-    if (!createHoleMaskArrayResources()) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "TerrainTileCache: Failed to create hole mask array resources");
-        return false;
+    // Initialize hole mask manager
+    {
+        HoleMaskManager::InitInfo holeInfo{};
+        holeInfo.raiiDevice = raiiDevice_;
+        holeInfo.device = device;
+        holeInfo.allocator = allocator;
+        holeInfo.graphicsQueue = graphicsQueue;
+        holeInfo.commandPool = commandPool;
+        holeInfo.storedTileResolution = storedTileResolution;
+        holeInfo.maxLayers = MAX_ACTIVE_TILES;
+        if (!holeMask_.init(holeInfo)) {
+            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                         "TerrainTileCache: Failed to init HoleMaskManager");
+            return false;
+        }
     }
 
     return true;
@@ -166,9 +120,11 @@ void TerrainTileCache::cleanup() {
         vkDeviceWaitIdle(device);
     }
 
-    // Clear base tiles list (pointers into loadedTiles)
-    baseTiles_.clear();
-    baseHeightMapCpuData_.clear();
+    // Clean up sub-components
+    baseHeightMap_.cleanup();
+    holeMask_.cleanup();
+    tileInfoBuffer_.cleanup();
+    tileArray_.cleanup();
 
     // Unload all tiles
     for (auto& [key, tile] : loadedTiles) {
@@ -177,45 +133,6 @@ void TerrainTileCache::cleanup() {
     }
     loadedTiles.clear();
     activeTiles.clear();
-
-    // Destroy tile info buffers (RAII via clear)
-    tileInfoBuffers_.forEach([](uint32_t, ManagedBuffer& buffer) {
-        buffer.reset();
-    });
-    tileInfoBuffers_.clear();
-    tileInfoMappedPtrs_.fill(nullptr);
-
-    // Destroy tile array texture
-    if (tileArrayView) {
-        vkDestroyImageView(device, tileArrayView, nullptr);
-        tileArrayView = VK_NULL_HANDLE;
-    }
-    if (tileArrayImage) {
-        vmaDestroyImage(allocator, tileArrayImage, tileArrayAllocation);
-        tileArrayImage = VK_NULL_HANDLE;
-    }
-
-    // Destroy base heightmap texture
-    if (baseHeightMapView_) {
-        vkDestroyImageView(device, baseHeightMapView_, nullptr);
-        baseHeightMapView_ = VK_NULL_HANDLE;
-    }
-    if (baseHeightMapImage_) {
-        vmaDestroyImage(allocator, baseHeightMapImage_, baseHeightMapAllocation_);
-        baseHeightMapImage_ = VK_NULL_HANDLE;
-    }
-
-    // Destroy hole mask array resources
-    holeMaskSampler_.reset();
-    if (holeMaskArrayView_) {
-        vkDestroyImageView(device, holeMaskArrayView_, nullptr);
-        holeMaskArrayView_ = VK_NULL_HANDLE;
-    }
-    if (holeMaskArrayImage_) {
-        vmaDestroyImage(allocator, holeMaskArrayImage_, holeMaskArrayAllocation_);
-        holeMaskArrayImage_ = VK_NULL_HANDLE;
-    }
-    holes_.clear();
 
     // Destroy sampler (RAII via reset)
     sampler_.reset();
@@ -268,7 +185,6 @@ std::string TerrainTileCache::getTilePath(TileCoord coord, uint32_t lod) const {
 }
 
 uint64_t TerrainTileCache::makeTileKey(TileCoord coord, uint32_t lod) const {
-    // Pack coord and LOD into a single 64-bit key
     return (static_cast<uint64_t>(lod) << 48) |
            (static_cast<uint64_t>(static_cast<uint32_t>(coord.x)) << 24) |
            static_cast<uint64_t>(static_cast<uint32_t>(coord.z));
@@ -300,8 +216,6 @@ bool TerrainTileCache::loadTileDataFromDisk(TileCoord coord, uint32_t lod, Terra
         return false;
     }
 
-    // Tiles must match expected stored resolution (with overlap)
-    // Accept both old format (tileResolution) and new format (storedTileResolution)
     uint32_t loadedRes = static_cast<uint32_t>(width);
     bool isOldFormat = (loadedRes == tileResolution);
     bool isNewFormat = (loadedRes == storedTileResolution);
@@ -323,7 +237,6 @@ bool TerrainTileCache::loadTileDataFromDisk(TileCoord coord, uint32_t lod, Terra
         return false;
     }
 
-    // Initialize tile metadata
     tile.coord = coord;
     tile.lod = lod;
     calculateTileWorldBounds(coord, lod, tile);
@@ -347,15 +260,11 @@ uint32_t TerrainTileCache::getLODForDistance(float distance) const {
 }
 
 TileCoord TerrainTileCache::worldToTileCoord(float worldX, float worldZ, uint32_t lod) const {
-    // Convert world position to normalized [0, 1]
     float normX = (worldX / terrainSize) + 0.5f;
     float normZ = (worldZ / terrainSize) + 0.5f;
-
-    // Clamp to valid range
     normX = std::clamp(normX, 0.0f, 0.9999f);
     normZ = std::clamp(normZ, 0.0f, 0.9999f);
 
-    // Calculate tile count at this LOD level
     uint32_t lodTilesX = tilesX >> lod;
     uint32_t lodTilesZ = tilesZ >> lod;
     if (lodTilesX < 1) lodTilesX = 1;
@@ -369,44 +278,31 @@ TileCoord TerrainTileCache::worldToTileCoord(float worldX, float worldZ, uint32_
 }
 
 void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadRadius, float unloadRadius) {
-    // Determine which tiles should be loaded based on camera position
     std::vector<std::pair<TileCoord, uint32_t>> tilesToLoad;
     std::vector<uint64_t> tilesToUnload;
 
-    // Calculate camera position in terrain space
     float camX = cameraPos.x;
     float camZ = cameraPos.z;
 
+    uint32_t baseLOD = baseHeightMap_.getBaseLOD();
+
     // For each LOD level, determine which tiles should be loaded
     for (uint32_t lod = 0; lod < numLODLevels; lod++) {
-        float lodMinDist = (lod == 0) ? 0.0f :
-                          (lod == 1) ? LOD0_MAX_DISTANCE :
-                          (lod == 2) ? LOD1_MAX_DISTANCE :
-                          LOD2_MAX_DISTANCE;
         float lodMaxDist = (lod == 0) ? LOD0_MAX_DISTANCE :
                           (lod == 1) ? LOD1_MAX_DISTANCE :
                           (lod == 2) ? LOD2_MAX_DISTANCE :
                           LOD3_MAX_DISTANCE;
 
-        // Skip this LOD if camera is outside its range
-        // (we still need tiles for areas within our loadRadius though)
-
-        // Calculate tile size at this LOD
         uint32_t lodTilesX = tilesX >> lod;
         uint32_t lodTilesZ = tilesZ >> lod;
         if (lodTilesX < 1) lodTilesX = 1;
         if (lodTilesZ < 1) lodTilesZ = 1;
 
-        float tileWorldSizeX = terrainSize / lodTilesX;
-        float tileWorldSizeZ = terrainSize / lodTilesZ;
-
-        // Calculate tile range to check around camera
         int32_t minTileX = static_cast<int32_t>(((camX - loadRadius) / terrainSize + 0.5f) * lodTilesX);
         int32_t maxTileX = static_cast<int32_t>(((camX + loadRadius) / terrainSize + 0.5f) * lodTilesX);
         int32_t minTileZ = static_cast<int32_t>(((camZ - loadRadius) / terrainSize + 0.5f) * lodTilesZ);
         int32_t maxTileZ = static_cast<int32_t>(((camZ + loadRadius) / terrainSize + 0.5f) * lodTilesZ);
 
-        // Clamp to valid tile range
         minTileX = std::max(0, minTileX);
         maxTileX = std::min(static_cast<int32_t>(lodTilesX - 1), maxTileX);
         minTileZ = std::max(0, minTileZ);
@@ -414,18 +310,12 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
 
         for (int32_t tz = minTileZ; tz <= maxTileZ; tz++) {
             for (int32_t tx = minTileX; tx <= maxTileX; tx++) {
-                // Calculate tile center in world space
                 float tileCenterX = ((static_cast<float>(tx) + 0.5f) / lodTilesX - 0.5f) * terrainSize;
                 float tileCenterZ = ((static_cast<float>(tz) + 0.5f) / lodTilesZ - 0.5f) * terrainSize;
 
                 float dist = std::sqrt((tileCenterX - camX) * (tileCenterX - camX) +
                                        (tileCenterZ - camZ) * (tileCenterZ - camZ));
 
-                // Load tile if any part of it is within this LOD's max distance
-                // and within the overall load radius.
-                // Each LOD level covers from 0 to lodMaxDist, with finer LODs
-                // preferred when available (handled by shader/sampling).
-                // This ensures no gaps at LOD boundaries.
                 if (dist < lodMaxDist && dist < loadRadius) {
                     TileCoord coord{tx, tz};
                     if (!isTileLoaded(coord, lod)) {
@@ -437,11 +327,8 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
     }
 
     // Find tiles to unload (beyond their LOD's useful range)
-    // Each LOD has its own max distance - unload when beyond that + hysteresis
-    // Never unload base LOD tiles - they're the fallback for the entire terrain
     for (auto& [key, tile] : loadedTiles) {
-        // Skip base LOD tiles - they're never unloaded
-        if (tile.lod == baseLOD_) continue;
+        if (tile.lod == baseLOD) continue;
 
         float tileCenterX = (tile.worldMinX + tile.worldMaxX) * 0.5f;
         float tileCenterZ = (tile.worldMinZ + tile.worldMaxZ) * 0.5f;
@@ -449,14 +336,11 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
         float dist = std::sqrt((tileCenterX - camX) * (tileCenterX - camX) +
                                (tileCenterZ - camZ) * (tileCenterZ - camZ));
 
-        // Get the max distance for this tile's LOD level
         float lodMaxDist = (tile.lod == 0) ? LOD0_MAX_DISTANCE :
                           (tile.lod == 1) ? LOD1_MAX_DISTANCE :
                           (tile.lod == 2) ? LOD2_MAX_DISTANCE :
                           LOD3_MAX_DISTANCE;
 
-        // Unload if beyond this LOD's range (with hysteresis to prevent thrashing)
-        // The coarser LOD tiles will still provide coverage
         float unloadDist = lodMaxDist + (unloadRadius - loadRadius);
         if (dist > unloadDist) {
             tilesToUnload.push_back(key);
@@ -468,9 +352,8 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
         auto it = loadedTiles.find(key);
         if (it != loadedTiles.end()) {
             TerrainTile& tile = it->second;
-            // Free the array layer used by this tile
             if (tile.arrayLayerIndex >= 0) {
-                freeArrayLayer(tile.arrayLayerIndex);
+                tileArray_.freeLayer(tile.arrayLayerIndex);
             }
             if (tile.imageView) vkDestroyImageView(device, tile.imageView, nullptr);
             if (tile.image) vmaDestroyImage(allocator, tile.image, tile.allocation);
@@ -500,34 +383,29 @@ void TerrainTileCache::updateActiveTiles(const glm::vec3& cameraPos, float loadR
     }
 
     // Sort active tiles by LOD (lower LOD = higher resolution) so GPU checks LOD0 first
-    // This matches CPU getHeightAt() which also prioritizes LOD0 tiles
     std::sort(activeTiles.begin(), activeTiles.end(), [](const TerrainTile* a, const TerrainTile* b) {
         return a->lod < b->lod;
     });
 
     // Update tile info buffer
-    updateTileInfoBuffer();
+    tileInfoBuffer_.update(currentFrameIndex_, activeTiles);
 }
 
 bool TerrainTileCache::loadTile(TileCoord coord, uint32_t lod) {
     uint64_t key = makeTileKey(coord, lod);
 
-    // Check if tile already has GPU resources (fully loaded)
     auto existingIt = loadedTiles.find(key);
     if (existingIt != loadedTiles.end() && existingIt->second.loaded) {
-        return true;  // Already fully loaded
+        return true;
     }
 
-    // Check if we already have CPU data from loadTileCPUOnly
     bool hasCpuData = (existingIt != loadedTiles.end() && !existingIt->second.cpuData.empty());
 
     TerrainTile* tilePtr = nullptr;
 
     if (hasCpuData) {
-        // Already have CPU data, just need to add GPU resources
         tilePtr = &existingIt->second;
     } else {
-        // Need to load from disk - create entry and populate with helper
         TerrainTile& tile = loadedTiles[key];
         if (!loadTileDataFromDisk(coord, lod, tile)) {
             loadedTiles.erase(key);
@@ -538,7 +416,6 @@ bool TerrainTileCache::loadTile(TileCoord coord, uint32_t lod) {
 
     TerrainTile& tile = *tilePtr;
 
-    // Create GPU resources and upload
     if (!createTileGPUResources(tile)) {
         loadedTiles.erase(key);
         return false;
@@ -551,11 +428,11 @@ bool TerrainTileCache::loadTile(TileCoord coord, uint32_t lod) {
         return false;
     }
 
-    // Allocate a layer in the tile array and copy data to it (one-time upload)
-    int32_t layerIndex = allocateArrayLayer();
+    // Allocate a layer in the tile array and copy data to it
+    int32_t layerIndex = tileArray_.allocateLayer();
     if (layerIndex >= 0) {
         tile.arrayLayerIndex = layerIndex;
-        copyTileToArrayLayer(&tile, static_cast<uint32_t>(layerIndex));
+        tileArray_.copyTileToLayer(tile, static_cast<uint32_t>(layerIndex));
     } else {
         SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: No free array layers for tile (%d, %d) LOD%u",
                     coord.x, coord.z, lod);
@@ -567,11 +444,13 @@ bool TerrainTileCache::loadTile(TileCoord coord, uint32_t lod) {
             coord.x, coord.z, lod, tile.arrayLayerIndex, tile.worldMinX, tile.worldMinZ, tile.worldMaxX, tile.worldMaxZ,
             hasCpuData ? " (added GPU to existing)" : "");
 
+    // Upload hole mask for this tile
+    holeMask_.uploadTileHoleMask(tile, tile.arrayLayerIndex);
+
     return true;
 }
 
 bool TerrainTileCache::createTileGPUResources(TerrainTile& tile) {
-    // Infer resolution from loaded CPU data
     uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile.cpuData.size()));
 
     ManagedImage image;
@@ -588,26 +467,21 @@ bool TerrainTileCache::createTileGPUResources(TerrainTile& tile) {
 }
 
 bool TerrainTileCache::uploadTileToGPU(TerrainTile& tile) {
-    // Infer resolution from loaded CPU data
     uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile.cpuData.size()));
     VkDeviceSize imageSize = tile.cpuData.size() * sizeof(float);
 
-    // Create staging buffer using RAII wrapper
     ManagedBuffer stagingBuffer;
     if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
         return false;
     }
 
-    // Copy data to staging buffer
     void* mappedData = stagingBuffer.map();
     memcpy(mappedData, tile.cpuData.data(), imageSize);
     stagingBuffer.unmap();
 
-    // Use CommandScope for one-time command submission
     CommandScope cmd(device, commandPool, graphicsQueue);
     if (!cmd.begin()) return false;
 
-    // Copy staging buffer to tile image with explicit barriers
     vk::CommandBuffer vkCmd(cmd.get());
 
     // Transition to transfer dst
@@ -670,77 +544,28 @@ bool TerrainTileCache::uploadTileToGPU(TerrainTile& tile) {
 
     if (!cmd.end()) return false;
 
-    // ManagedBuffer automatically destroyed on scope exit
     return true;
-}
-
-void TerrainTileCache::updateTileInfoBuffer() {
-    // Write to the current frame's buffer (triple-buffered to avoid CPU-GPU sync issues)
-    void* mappedPtr = tileInfoMappedPtrs_[currentFrameIndex_ % FRAMES_IN_FLIGHT];
-    if (!mappedPtr) return;
-
-    // First 4 bytes: active tile count
-    uint32_t* countPtr = static_cast<uint32_t*>(mappedPtr);
-    countPtr[0] = static_cast<uint32_t>(activeTiles.size());
-    countPtr[1] = 0; // padding1
-    countPtr[2] = 0; // padding2
-    countPtr[3] = 0; // padding3
-
-    if (activeTiles.empty()) return;
-
-    // Tile info array follows after the count (offset by 16 bytes for alignment)
-    TileInfoGPU* tileInfoArray = reinterpret_cast<TileInfoGPU*>(countPtr + 4);
-
-    for (size_t i = 0; i < activeTiles.size() && i < MAX_ACTIVE_TILES; i++) {
-        TerrainTile* tile = activeTiles[i];
-
-        tileInfoArray[i].worldBounds = glm::vec4(
-            tile->worldMinX, tile->worldMinZ,
-            tile->worldMaxX, tile->worldMaxZ
-        );
-
-        // UV scale and offset for sampling this tile
-        // UV = (worldPos - worldMin) / (worldMax - worldMin)
-        float sizeX = tile->worldMaxX - tile->worldMinX;
-        float sizeZ = tile->worldMaxZ - tile->worldMinZ;
-        tileInfoArray[i].uvScaleOffset = glm::vec4(
-            1.0f / sizeX, 1.0f / sizeZ,
-            -tile->worldMinX / sizeX, -tile->worldMinZ / sizeZ
-        );
-
-        // Store the array layer index where this tile's data is stored
-        // The tile data was copied to the array when it was first loaded (in loadTile)
-        // so we don't need to re-copy it every frame - just tell the shader which layer to sample
-        tileInfoArray[i].layerIndex = glm::ivec4(tile->arrayLayerIndex, 0, 0, 0);
-    }
 }
 
 bool TerrainTileCache::isTileLoaded(TileCoord coord, uint32_t lod) const {
     uint64_t key = makeTileKey(coord, lod);
     auto it = loadedTiles.find(key);
-    // A tile is fully loaded only if it has GPU resources (tile.loaded = true)
     return it != loadedTiles.end() && it->second.loaded;
 }
 
 bool TerrainTileCache::getHeightAt(float worldX, float worldZ, float& outHeight) const {
-    // Helper to sample height from a tile using TerrainHeight bilinear sampling
     auto sampleTile = [&](const TerrainTile& tile, const char* source) -> bool {
         if (tile.cpuData.empty()) return false;
         if (worldX < tile.worldMinX || worldX >= tile.worldMaxX ||
             worldZ < tile.worldMinZ || worldZ >= tile.worldMaxZ) return false;
 
-        // Calculate UV within tile (maps world bounds to [0,1])
         float u = (worldX - tile.worldMinX) / (tile.worldMaxX - tile.worldMinX);
         float v = (worldZ - tile.worldMinZ) / (tile.worldMaxZ - tile.worldMinZ);
-
-        // Infer actual resolution from tile data (handles both old and new formats)
         uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile.cpuData.size()));
 
-        // Sample and convert to world height using TerrainHeight helpers
         outHeight = TerrainHeight::sampleWorldHeight(u, v, tile.cpuData.data(),
                                                       actualRes, heightScale);
 
-        // Debug: Log first few height queries to verify sampling
         static int debugCount = 0;
         if (debugCount < 5) {
             SDL_Log("getHeightAt(%.1f, %.1f): %s LOD%u tile(%d,%d) uv(%.4f,%.4f) res=%u h=%.2f",
@@ -752,32 +577,30 @@ bool TerrainTileCache::getHeightAt(float worldX, float worldZ, float& outHeight)
     };
 
     // First check active tiles (GPU tiles - highest priority)
-    // Sort by LOD to prefer LOD0 (highest resolution)
     std::vector<const TerrainTile*> sortedActive(activeTiles.begin(), activeTiles.end());
     std::sort(sortedActive.begin(), sortedActive.end(), [](const TerrainTile* a, const TerrainTile* b) {
-        return a->lod < b->lod;  // Lower LOD number = higher resolution
+        return a->lod < b->lod;
     });
     for (const TerrainTile* tile : sortedActive) {
         if (sampleTile(*tile, "active")) return true;
     }
 
     // Also check all loaded tiles (includes CPU-only tiles from physics preloading)
-    // This ensures physics and CPU queries use the same high-res tile data
-    // Prioritize LOD0 tiles to match physics heightfield resolution
+    uint32_t baseLOD = baseHeightMap_.getBaseLOD();
     std::vector<const TerrainTile*> sortedLoaded;
     for (const auto& [key, tile] : loadedTiles) {
-        if (tile.lod == baseLOD_) continue;  // Skip base LOD - checked as fallback
+        if (tile.lod == baseLOD) continue;
         sortedLoaded.push_back(&tile);
     }
     std::sort(sortedLoaded.begin(), sortedLoaded.end(), [](const TerrainTile* a, const TerrainTile* b) {
-        return a->lod < b->lod;  // Lower LOD number = higher resolution
+        return a->lod < b->lod;
     });
     for (const TerrainTile* tile : sortedLoaded) {
         if (sampleTile(*tile, "loaded")) return true;
     }
 
-    // Fallback to base LOD tiles (always loaded, covers entire terrain)
-    return sampleBaseLOD(worldX, worldZ, outHeight);
+    // Fallback to base LOD tiles
+    return baseHeightMap_.sampleHeight(worldX, worldZ, outHeight);
 }
 
 TerrainTileCache::HeightQueryInfo TerrainTileCache::getHeightAtDebug(float worldX, float worldZ) const {
@@ -789,7 +612,6 @@ TerrainTileCache::HeightQueryInfo TerrainTileCache::getHeightAtDebug(float world
     info.lod = 0;
     info.source = "none";
 
-    // Helper to sample height from a tile
     auto sampleTile = [&](const TerrainTile& tile, const char* source) -> bool {
         if (tile.cpuData.empty()) return false;
         if (worldX < tile.worldMinX || worldX >= tile.worldMaxX ||
@@ -808,7 +630,7 @@ TerrainTileCache::HeightQueryInfo TerrainTileCache::getHeightAtDebug(float world
         return true;
     };
 
-    // Check active tiles first (sorted by LOD to prefer highest resolution)
+    // Check active tiles first
     std::vector<const TerrainTile*> sortedActive(activeTiles.begin(), activeTiles.end());
     std::sort(sortedActive.begin(), sortedActive.end(), [](const TerrainTile* a, const TerrainTile* b) {
         return a->lod < b->lod;
@@ -818,9 +640,10 @@ TerrainTileCache::HeightQueryInfo TerrainTileCache::getHeightAtDebug(float world
     }
 
     // Check loaded tiles (sorted by LOD, excluding baseLOD)
+    uint32_t baseLOD = baseHeightMap_.getBaseLOD();
     std::vector<const TerrainTile*> sortedLoaded;
     for (const auto& [key, tile] : loadedTiles) {
-        if (tile.lod == baseLOD_) continue;
+        if (tile.lod == baseLOD) continue;
         sortedLoaded.push_back(&tile);
     }
     std::sort(sortedLoaded.begin(), sortedLoaded.end(), [](const TerrainTile* a, const TerrainTile* b) {
@@ -831,128 +654,17 @@ TerrainTileCache::HeightQueryInfo TerrainTileCache::getHeightAtDebug(float world
     }
 
     // Fallback to base LOD
-    if (!baseTiles_.empty()) {
-        uint32_t baseTilesX = tilesX >> baseLOD_;
-        uint32_t baseTilesZ = tilesZ >> baseLOD_;
-        if (baseTilesX < 1) baseTilesX = 1;
-        if (baseTilesZ < 1) baseTilesZ = 1;
-
-        float invTerrainSize = 1.0f / terrainSize;
-        float normX = (worldX * invTerrainSize) + 0.5f;
-        float normZ = (worldZ * invTerrainSize) + 0.5f;
-        normX = std::clamp(normX, 0.0f, 0.9999f);
-        normZ = std::clamp(normZ, 0.0f, 0.9999f);
-
-        uint32_t tx = static_cast<uint32_t>(normX * baseTilesX);
-        uint32_t tz = static_cast<uint32_t>(normZ * baseTilesZ);
-        uint32_t tileIndex = tz * baseTilesX + tx;
-
-        if (tileIndex < baseTiles_.size()) {
-            const TerrainTile* tile = baseTiles_[tileIndex];
-            if (tile && !tile->cpuData.empty()) {
-                sampleTile(*tile, "baseLOD");
-            }
-        }
+    const TerrainTile* baseTile = baseHeightMap_.getTileAt(worldX, worldZ);
+    if (baseTile && !baseTile->cpuData.empty()) {
+        sampleTile(*baseTile, "baseLOD");
     }
 
     return info;
 }
 
-void TerrainTileCache::copyTileToArrayLayer(TerrainTile* tile, uint32_t layerIndex) {
-    if (!tile || tile->cpuData.empty() || layerIndex >= MAX_ACTIVE_TILES) return;
-
-    // Infer actual resolution from tile data
-    uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile->cpuData.size()));
-
-    // Create staging buffer using RAII wrapper
-    VkDeviceSize imageSize = tile->cpuData.size() * sizeof(float);
-
-    ManagedBuffer stagingBuffer;
-    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create staging buffer for tile copy");
-        return;
-    }
-
-    // Copy tile data to staging buffer
-    void* mappedData = stagingBuffer.map();
-    memcpy(mappedData, tile->cpuData.data(), imageSize);
-    stagingBuffer.unmap();
-
-    // Use CommandScope for one-time command submission
-    CommandScope cmd(device, commandPool, graphicsQueue);
-    if (!cmd.begin()) return;
-
-    vk::CommandBuffer vkCmd(cmd.get());
-
-    // Transition tile array layer to transfer dst
-    {
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
-            .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(tileArrayImage)
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(layerIndex)
-                .setLayerCount(1));
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eVertexShader,
-                              vk::PipelineStageFlagBits::eTransfer,
-                              {}, {}, {}, barrier);
-    }
-
-    // Copy buffer to image layer
-    {
-        auto region = vk::BufferImageCopy{}
-            .setBufferOffset(0)
-            .setBufferRowLength(0)
-            .setBufferImageHeight(0)
-            .setImageSubresource(vk::ImageSubresourceLayers{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setMipLevel(0)
-                .setBaseArrayLayer(layerIndex)
-                .setLayerCount(1))
-            .setImageOffset({0, 0, 0})
-            .setImageExtent({actualRes, actualRes, 1});
-        vkCmd.copyBufferToImage(stagingBuffer.get(), tileArrayImage, vk::ImageLayout::eTransferDstOptimal, region);
-    }
-
-    // Transition back to shader read
-    {
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
-            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(tileArrayImage)
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(layerIndex)
-                .setLayerCount(1));
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-                              vk::PipelineStageFlagBits::eVertexShader,
-                              {}, {}, {}, barrier);
-    }
-
-    cmd.end();
-    // ManagedBuffer automatically destroyed on scope exit
-
-    // Also upload hole mask for this tile (shares same layer index)
-    uploadTileHoleMask(*tile, static_cast<int32_t>(layerIndex));
-}
-
 const TerrainTile* TerrainTileCache::getLoadedTile(TileCoord coord, uint32_t lod) const {
     uint64_t key = makeTileKey(coord, lod);
     auto it = loadedTiles.find(key);
-    // Return tile if fully loaded OR if CPU data is available (for physics)
     if (it != loadedTiles.end() && (it->second.loaded || !it->second.cpuData.empty())) {
         return &it->second;
     }
@@ -960,38 +672,30 @@ const TerrainTile* TerrainTileCache::getLoadedTile(TileCoord coord, uint32_t lod
 }
 
 bool TerrainTileCache::requestTileLoad(TileCoord coord, uint32_t lod) {
-    // Check if already loaded
     uint64_t key = makeTileKey(coord, lod);
     auto it = loadedTiles.find(key);
     if (it != loadedTiles.end() && it->second.loaded) {
         return true;
     }
-
-    // Also accept CPU-only loaded tiles (no GPU resources yet)
     if (it != loadedTiles.end() && !it->second.cpuData.empty()) {
         return true;
     }
-
-    // Load the tile
     return loadTile(coord, lod);
 }
 
 bool TerrainTileCache::loadTileCPUOnly(TileCoord coord, uint32_t lod) {
-    // Check if already loaded (either fully or CPU-only)
     uint64_t key = makeTileKey(coord, lod);
     auto it = loadedTiles.find(key);
     if (it != loadedTiles.end() && !it->second.cpuData.empty()) {
-        return true;  // Already has CPU data
+        return true;
     }
 
-    // Create tile entry and load from disk using helper
     TerrainTile& tile = loadedTiles[key];
     if (!loadTileDataFromDisk(coord, lod, tile)) {
         loadedTiles.erase(key);
         return false;
     }
 
-    // Leave loaded=false - GPU resources will be created later when needed
     tile.loaded = false;
 
     SDL_Log("TerrainTileCache: Loaded tile CPU data (%d, %d) LOD%u - world bounds [%.0f,%.0f]-[%.0f,%.0f]",
@@ -1001,19 +705,13 @@ bool TerrainTileCache::loadTileCPUOnly(TileCoord coord, uint32_t lod) {
 }
 
 void TerrainTileCache::preloadTilesAround(float worldX, float worldZ, float radius) {
-    // Pre-load LOD0 tiles (highest resolution) around the given position
-    // This is synchronous and blocks until tiles are loaded
     const uint32_t lod = 0;
-    const float tileWorldSizeX = terrainSize / tilesX;
-    const float tileWorldSizeZ = terrainSize / tilesZ;
 
-    // Calculate tile range covering the radius
     int32_t minTileX = static_cast<int32_t>(((worldX - radius) / terrainSize + 0.5f) * tilesX);
     int32_t maxTileX = static_cast<int32_t>(((worldX + radius) / terrainSize + 0.5f) * tilesX);
     int32_t minTileZ = static_cast<int32_t>(((worldZ - radius) / terrainSize + 0.5f) * tilesZ);
     int32_t maxTileZ = static_cast<int32_t>(((worldZ + radius) / terrainSize + 0.5f) * tilesZ);
 
-    // Clamp to valid range
     minTileX = std::max(0, minTileX);
     maxTileX = std::min(static_cast<int32_t>(tilesX - 1), maxTileX);
     minTileZ = std::max(0, minTileZ);
@@ -1022,7 +720,6 @@ void TerrainTileCache::preloadTilesAround(float worldX, float worldZ, float radi
     uint32_t tilesLoaded = 0;
     for (int32_t tz = minTileZ; tz <= maxTileZ; tz++) {
         for (int32_t tx = minTileX; tx <= maxTileX; tx++) {
-            // Calculate tile center for distance check
             float tileCenterX = ((static_cast<float>(tx) + 0.5f) / tilesX - 0.5f) * terrainSize;
             float tileCenterZ = ((static_cast<float>(tz) + 0.5f) / tilesZ - 0.5f) * terrainSize;
 
@@ -1043,290 +740,32 @@ void TerrainTileCache::preloadTilesAround(float worldX, float worldZ, float radi
             tilesLoaded, worldX, worldZ, radius);
 }
 
-int32_t TerrainTileCache::allocateArrayLayer() {
-    for (uint32_t i = 0; i < MAX_ACTIVE_TILES; i++) {
-        if (freeArrayLayers_[i]) {
-            freeArrayLayers_[i] = false;
-            return static_cast<int32_t>(i);
-        }
-    }
-    return -1;  // No free layers
-}
-
-void TerrainTileCache::freeArrayLayer(int32_t layerIndex) {
-    if (layerIndex >= 0 && layerIndex < static_cast<int32_t>(MAX_ACTIVE_TILES)) {
-        freeArrayLayers_[layerIndex] = true;
-    }
-}
-
 bool TerrainTileCache::loadBaseLODTiles() {
-    // Load all tiles at the coarsest LOD level (LOD3 typically)
-    // These tiles cover the entire terrain and are never unloaded
-    baseLOD_ = numLODLevels - 1;  // Use highest LOD number (coarsest resolution)
+    BaseHeightMap::InitInfo baseInfo{};
+    baseInfo.device = device;
+    baseInfo.allocator = allocator;
+    baseInfo.graphicsQueue = graphicsQueue;
+    baseInfo.commandPool = commandPool;
+    baseInfo.terrainSize = terrainSize;
+    baseInfo.heightScale = heightScale;
+    baseInfo.tileResolution = tileResolution;
+    baseInfo.tilesX = tilesX;
+    baseInfo.tilesZ = tilesZ;
+    baseInfo.numLODLevels = numLODLevels;
+    baseInfo.yieldCallback = yieldCallback_;
+    baseHeightMap_.init(baseInfo);
 
-    // Calculate number of tiles at base LOD level
-    uint32_t baseTilesX = tilesX >> baseLOD_;
-    uint32_t baseTilesZ = tilesZ >> baseLOD_;
-    if (baseTilesX < 1) baseTilesX = 1;
-    if (baseTilesZ < 1) baseTilesZ = 1;
-
-    SDL_Log("TerrainTileCache: Loading %ux%u base LOD tiles (LOD%u)...",
-            baseTilesX, baseTilesZ, baseLOD_);
-
-    baseTiles_.clear();
-    baseTiles_.reserve(baseTilesX * baseTilesZ);
-
-    uint32_t tilesLoaded = 0;
-    uint32_t tilesFailed = 0;
-    uint32_t totalTiles = baseTilesX * baseTilesZ;
-
-    for (uint32_t tz = 0; tz < baseTilesZ; tz++) {
-        for (uint32_t tx = 0; tx < baseTilesX; tx++) {
-            TileCoord coord{static_cast<int32_t>(tx), static_cast<int32_t>(tz)};
-
-            // Load with CPU data only first (no GPU resources yet)
-            if (loadTileCPUOnly(coord, baseLOD_)) {
-                uint64_t key = makeTileKey(coord, baseLOD_);
-                auto it = loadedTiles.find(key);
-                if (it != loadedTiles.end()) {
-                    baseTiles_.push_back(&it->second);
-                    tilesLoaded++;
-                }
-            } else {
-                tilesFailed++;
-            }
-
-            // Yield after each tile to allow loading screen to update
-            if (yieldCallback_) {
-                float progress = static_cast<float>(tilesLoaded + tilesFailed) / totalTiles * 0.5f;
-                yieldCallback_(progress, "Loading terrain tiles");
+    return baseHeightMap_.loadBaseLODTiles([this](int32_t tx, int32_t tz, uint32_t lod) -> TerrainTile* {
+        TileCoord coord{tx, tz};
+        if (loadTileCPUOnly(coord, lod)) {
+            uint64_t key = makeTileKey(coord, lod);
+            auto it = loadedTiles.find(key);
+            if (it != loadedTiles.end()) {
+                return &it->second;
             }
         }
-    }
-
-    SDL_Log("TerrainTileCache: Loaded %u/%u base LOD tiles (%u failed)",
-            tilesLoaded, totalTiles, tilesFailed);
-
-    if (tilesLoaded == 0) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
-                     "TerrainTileCache: Failed to load any base LOD tiles");
-        return false;
-    }
-
-    // Create combined base heightmap texture from base tiles
-    if (!createBaseHeightMap()) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
-                    "TerrainTileCache: Failed to create combined base heightmap");
-        // Not fatal - CPU queries will still work via sampleBaseLOD
-    }
-
-    return true;
-}
-
-bool TerrainTileCache::createBaseHeightMap() {
-    // Create a combined heightmap texture from all base LOD tiles
-    // This provides a single GPU texture for rendering fallback
-
-    uint32_t baseTilesX = tilesX >> baseLOD_;
-    uint32_t baseTilesZ = tilesZ >> baseLOD_;
-    if (baseTilesX < 1) baseTilesX = 1;
-    if (baseTilesZ < 1) baseTilesZ = 1;
-
-    // Calculate base heightmap resolution
-    // With 4x4 tiles at 512px each, native would be 2048x2048
-    // Use 1024x1024 as a good balance between quality and memory
-    // This preserves detail while using less VRAM than full native resolution
-    uint32_t nativeRes = std::max(baseTilesX, baseTilesZ) * tileResolution;
-    baseHeightMapResolution_ = std::min(nativeRes, 1024u);
-
-    // Create CPU data by sampling from base tiles
-    // Optimized: compute tile index directly instead of linear search (O(n²) vs O(n²·m))
-    baseHeightMapCpuData_.resize(baseHeightMapResolution_ * baseHeightMapResolution_);
-
-    // Precompute inverse for faster division
-    float invTerrainSize = 1.0f / terrainSize;
-
-    // Yield every N rows to keep loading screen responsive
-    constexpr uint32_t YIELD_INTERVAL = 32;
-
-    for (uint32_t y = 0; y < baseHeightMapResolution_; y++) {
-        for (uint32_t x = 0; x < baseHeightMapResolution_; x++) {
-            // Map pixel to world coordinates
-            float worldX = (static_cast<float>(x) / (baseHeightMapResolution_ - 1) - 0.5f) * terrainSize;
-            float worldZ = (static_cast<float>(y) / (baseHeightMapResolution_ - 1) - 0.5f) * terrainSize;
-
-            // Compute tile index directly from world position (tiles stored in row-major order)
-            float normalizedX = (worldX * invTerrainSize) + 0.5f;
-            float normalizedZ = (worldZ * invTerrainSize) + 0.5f;
-            int tileIdxX = std::clamp(static_cast<int>(normalizedX * baseTilesX), 0, static_cast<int>(baseTilesX) - 1);
-            int tileIdxZ = std::clamp(static_cast<int>(normalizedZ * baseTilesZ), 0, static_cast<int>(baseTilesZ) - 1);
-
-            size_t tileIdx = static_cast<size_t>(tileIdxZ * baseTilesX + tileIdxX);
-            float height = 0.0f;
-
-            if (tileIdx < baseTiles_.size()) {
-                const TerrainTile* tile = baseTiles_[tileIdx];
-                if (tile && !tile->cpuData.empty()) {
-                    // Calculate UV within tile and sample using helper
-                    float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
-                    float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
-                    // Infer actual resolution from tile data
-                    uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile->cpuData.size()));
-                    height = TerrainHeight::sampleBilinear(u, v, tile->cpuData.data(), actualRes);
-                }
-            }
-
-            baseHeightMapCpuData_[y * baseHeightMapResolution_ + x] = height;
-        }
-
-        // Yield periodically to allow loading screen to update
-        if (yieldCallback_ && (y % YIELD_INTERVAL) == 0) {
-            float progress = 0.5f + (static_cast<float>(y) / baseHeightMapResolution_) * 0.4f;
-            yieldCallback_(progress, "Building terrain heightmap");
-        }
-    }
-
-    // Create GPU image
-    {
-        ManagedImage image;
-        if (!ImageBuilder(allocator)
-                .setExtent(baseHeightMapResolution_, baseHeightMapResolution_)
-                .setFormat(VK_FORMAT_R32_SFLOAT)
-                .setUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-                .build(device, image, baseHeightMapView_)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create base heightmap image");
-            return false;
-        }
-        image.releaseToRaw(baseHeightMapImage_, baseHeightMapAllocation_);
-    }
-
-    // Upload to GPU
-    VkDeviceSize imageSize = baseHeightMapResolution_ * baseHeightMapResolution_ * sizeof(float);
-
-    ManagedBuffer stagingBuffer;
-    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
-        return false;
-    }
-
-    void* mappedData = stagingBuffer.map();
-    memcpy(mappedData, baseHeightMapCpuData_.data(), imageSize);
-    stagingBuffer.unmap();
-
-    CommandScope cmd(device, commandPool, graphicsQueue);
-    if (!cmd.begin()) return false;
-
-    vk::CommandBuffer vkCmd(cmd.get());
-
-    // Transition to transfer dst
-    {
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlags{})
-            .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
-            .setOldLayout(vk::ImageLayout::eUndefined)
-            .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(baseHeightMapImage_)
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1));
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
-                              vk::PipelineStageFlagBits::eTransfer,
-                              {}, {}, {}, barrier);
-    }
-
-    // Copy buffer to image
-    {
-        auto region = vk::BufferImageCopy{}
-            .setBufferOffset(0)
-            .setBufferRowLength(0)
-            .setBufferImageHeight(0)
-            .setImageSubresource(vk::ImageSubresourceLayers{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setMipLevel(0)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1))
-            .setImageOffset({0, 0, 0})
-            .setImageExtent({baseHeightMapResolution_, baseHeightMapResolution_, 1});
-        vkCmd.copyBufferToImage(stagingBuffer.get(), baseHeightMapImage_, vk::ImageLayout::eTransferDstOptimal, region);
-    }
-
-    // Transition to shader read
-    {
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
-            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(baseHeightMapImage_)
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(0)
-                .setLayerCount(1));
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-                              vk::PipelineStageFlagBits::eFragmentShader,
-                              {}, {}, {}, barrier);
-    }
-
-    if (!cmd.end()) return false;
-
-    SDL_Log("TerrainTileCache: Created base heightmap (%ux%u) from %zu base tiles",
-            baseHeightMapResolution_, baseHeightMapResolution_, baseTiles_.size());
-
-    return true;
-}
-
-bool TerrainTileCache::sampleBaseLOD(float worldX, float worldZ, float& outHeight) const {
-    // Sample height from base LOD tiles (fallback when no high-res tile covers position)
-    // Optimized: compute tile index directly instead of linear search
-
-    if (baseTiles_.empty()) return false;
-
-    // Compute tile grid dimensions at base LOD
-    uint32_t baseTilesX = tilesX >> baseLOD_;
-    uint32_t baseTilesZ = tilesZ >> baseLOD_;
-    if (baseTilesX < 1) baseTilesX = 1;
-    if (baseTilesZ < 1) baseTilesZ = 1;
-
-    // Compute tile index from world position
-    float invTerrainSize = 1.0f / terrainSize;
-    float normalizedX = (worldX * invTerrainSize) + 0.5f;
-    float normalizedZ = (worldZ * invTerrainSize) + 0.5f;
-    int tileIdxX = std::clamp(static_cast<int>(normalizedX * baseTilesX), 0, static_cast<int>(baseTilesX) - 1);
-    int tileIdxZ = std::clamp(static_cast<int>(normalizedZ * baseTilesZ), 0, static_cast<int>(baseTilesZ) - 1);
-
-    size_t tileIdx = static_cast<size_t>(tileIdxZ * baseTilesX + tileIdxX);
-    if (tileIdx >= baseTiles_.size()) return false;
-
-    const TerrainTile* tile = baseTiles_[tileIdx];
-    if (!tile || tile->cpuData.empty()) return false;
-
-    // Calculate UV within tile and sample using helper
-    float u = (worldX - tile->worldMinX) / (tile->worldMaxX - tile->worldMinX);
-    float v = (worldZ - tile->worldMinZ) / (tile->worldMaxZ - tile->worldMinZ);
-
-    // Infer actual resolution from tile data
-    uint32_t actualRes = static_cast<uint32_t>(std::sqrt(tile->cpuData.size()));
-
-    outHeight = TerrainHeight::sampleWorldHeight(u, v, tile->cpuData.data(),
-                                                  actualRes, heightScale);
-
-    // Debug: Log first few height queries from base LOD
-    static int baseLodDebugCount = 0;
-    if (baseLodDebugCount < 5) {
-        SDL_Log("getHeightAt(%.1f, %.1f): baseLOD LOD%u tile(%d,%d) uv(%.4f,%.4f) res=%u h=%.2f",
-                worldX, worldZ, tile->lod, tile->coord.x, tile->coord.z,
-                u, v, actualRes, outHeight);
-        baseLodDebugCount++;
-    }
-    return true;
+        return nullptr;
+    });
 }
 
 std::vector<const TerrainTile*> TerrainTileCache::getAllCPUTiles() const {
@@ -1341,241 +780,26 @@ std::vector<const TerrainTile*> TerrainTileCache::getAllCPUTiles() const {
 }
 
 // ============================================================================
-// Hole mask functionality (tiled array texture)
+// Hole mask delegation
 // ============================================================================
 
-bool TerrainTileCache::createHoleMaskArrayResources() {
-    // Create Vulkan 2D array image for hole mask (R8_UNORM: 0=solid, 255=hole)
-    // Same layer count as height tile array for 1:1 correspondence
-    {
-        ManagedImage image;
-        if (!ImageBuilder(allocator)
-                .setExtent(storedTileResolution, storedTileResolution)
-                .setFormat(VK_FORMAT_R8_UNORM)
-                .setArrayLayers(MAX_ACTIVE_TILES)
-                .setUsage(VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-                .build(device, image, holeMaskArrayView_)) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create hole mask array image");
-            return false;
-        }
-        image.releaseToRaw(holeMaskArrayImage_, holeMaskArrayAllocation_);
-    }
-
-    // Transition hole mask array to shader read layout
-    {
-        VkCommandBuffer cmd;
-        auto cmdAllocInfo = vk::CommandBufferAllocateInfo{}
-            .setCommandPool(commandPool)
-            .setLevel(vk::CommandBufferLevel::ePrimary)
-            .setCommandBufferCount(1);
-        vkAllocateCommandBuffers(device, reinterpret_cast<const VkCommandBufferAllocateInfo*>(&cmdAllocInfo), &cmd);
-
-        auto beginInfo = vk::CommandBufferBeginInfo{}
-            .setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
-        vkBeginCommandBuffer(cmd, reinterpret_cast<const VkCommandBufferBeginInfo*>(&beginInfo));
-
-        vk::CommandBuffer vkCmd(cmd);
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlags{})
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eUndefined)
-            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(holeMaskArrayImage_)
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(0)
-                .setLayerCount(MAX_ACTIVE_TILES));
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
-                              vk::PipelineStageFlagBits::eFragmentShader,
-                              {}, {}, {}, barrier);
-
-        vkEndCommandBuffer(cmd);
-
-        VkSubmitInfo submitInfo{};
-        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submitInfo.commandBufferCount = 1;
-        submitInfo.pCommandBuffers = &cmd;
-        vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-        vkQueueWaitIdle(graphicsQueue);
-        vkFreeCommandBuffers(device, commandPool, 1, &cmd);
-    }
-
-    // Create sampler (linear filtering for smooth edges) using factory
-    auto holeSampler = SamplerFactory::createSamplerLinearClamp(*raiiDevice_);
-    if (!holeSampler) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create hole mask sampler");
-        return false;
-    }
-    holeMaskSampler_ = std::move(*holeSampler);
-
-    SDL_Log("TerrainTileCache: Created hole mask array (%ux%u x %u layers)",
-            storedTileResolution, storedTileResolution, MAX_ACTIVE_TILES);
-
-    return true;
-}
-
-std::vector<uint8_t> TerrainTileCache::generateTileHoleMask(const TerrainTile& tile) const {
-    // Use TileGrid helper to rasterize holes for this specific tile
-    return TileGrid::rasterizeHolesForTile(
-        tile.worldMinX, tile.worldMinZ,
-        tile.worldMaxX, tile.worldMaxZ,
-        storedTileResolution, holes_);
-}
-
-void TerrainTileCache::uploadTileHoleMask(const TerrainTile& tile, int32_t layerIndex) {
-    if (layerIndex < 0 || layerIndex >= static_cast<int32_t>(MAX_ACTIVE_TILES)) return;
-
-    // Generate hole mask for this tile
-    std::vector<uint8_t> holeMaskData = generateTileHoleMask(tile);
-
-    // Create staging buffer
-    VkDeviceSize imageSize = holeMaskData.size() * sizeof(uint8_t);
-    ManagedBuffer stagingBuffer;
-    if (!VmaBufferFactory::createStagingBuffer(allocator, imageSize, stagingBuffer)) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "TerrainTileCache: Failed to create staging buffer for hole mask");
-        return;
-    }
-
-    // Copy data to staging buffer
-    void* mappedData = stagingBuffer.map();
-    memcpy(mappedData, holeMaskData.data(), imageSize);
-    stagingBuffer.unmap();
-
-    // Use CommandScope for one-time command submission
-    CommandScope cmd(device, commandPool, graphicsQueue);
-    if (!cmd.begin()) return;
-
-    vk::CommandBuffer vkCmd(cmd.get());
-
-    // Transition layer to transfer dst
-    {
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setDstAccessMask(vk::AccessFlagBits::eTransferWrite)
-            .setOldLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setNewLayout(vk::ImageLayout::eTransferDstOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(holeMaskArrayImage_)
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(static_cast<uint32_t>(layerIndex))
-                .setLayerCount(1));
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eFragmentShader,
-                              vk::PipelineStageFlagBits::eTransfer,
-                              {}, {}, {}, barrier);
-    }
-
-    // Copy buffer to image layer
-    {
-        auto region = vk::BufferImageCopy{}
-            .setBufferOffset(0)
-            .setBufferRowLength(0)
-            .setBufferImageHeight(0)
-            .setImageSubresource(vk::ImageSubresourceLayers{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setMipLevel(0)
-                .setBaseArrayLayer(static_cast<uint32_t>(layerIndex))
-                .setLayerCount(1))
-            .setImageOffset({0, 0, 0})
-            .setImageExtent({storedTileResolution, storedTileResolution, 1});
-        vkCmd.copyBufferToImage(stagingBuffer.get(), holeMaskArrayImage_,
-                                vk::ImageLayout::eTransferDstOptimal, region);
-    }
-
-    // Transition back to shader read
-    {
-        auto barrier = vk::ImageMemoryBarrier{}
-            .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
-            .setDstAccessMask(vk::AccessFlagBits::eShaderRead)
-            .setOldLayout(vk::ImageLayout::eTransferDstOptimal)
-            .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
-            .setSrcQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setDstQueueFamilyIndex(VK_QUEUE_FAMILY_IGNORED)
-            .setImage(holeMaskArrayImage_)
-            .setSubresourceRange(vk::ImageSubresourceRange{}
-                .setAspectMask(vk::ImageAspectFlagBits::eColor)
-                .setBaseMipLevel(0)
-                .setLevelCount(1)
-                .setBaseArrayLayer(static_cast<uint32_t>(layerIndex))
-                .setLayerCount(1));
-        vkCmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-                              vk::PipelineStageFlagBits::eFragmentShader,
-                              {}, {}, {}, barrier);
-    }
-
-    cmd.end();
-}
-
 bool TerrainTileCache::isHole(float x, float z) const {
-    return TileGrid::isPointInHole(x, z, holes_);
+    return holeMask_.isHole(x, z);
 }
 
 void TerrainTileCache::addHoleCircle(float centerX, float centerZ, float radius) {
-    holes_.push_back({centerX, centerZ, radius});
-
-    // Re-upload hole masks for all active tiles that might be affected
-    for (TerrainTile* tile : activeTiles) {
-        if (tile && tile->arrayLayerIndex >= 0) {
-            // Check if hole might intersect this tile
-            float closestX = std::clamp(centerX, tile->worldMinX, tile->worldMaxX);
-            float closestZ = std::clamp(centerZ, tile->worldMinZ, tile->worldMaxZ);
-            float dx = centerX - closestX;
-            float dz = centerZ - closestZ;
-            if (dx * dx + dz * dz <= radius * radius) {
-                uploadTileHoleMask(*tile, tile->arrayLayerIndex);
-            }
-        }
-    }
-
-    SDL_Log("TerrainTileCache: Added hole circle at (%.1f, %.1f) radius %.1f, total holes: %zu",
-            centerX, centerZ, radius, holes_.size());
+    holeMask_.addHoleCircle(centerX, centerZ, radius, activeTiles);
 }
 
 void TerrainTileCache::removeHoleCircle(float centerX, float centerZ, float radius) {
-    auto it = std::remove_if(holes_.begin(), holes_.end(), [&](const TerrainHole& h) {
-        return std::abs(h.centerX - centerX) < 0.1f &&
-               std::abs(h.centerZ - centerZ) < 0.1f &&
-               std::abs(h.radius - radius) < 0.1f;
-    });
-    if (it != holes_.end()) {
-        holes_.erase(it, holes_.end());
-
-        // Re-upload hole masks for all active tiles that might be affected
-        for (TerrainTile* tile : activeTiles) {
-            if (tile && tile->arrayLayerIndex >= 0) {
-                float closestX = std::clamp(centerX, tile->worldMinX, tile->worldMaxX);
-                float closestZ = std::clamp(centerZ, tile->worldMinZ, tile->worldMaxZ);
-                float dx = centerX - closestX;
-                float dz = centerZ - closestZ;
-                if (dx * dx + dz * dz <= radius * radius) {
-                    uploadTileHoleMask(*tile, tile->arrayLayerIndex);
-                }
-            }
-        }
-
-        SDL_Log("TerrainTileCache: Removed hole circle at (%.1f, %.1f), total holes: %zu",
-                centerX, centerZ, holes_.size());
-    }
+    holeMask_.removeHoleCircle(centerX, centerZ, radius, activeTiles);
 }
 
 std::vector<uint8_t> TerrainTileCache::rasterizeHolesForTile(
     float tileMinX, float tileMinZ, float tileMaxX, float tileMaxZ, uint32_t resolution) const {
-    // Delegate to TileGrid helper
-    return TileGrid::rasterizeHolesForTile(tileMinX, tileMinZ, tileMaxX, tileMaxZ, resolution, holes_);
+    return holeMask_.rasterizeHolesForTile(tileMinX, tileMinZ, tileMaxX, tileMaxZ, resolution);
 }
 
 void TerrainTileCache::uploadHoleMaskToGPU() {
-    // Re-upload hole masks for all active tiles
-    for (TerrainTile* tile : activeTiles) {
-        if (tile && tile->arrayLayerIndex >= 0) {
-            uploadTileHoleMask(*tile, tile->arrayLayerIndex);
-        }
-    }
+    holeMask_.uploadAllActiveMasks(activeTiles);
 }

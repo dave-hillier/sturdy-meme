@@ -13,10 +13,14 @@
 #include <limits>
 #include <optional>
 #include <functional>
-#include "VmaBuffer.h"
-#include "VmaImage.h"
+#include "core/vulkan/VmaBuffer.h"
+#include "core/vulkan/VmaImage.h"
 #include "core/FrameBuffered.h"
 #include "TileGridLogic.h"
+#include "TileArrayManager.h"
+#include "HoleMaskManager.h"
+#include "TileInfoBuffer.h"
+#include "BaseHeightMap.h"
 
 // Use types from TileGridLogic for consistency
 using TileCoord = TileGrid::TileCoord;
@@ -48,14 +52,9 @@ struct TerrainTile {
     int32_t arrayLayerIndex = -1;
 };
 
-// Tile info for GPU (matches shader buffer layout)
-struct TileInfoGPU {
-    glm::vec4 worldBounds;  // xy = min corner, zw = max corner
-    glm::vec4 uvScaleOffset; // xy = scale, zw = offset (for UV calculation)
-    glm::ivec4 layerIndex;  // x = layer index in tile array, yzw = padding (std140 alignment)
-};
-
 // Terrain tile cache - manages LOD-based tile streaming
+// Composes TileArrayManager, HoleMaskManager, TileInfoBuffer, and BaseHeightMap
+// for separation of concerns while presenting a unified public API.
 class TerrainTileCache {
 public:
     // Passkey for controlled construction via make_unique
@@ -127,7 +126,7 @@ public:
     VkSampler getSampler() const { return sampler_ ? **sampler_ : VK_NULL_HANDLE; }
 
     // Get tile array image view (sampler2DArray)
-    VkImageView getTileArrayView() const { return tileArrayView; }
+    VkImageView getTileArrayView() const { return tileArray_.getArrayView(); }
 
     // Get active tile count and descriptors for shader binding
     uint32_t getActiveTileCount() const { return static_cast<uint32_t>(activeTiles.size()); }
@@ -142,7 +141,7 @@ public:
     // The buffer is written by CPU during updateActiveTiles() and read by GPU shaders.
     // Using the wrong frame's buffer causes flickering artifacts.
     VkBuffer getTileInfoBuffer(uint32_t frameIndex) const {
-        return tileInfoBuffers_.at(frameIndex).get();
+        return tileInfoBuffer_.getBuffer(frameIndex);
     }
 
     // Update which frame we're writing to (call during updateActiveTiles)
@@ -181,24 +180,24 @@ public:
     bool loadBaseLODTiles();
 
     // Check if base LOD tiles are loaded
-    bool hasBaseLODTiles() const { return !baseTiles_.empty(); }
+    bool hasBaseLODTiles() const { return baseHeightMap_.hasBaseTiles(); }
 
     // Get base heightmap texture (combined from LOD3 tiles) for GPU fallback
-    VkImageView getBaseHeightMapView() const { return baseHeightMapView_; }
+    VkImageView getBaseHeightMapView() const { return baseHeightMap_.getHeightMapView(); }
     VkSampler getBaseHeightMapSampler() const { return sampler_ ? **sampler_ : VK_NULL_HANDLE; }
 
     // Get base heightmap CPU data for fallback height queries
-    const std::vector<float>& getBaseHeightMapData() const { return baseHeightMapCpuData_; }
-    uint32_t getBaseHeightMapResolution() const { return baseHeightMapResolution_; }
+    const std::vector<float>& getBaseHeightMapData() const { return baseHeightMap_.getHeightMapData(); }
+    uint32_t getBaseHeightMapResolution() const { return baseHeightMap_.getHeightMapResolution(); }
 
     // Hole mask GPU resource accessors (tiled array texture)
-    VkImageView getHoleMaskArrayView() const { return holeMaskArrayView_; }
-    VkSampler getHoleMaskSampler() const { return holeMaskSampler_ ? **holeMaskSampler_ : VK_NULL_HANDLE; }
+    VkImageView getHoleMaskArrayView() const { return holeMask_.getArrayView(); }
+    VkSampler getHoleMaskSampler() const { return holeMask_.getSampler(); }
 
     // Hole management - geometric primitives rasterized on demand
     void addHoleCircle(float centerX, float centerZ, float radius);
     void removeHoleCircle(float centerX, float centerZ, float radius);
-    const std::vector<TerrainHole>& getHoles() const { return holes_; }
+    const std::vector<TerrainHole>& getHoles() const { return holeMask_.getHoles(); }
 
     // Query if a point is inside any hole (analytical, not rasterized)
     bool isHole(float x, float z) const;
@@ -234,12 +233,6 @@ private:
     // Upload tile data to GPU
     bool uploadTileToGPU(TerrainTile& tile);
 
-    // Update tile info buffer for shaders
-    void updateTileInfoBuffer();
-
-    // Copy tile data to a specific layer of the tile array texture
-    void copyTileToArrayLayer(TerrainTile* tile, uint32_t layerIndex);
-
     // Get appropriate LOD level for distance
     uint32_t getLODForDistance(float distance) const;
 
@@ -259,6 +252,12 @@ private:
     // Calculate world bounds for a tile at given LOD
     void calculateTileWorldBounds(TileCoord coord, uint32_t lod, TerrainTile& tile) const;
 
+    // Sub-components (composition)
+    TileArrayManager tileArray_;
+    HoleMaskManager holeMask_;
+    TileInfoBuffer tileInfoBuffer_;
+    BaseHeightMap baseHeightMap_;
+
     // Vulkan resources
     const vk::raii::Device* raiiDevice_ = nullptr;
     VkDevice device = VK_NULL_HANDLE;
@@ -270,15 +269,7 @@ private:
     // Yield callback for long operations (allows loading screen to update)
     YieldCallback yieldCallback_;
 
-    // Tile info buffers for shader (RAII-managed, triple-buffered for frames-in-flight)
-    TripleBuffered<ManagedBuffer> tileInfoBuffers_;
-    std::array<void*, FRAMES_IN_FLIGHT> tileInfoMappedPtrs_ = {};  // Raw pointers, no lifecycle management
     uint32_t currentFrameIndex_ = 0;
-
-    // Tile array texture (sampler2DArray) for shader - holds all active tiles
-    VkImage tileArrayImage = VK_NULL_HANDLE;
-    VmaAllocation tileArrayAllocation = VK_NULL_HANDLE;
-    VkImageView tileArrayView = VK_NULL_HANDLE;
 
     // Configuration from metadata
     std::string cacheDirectory;
@@ -301,45 +292,4 @@ private:
 
     // Maximum active tiles (limits GPU memory usage)
     static constexpr uint32_t MAX_ACTIVE_TILES = 64;
-
-    // Track which array layers are free (true = free, false = occupied)
-    std::array<bool, MAX_ACTIVE_TILES> freeArrayLayers_;
-
-    // Allocate a free layer in the tile array texture, returns -1 if none available
-    int32_t allocateArrayLayer();
-
-    // Free a layer in the tile array texture
-    void freeArrayLayer(int32_t layerIndex);
-
-    // Base LOD tiles (coarsest level, covering entire terrain, never unloaded)
-    std::vector<TerrainTile*> baseTiles_;
-    uint32_t baseLOD_ = 0;  // The LOD level used for base tiles (typically numLODLevels - 1)
-
-    // Combined base heightmap (created from base LOD tiles)
-    VkImage baseHeightMapImage_ = VK_NULL_HANDLE;
-    VmaAllocation baseHeightMapAllocation_ = VK_NULL_HANDLE;
-    VkImageView baseHeightMapView_ = VK_NULL_HANDLE;
-    std::vector<float> baseHeightMapCpuData_;
-    uint32_t baseHeightMapResolution_ = 512;  // Combined base heightmap resolution
-
-    // Create combined base heightmap from base LOD tiles
-    bool createBaseHeightMap();
-
-    // Sample height from base LOD tiles (fallback when no high-res tile covers position)
-    bool sampleBaseLOD(float worldX, float worldZ, float& outHeight) const;
-
-    // Hole mask tile array (sampler2DArray, R8_UNORM: 0=solid, 255=hole)
-    // Uses same layer indices as height tile array for 1:1 correspondence
-    VkImage holeMaskArrayImage_ = VK_NULL_HANDLE;
-    VmaAllocation holeMaskArrayAllocation_ = VK_NULL_HANDLE;
-    VkImageView holeMaskArrayView_ = VK_NULL_HANDLE;
-    std::optional<vk::raii::Sampler> holeMaskSampler_;
-
-    // Hole definitions - geometric primitives
-    std::vector<TerrainHole> holes_;
-
-    // Hole mask helper methods
-    bool createHoleMaskArrayResources();
-    void uploadTileHoleMask(const TerrainTile& tile, int32_t layerIndex);
-    std::vector<uint8_t> generateTileHoleMask(const TerrainTile& tile) const;
 };
