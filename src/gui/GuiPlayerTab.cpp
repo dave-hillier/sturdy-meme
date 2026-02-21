@@ -89,18 +89,19 @@ void GuiPlayerTab::renderCharacterLOD(IPlayerControl& playerControl, PlayerSetti
     ImGui::Spacing();
 
     ImGui::Checkbox("Force LOD Level", &settings.forceLODLevel);
-    if (settings.forceLODLevel) {
-        int forcedLOD = static_cast<int>(settings.forcedLOD);
-        if (ImGui::SliderInt("Forced LOD", &forcedLOD, 0, 3, lodNames[forcedLOD])) {
-            settings.forcedLOD = static_cast<uint32_t>(forcedLOD);
-        }
-        character.setLODLevel(settings.forcedLOD);
+    ImGui::BeginDisabled(!settings.forceLODLevel);
+    int forcedLOD = static_cast<int>(settings.forcedLOD);
+    if (ImGui::SliderInt("Forced LOD", &forcedLOD, 0, 3, lodNames[forcedLOD])) {
+        settings.forcedLOD = static_cast<uint32_t>(forcedLOD);
+    }
+    ImGui::EndDisabled();
 
+    if (settings.forceLODLevel) {
+        character.setLODLevel(settings.forcedLOD);
         bool shouldSkip = (settings.forcedLOD >= 2);
         character.setSkipAnimationUpdate(shouldSkip);
-
-        ImGui::SameLine();
         if (shouldSkip) {
+            ImGui::SameLine();
             ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "(anim frozen)");
         }
     } else {
@@ -241,105 +242,105 @@ void GuiPlayerTab::renderMotionMatching(IPlayerControl& playerControl, PlayerSet
     // Sync the checkbox with actual state
     settings.motionMatchingEnabled = character.isUsingMotionMatching();
 
-    if (character.isUsingMotionMatching()) {
-        // Facing mode
-        auto& controller = const_cast<MotionMatching::MotionMatchingController&>(
-            character.getMotionMatchingController());
+    bool mmActive = character.isUsingMotionMatching();
 
-        const char* facingModeItems[] = { "Follow Movement", "Follow Camera", "Follow Target" };
-        int currentFacingMode = static_cast<int>(settings.facingMode);
-        FacingMode prevMode = settings.facingMode;
-        if (ImGui::Combo("Facing Mode", &currentFacingMode, facingModeItems, IM_ARRAYSIZE(facingModeItems))) {
-            settings.facingMode = static_cast<FacingMode>(currentFacingMode);
+    ImGui::BeginDisabled(!mmActive);
+
+    // Facing mode
+    const char* facingModeItems[] = { "Follow Movement", "Follow Camera", "Follow Target" };
+    int currentFacingMode = static_cast<int>(settings.facingMode);
+    FacingMode prevMode = settings.facingMode;
+    if (ImGui::Combo("Facing Mode", &currentFacingMode, facingModeItems, IM_ARRAYSIZE(facingModeItems))) {
+        settings.facingMode = static_cast<FacingMode>(currentFacingMode);
+        if (mmActive) {
+            auto& controller = const_cast<MotionMatching::MotionMatchingController&>(
+                character.getMotionMatchingController());
             bool isStrafeMode = (settings.facingMode != FacingMode::FollowMovement);
             controller.setStrafeMode(isStrafeMode);
-            if (prevMode == FacingMode::FollowTarget && settings.facingMode != FacingMode::FollowTarget) {
-                settings.hasTarget = false;
-            }
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Follow Movement: Character turns to face movement direction\n"
-                              "Follow Camera: Character faces camera (strafe mode)\n"
-                              "Follow Target: Character faces a target position (lock-on)\n\n"
-                              "Quick toggle: CapsLock or B button (gamepad)\n"
-                              "Hold: Middle mouse or Left Trigger");
-        }
-
-        if (settings.facingMode == FacingMode::FollowTarget) {
-            if (settings.hasTarget) {
-                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
-                    "Target: (%.1f, %.1f, %.1f)",
-                    settings.targetPosition.x, settings.targetPosition.y, settings.targetPosition.z);
-            } else {
-                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Target will be placed 5m ahead");
-            }
-        }
-
-        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Tab: Toggle 3rd Person Camera");
-        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "P: Toggle Orbit Camera");
-
-        if (settings.facingMode == FacingMode::FollowCamera) {
-            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "FOLLOW CAMERA ACTIVE");
-        } else if (settings.facingMode == FacingMode::FollowTarget && settings.hasTarget) {
-            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "FOLLOW TARGET ACTIVE");
-        }
-
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        ImGui::Checkbox("Show Trajectory", &settings.showMotionMatchingTrajectory);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Visualize predicted (cyan) and matched (green) trajectories");
-        }
-
-        ImGui::Checkbox("Show Features", &settings.showMotionMatchingFeatures);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Show feature bone positions used for matching");
-        }
-
-        ImGui::Checkbox("Show Stats", &settings.showMotionMatchingStats);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Display motion matching cost statistics");
-        }
-
-        ImGui::Spacing();
-
-        const auto& stats = character.getMotionMatchingStats();
-
-        ImGui::Text("Current Clip:");
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.2f, 1.0f), "%s", stats.currentClipName.c_str());
-
-        ImGui::Text("Clip Time: %.2fs", stats.currentClipTime);
-
-        float costThreshold = 2.0f;
-        ImVec4 costColor = stats.lastMatchCost < costThreshold ?
-                           ImVec4(0.2f, 1.0f, 0.2f, 1.0f) :
-                           ImVec4(1.0f, 0.5f, 0.2f, 1.0f);
-
-        ImGui::Text("Match Cost:");
-        ImGui::SameLine();
-        ImGui::TextColored(costColor, "%.3f", stats.lastMatchCost);
-
-        if (ImGui::TreeNode("Cost Breakdown")) {
-            ImGui::Text("Trajectory: %.3f", stats.lastTrajectoryCost);
-            ImGui::Text("Pose: %.3f", stats.lastPoseCost);
-            ImGui::Text("Heading: %.3f", stats.lastHeadingCost);
-            ImGui::Text("Bias: %.3f", stats.lastBiasCost);
-            ImGui::Text("Matches/sec: %zu", stats.matchesThisSecond);
-            ImGui::Text("Database poses: %zu", stats.posesSearched);
-            ImGui::TreePop();
-        }
-    } else {
-        ImGui::TextDisabled("Enable to see motion matching options");
-
-        const auto& controller = character.getMotionMatchingController();
-        if (controller.isDatabaseBuilt()) {
-            const auto& db = controller.getDatabase();
-            ImGui::Text("Database: %zu poses from %zu clips",
-                       db.getPoseCount(), db.getClipCount());
+        if (prevMode == FacingMode::FollowTarget && settings.facingMode != FacingMode::FollowTarget) {
+            settings.hasTarget = false;
         }
     }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Follow Movement: Character turns to face movement direction\n"
+                          "Follow Camera: Character faces camera (strafe mode)\n"
+                          "Follow Target: Character faces a target position (lock-on)\n\n"
+                          "Quick toggle: CapsLock or B button (gamepad)\n"
+                          "Hold: Middle mouse or Left Trigger");
+    }
+
+    if (settings.facingMode == FacingMode::FollowTarget) {
+        if (settings.hasTarget) {
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f),
+                "Target: (%.1f, %.1f, %.1f)",
+                settings.targetPosition.x, settings.targetPosition.y, settings.targetPosition.z);
+        } else {
+            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Target will be placed 5m ahead");
+        }
+    }
+
+    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Tab: Toggle 3rd Person Camera");
+    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "P: Toggle Orbit Camera");
+
+    if (settings.facingMode == FacingMode::FollowCamera) {
+        ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "FOLLOW CAMERA ACTIVE");
+    } else if (settings.facingMode == FacingMode::FollowTarget && settings.hasTarget) {
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "FOLLOW TARGET ACTIVE");
+    }
+
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::Checkbox("Show Trajectory", &settings.showMotionMatchingTrajectory);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Visualize predicted (cyan) and matched (green) trajectories");
+    }
+
+    ImGui::Checkbox("Show Features", &settings.showMotionMatchingFeatures);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Show feature bone positions used for matching");
+    }
+
+    ImGui::Checkbox("Show Stats", &settings.showMotionMatchingStats);
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Display motion matching cost statistics");
+    }
+
+    ImGui::Spacing();
+
+    const auto& stats = character.getMotionMatchingStats();
+
+    ImGui::Text("Current Clip:");
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.2f, 1.0f), "%s", stats.currentClipName.c_str());
+
+    ImGui::Text("Clip Time: %.2fs", stats.currentClipTime);
+
+    float costThreshold = 2.0f;
+    ImVec4 costColor = stats.lastMatchCost < costThreshold ?
+                       ImVec4(0.2f, 1.0f, 0.2f, 1.0f) :
+                       ImVec4(1.0f, 0.5f, 0.2f, 1.0f);
+
+    ImGui::Text("Match Cost:");
+    ImGui::SameLine();
+    ImGui::TextColored(costColor, "%.3f", stats.lastMatchCost);
+
+    ImGui::Text("Trajectory: %.3f", stats.lastTrajectoryCost);
+    ImGui::Text("Pose: %.3f", stats.lastPoseCost);
+    ImGui::Text("Heading: %.3f", stats.lastHeadingCost);
+    ImGui::Text("Bias: %.3f", stats.lastBiasCost);
+    ImGui::Text("Matches/sec: %zu", stats.matchesThisSecond);
+    ImGui::Text("Database poses: %zu", stats.posesSearched);
+
+    const auto& controller = character.getMotionMatchingController();
+    if (controller.isDatabaseBuilt()) {
+        const auto& db = controller.getDatabase();
+        ImGui::Text("Database: %zu poses from %zu clips",
+                   db.getPoseCount(), db.getClipCount());
+    }
+
+    ImGui::EndDisabled();
 }
 
 // Helper to project world position to screen coordinates

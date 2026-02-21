@@ -32,27 +32,27 @@ void GuiDebugTab::renderVisualizations(IDebugControl& debugControl) {
         ImGui::SetTooltip("Shows road and river paths with directional cones");
     }
 
-    if (roadRiverVis) {
-        ImGui::Indent();
+    ImGui::BeginDisabled(!roadRiverVis);
+    ImGui::Indent();
 
-        bool showRoads = debugControl.isRoadVisualizationEnabled();
-        if (ImGui::Checkbox("Show Roads", &showRoads)) {
-            debugControl.setRoadVisualizationEnabled(showRoads);
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Show road paths as bidirectional orange cones");
-        }
-
-        bool showRivers = debugControl.isRiverVisualizationEnabled();
-        if (ImGui::Checkbox("Show Rivers", &showRivers)) {
-            debugControl.setRiverVisualizationEnabled(showRivers);
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Show river paths as blue cones pointing downstream");
-        }
-
-        ImGui::Unindent();
+    bool showRoads = debugControl.isRoadVisualizationEnabled();
+    if (ImGui::Checkbox("Show Roads", &showRoads)) {
+        debugControl.setRoadVisualizationEnabled(showRoads);
     }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Show road paths as bidirectional orange cones");
+    }
+
+    bool showRivers = debugControl.isRiverVisualizationEnabled();
+    if (ImGui::Checkbox("Show Rivers", &showRivers)) {
+        debugControl.setRiverVisualizationEnabled(showRivers);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Show river paths as blue cones pointing downstream");
+    }
+
+    ImGui::Unindent();
+    ImGui::EndDisabled();
 }
 
 void GuiDebugTab::renderPhysicsDebug(IDebugControl& debugControl) {
@@ -65,50 +65,48 @@ void GuiDebugTab::renderPhysicsDebug(IDebugControl& debugControl) {
         ImGui::SetTooltip("Draw Jolt Physics collision shapes and debug info");
     }
 
-    if (physicsDebug) {
-        auto* debugRenderer = debugControl.getPhysicsDebugRenderer();
-        if (debugRenderer) {
-            auto& options = debugRenderer->getOptions();
+    ImGui::BeginDisabled(!physicsDebug);
+    auto* debugRenderer = debugControl.getPhysicsDebugRenderer();
+    if (debugRenderer) {
+        auto& options = debugRenderer->getOptions();
 
-            ImGui::Checkbox("Draw Shapes", &options.drawShapes);
-            ImGui::Checkbox("Wireframe", &options.drawShapeWireframe);
-            ImGui::Checkbox("Bounding Boxes", &options.drawBoundingBox);
-            ImGui::Checkbox("Velocity", &options.drawVelocity);
-            ImGui::Checkbox("Center of Mass", &options.drawCenterOfMassTransform);
+        ImGui::Checkbox("Draw Shapes", &options.drawShapes);
+        ImGui::Checkbox("Wireframe", &options.drawShapeWireframe);
+        ImGui::Checkbox("Bounding Boxes", &options.drawBoundingBox);
+        ImGui::Checkbox("Velocity", &options.drawVelocity);
+        ImGui::Checkbox("Center of Mass", &options.drawCenterOfMassTransform);
 
-            ImGui::Spacing();
-            ImGui::Text("Body Types:");
-            ImGui::Checkbox("Static", &options.drawStaticBodies);
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Warning: Static bodies include terrain heightfields which are very slow to render");
-            }
-            ImGui::Checkbox("Dynamic", &options.drawDynamicBodies);
-            ImGui::Checkbox("Kinematic", &options.drawKinematicBodies);
-            ImGui::Checkbox("Character", &options.drawCharacter);
-        } else {
-            ImGui::TextDisabled("Enable to see options");
-        }
-
-        // Show stats
-        auto& debugLines = debugControl.getDebugLineSystem();
         ImGui::Spacing();
-        ImGui::Text("Lines: %zu", debugLines.getLineCount());
-        ImGui::Text("Triangles: %zu", debugLines.getTriangleCount());
-
-        // Ragdoll spawning
-        ImGui::Spacing();
-        if (ImGui::Button("Spawn Ragdoll")) {
-            debugControl.spawnRagdoll();
-        }
+        ImGui::Text("Body Types:");
+        ImGui::Checkbox("Static", &options.drawStaticBodies);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Drop an articulated ragdoll from 5m above player (also: R key)");
+            ImGui::SetTooltip("Warning: Static bodies include terrain heightfields which are very slow to render");
         }
-        int ragdollCount = debugControl.getActiveRagdollCount();
-        if (ragdollCount > 0) {
-            ImGui::SameLine();
-            ImGui::Text("Active: %d", ragdollCount);
-        }
+        ImGui::Checkbox("Dynamic", &options.drawDynamicBodies);
+        ImGui::Checkbox("Kinematic", &options.drawKinematicBodies);
+        ImGui::Checkbox("Character", &options.drawCharacter);
     }
+
+    // Show stats
+    auto& debugLines = debugControl.getDebugLineSystem();
+    ImGui::Spacing();
+    ImGui::Text("Lines: %zu", debugLines.getLineCount());
+    ImGui::Text("Triangles: %zu", debugLines.getTriangleCount());
+
+    // Ragdoll spawning
+    ImGui::Spacing();
+    if (ImGui::Button("Spawn Ragdoll")) {
+        debugControl.spawnRagdoll();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Drop an articulated ragdoll from 5m above player (also: R key)");
+    }
+    int ragdollCount = debugControl.getActiveRagdollCount();
+    if (ragdollCount > 0) {
+        ImGui::SameLine();
+        ImGui::Text("Active: %d", ragdollCount);
+    }
+    ImGui::EndDisabled();
 #else
     (void)debugControl;
     ImGui::TextDisabled("Physics debug not available (JPH_DEBUG_RENDERER not defined)");
