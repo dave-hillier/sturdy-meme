@@ -15,6 +15,7 @@ class AtmosphereLUTSystem;
 class CloudShadowSystem;
 class PostProcessSystem;
 class RendererSystems;
+class ResizeCoordinator;
 
 /**
  * AtmosphereSystemGroup - Groups atmosphere-related rendering systems
@@ -105,6 +106,10 @@ struct AtmosphereSystemGroup {
      * Combines createAll() + registerAll() so callers don't need concrete type includes.
      */
     static bool createAndRegister(const CreateDeps& deps, RendererSystems& systems);
+
+    /** Register atmosphere systems for resize and temporal history. */
+    static void registerResize(ResizeCoordinator& coord, RendererSystems& systems);
+    static void registerTemporalSystems(RendererSystems& systems);
 
     /**
      * Wire atmosphere systems to dependent systems.

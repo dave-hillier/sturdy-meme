@@ -13,6 +13,7 @@ class VolumetricSnowSystem;
 class WeatherSystem;
 class LeafSystem;
 class RendererSystems;
+class ResizeCoordinator;
 
 /**
  * SnowSystemGroup - Groups snow and weather-related rendering systems
@@ -83,4 +84,7 @@ struct SnowSystemGroup {
     static std::optional<Bundle> createAll(const CreateDeps& deps);
 
     static bool createAndRegister(const CreateDeps& deps, RendererSystems& systems);
+
+    /** Register snow/weather systems for resize. */
+    static void registerResize(ResizeCoordinator& coord, RendererSystems& systems);
 };

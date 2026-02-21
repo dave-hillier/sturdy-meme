@@ -7,6 +7,7 @@
 #include "FroxelSystem.h"
 #include "PostProcessSystem.h"
 #include "RendererSystems.h"
+#include "ResizeCoordinator.h"
 #include "core/vulkan/CommandBufferUtils.h"
 #include <glm/glm.hpp>
 #include <SDL3/SDL.h>
@@ -98,6 +99,17 @@ std::optional<AtmosphereSystemGroup::Bundle> AtmosphereSystemGroup::createAll(
 
     SDL_Log("AtmosphereSystemGroup: All systems created successfully");
     return bundle;
+}
+
+void AtmosphereSystemGroup::registerResize(ResizeCoordinator& coord, RendererSystems& systems) {
+    coord.registerWithSimpleResize(systems.froxel(), "FroxelSystem", ResizePriority::RenderTarget);
+    coord.registerWithExtent(systems.sky(), "SkySystem");
+}
+
+void AtmosphereSystemGroup::registerTemporalSystems(RendererSystems& systems) {
+    if (systems.hasFroxel()) {
+        systems.registerTemporalSystem(&systems.froxel());
+    }
 }
 
 void AtmosphereSystemGroup::wireToPostProcess(

@@ -19,6 +19,7 @@ class TreeLODSystem;
 class ImpostorCullSystem;
 class ScatterSystem;
 class RendererSystems;
+class ResizeCoordinator;
 
 /**
  * VegetationSystemGroup - Groups vegetation-related rendering systems
@@ -124,4 +125,8 @@ struct VegetationSystemGroup {
     static std::optional<Bundle> createAll(const CreateDeps& deps);
 
     static bool createAndRegister(const CreateDeps& deps, RendererSystems& systems);
+
+    /** Register vegetation systems for resize and temporal history. */
+    static void registerResize(ResizeCoordinator& coord, RendererSystems& systems);
+    static void registerTemporalSystems(RendererSystems& systems);
 };

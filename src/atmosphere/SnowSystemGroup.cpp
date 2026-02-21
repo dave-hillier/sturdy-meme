@@ -6,6 +6,7 @@
 #include "WeatherSystem.h"
 #include "LeafSystem.h"
 #include "RendererSystems.h"
+#include "ResizeCoordinator.h"
 #include <SDL3/SDL.h>
 
 void SnowSystemGroup::Bundle::registerAll(RendererSystems& systems) {
@@ -51,4 +52,9 @@ std::optional<SnowSystemGroup::Bundle> SnowSystemGroup::createAll(
 
     SDL_Log("SnowSystemGroup: All systems created successfully");
     return bundle;
+}
+
+void SnowSystemGroup::registerResize(ResizeCoordinator& coord, RendererSystems& systems) {
+    coord.registerWithExtent(systems.weather(), "WeatherSystem");
+    coord.registerWithExtent(systems.leaf(), "LeafSystem");
 }

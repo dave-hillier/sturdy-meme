@@ -3,6 +3,7 @@
 #include "GeometrySystemGroup.h"
 #include "CatmullClarkSystem.h"
 #include "RendererSystems.h"
+#include "ResizeCoordinator.h"
 #include <SDL3/SDL.h>
 
 void GeometrySystemGroup::Bundle::registerAll(RendererSystems& systems) {
@@ -80,4 +81,8 @@ std::optional<GeometrySystemGroup::Bundle> GeometrySystemGroup::createAll(
 
     SDL_Log("GeometrySystemGroup: All systems created successfully");
     return bundle;
+}
+
+void GeometrySystemGroup::registerResize(ResizeCoordinator& coord, RendererSystems& systems) {
+    coord.registerWithExtent(systems.catmullClark(), "CatmullClarkSystem");
 }

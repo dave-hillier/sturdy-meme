@@ -6,50 +6,37 @@
 #include "Renderer.h"
 #include "core/loading/AsyncSystemLoader.h"
 #include "MaterialDescriptorFactory.h"
+// Core systems
 #include "PostProcessSystem.h"
 #include "BloomSystem.h"
 #include "BilateralGridSystem.h"
 #include "GodRaysSystem.h"
-#include "SkySystem.h"
 #include "GlobalBufferManager.h"
 #include "ShadowSystem.h"
 #include "TerrainSystem.h"
-#include "GrassSystem.h"
-// DisplacementSystem.h - removed: registration now in VegetationSystemGroup::Bundle::registerAll()
-#include "WeatherSystem.h"
+#include "SkySystem.h"
 #include "SnowMaskSystem.h"
-#include "VolumetricSnowSystem.h"
-#include "LeafSystem.h"
-#include "FroxelSystem.h"
-#include "AtmosphereLUTSystem.h"
-#include "CloudShadowSystem.h"
-#include "AtmosphereSystemGroup.h"
-#include "SnowSystemGroup.h"
-#include "GeometrySystemGroup.h"
 #include "HiZSystem.h"
 #include "GPUSceneBuffer.h"
 #include "culling/GPUCullPass.h"
-#include "ScatterSystem.h"
-#include "ScatterSystemFactory.h"
-// TreeSystem.h, TreeRenderer.h, TreeLODSystem.h - removed: registration now in VegetationSystemGroup::Bundle::registerAll()
-#include "ThreadedTreeGenerator.h"
-#include "ImpostorCullSystem.h"
-#include "VegetationContentGenerator.h"
-#include "VegetationSystemGroup.h"
-#include "DeferredTerrainObjects.h"
-#include "WaterSystem.h"
-#include "WaterDisplacement.h"
-#include "FlowMapGenerator.h"
-#include "FoamBuffer.h"
-#include "WaterTileCull.h"
-#include "WaterGBuffer.h"
-#include "WaterSystemGroup.h"
-#include "SSRSystem.h"
 #include "DebugLineSystem.h"
 #include "Profiler.h"
 #include "InitProfiler.h"
 #include "SkinnedMeshRenderer.h"
 #include "SceneManager.h"
+#include "ScreenSpaceShadowSystem.h"
+// System groups (concrete system includes moved into group .cpp files)
+#include "AtmosphereSystemGroup.h"
+#include "SnowSystemGroup.h"
+#include "GeometrySystemGroup.h"
+#include "VegetationSystemGroup.h"
+#include "WaterSystemGroup.h"
+// Vegetation content
+#include "ScatterSystemFactory.h"
+#include "ThreadedTreeGenerator.h"
+#include "VegetationContentGenerator.h"
+#include "DeferredTerrainObjects.h"
+// Infrastructure
 #include "ErosionDataLoader.h"
 #include "RoadNetworkLoader.h"
 #include "RoadRiverVisualization.h"
@@ -58,10 +45,8 @@
 #include "CelestialCalculator.h"
 #include "EnvironmentSettings.h"
 #include "UBOBuilder.h"
-#include "WindSystem.h"
 #include "SystemWiring.h"
 #include "CoreResources.h"
-#include "ScreenSpaceShadowSystem.h"
 #include "TerrainFactory.h"
 #include "threading/TaskScheduler.h"
 #include <SDL3/SDL.h>
@@ -688,30 +673,25 @@ void Renderer::initResizeCoordinator() {
     // Register systems with resize coordinator
     // Order matters: render targets first, then systems that depend on them, then viewport-only
 
-    // Render targets that need resize (reallocate GPU resources)
+    // Core render targets (not in any system group)
     resizeCoordinator_->registerWithSimpleResize(systems_->postProcess(), "PostProcessSystem", ResizePriority::RenderTarget);
     resizeCoordinator_->registerWithSimpleResize(systems_->bloom(), "BloomSystem", ResizePriority::RenderTarget);
     if (systems_->hasGodRays()) {
         resizeCoordinator_->registerWithSimpleResize(systems_->godRays(), "GodRaysSystem", ResizePriority::RenderTarget);
     }
-    resizeCoordinator_->registerWithSimpleResize(systems_->froxel(), "FroxelSystem", ResizePriority::RenderTarget);
 
-    // Culling systems with simple resize (extent only, but reallocates)
+    // Core culling
     resizeCoordinator_->registerWithSimpleResize(systems_->hiZ(), "HiZSystem", ResizePriority::Culling);
-    resizeCoordinator_->registerWithSimpleResize(systems_->ssr(), "SSRSystem", ResizePriority::Culling);
-    resizeCoordinator_->registerWithSimpleResize(systems_->waterTileCull(), "WaterTileCull", ResizePriority::Culling);
 
-    // G-buffer systems
-    resizeCoordinator_->registerWithSimpleResize(systems_->waterGBuffer(), "WaterGBuffer", ResizePriority::GBuffer);
+    // System groups register their own systems
+    AtmosphereSystemGroup::registerResize(*resizeCoordinator_, *systems_);
+    WaterSystemGroup::registerResize(*resizeCoordinator_, *systems_);
+    VegetationSystemGroup::registerResize(*resizeCoordinator_, *systems_);
+    SnowSystemGroup::registerResize(*resizeCoordinator_, *systems_);
+    GeometrySystemGroup::registerResize(*resizeCoordinator_, *systems_);
 
-    // Viewport-only systems (setExtent)
+    // Core viewport-only systems (not in any system group)
     resizeCoordinator_->registerWithExtent(systems_->terrain(), "TerrainSystem");
-    resizeCoordinator_->registerWithExtent(systems_->sky(), "SkySystem");
-    resizeCoordinator_->registerWithExtent(systems_->water(), "WaterSystem");
-    resizeCoordinator_->registerWithExtent(systems_->grass(), "GrassSystem");
-    resizeCoordinator_->registerWithExtent(systems_->weather(), "WeatherSystem");
-    resizeCoordinator_->registerWithExtent(systems_->leaf(), "LeafSystem");
-    resizeCoordinator_->registerWithExtent(systems_->catmullClark(), "CatmullClarkSystem");
     resizeCoordinator_->registerWithExtent(systems_->skinnedMesh(), "SkinnedMeshRenderer");
 
     // Register callback for bloom texture rebinding (needed after bloom resize)
@@ -761,7 +741,7 @@ void Renderer::initResizeCoordinator() {
         return newExtent;
     });
 
-    SDL_Log("Resize coordinator configured with %zu systems", 17UL);
+    SDL_Log("Resize coordinator configured");
 }
 
 void Renderer::initControlSubsystems() {
@@ -771,26 +751,10 @@ void Renderer::initControlSubsystems() {
 }
 
 void Renderer::initTemporalSystems() {
-    // Register all systems that implement ITemporalSystem
-    // These systems have temporal state (history buffers, ping-pong buffers, frame counters)
-    // that needs to be reset when the window regains focus to prevent ghost frames
-
-    // SSR - has temporal filtering with 90% previous frame blend
-    systems_->registerTemporalSystem(&systems_->ssr());
-
-    // Froxel - has temporal reprojection for volumetric fog
-    if (systems_->hasFroxel()) {
-        systems_->registerTemporalSystem(&systems_->froxel());
-    }
-
-    // Water systems with temporal state
-    systems_->registerTemporalSystem(&systems_->foam());
-    systems_->registerTemporalSystem(&systems_->waterDisplacement());
-
-    // Vegetation systems with temporal state
-    if (systems_->impostorCull()) {
-        systems_->registerTemporalSystem(systems_->impostorCull());
-    }
+    // Each system group registers its own temporal systems
+    AtmosphereSystemGroup::registerTemporalSystems(*systems_);
+    WaterSystemGroup::registerTemporalSystems(*systems_);
+    VegetationSystemGroup::registerTemporalSystems(*systems_);
 
     SDL_Log("Registered %zu temporal systems for ghost frame prevention",
             systems_->getTemporalSystemCount());

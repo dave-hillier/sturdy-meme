@@ -12,6 +12,7 @@
 // Forward declarations
 class CatmullClarkSystem;
 class RendererSystems;
+class ResizeCoordinator;
 
 /**
  * GeometrySystemGroup - Groups procedural geometry systems
@@ -87,4 +88,7 @@ struct GeometrySystemGroup {
     static std::optional<Bundle> createAll(const CreateDeps& deps);
 
     static bool createAndRegister(const CreateDeps& deps, RendererSystems& systems);
+
+    /** Register geometry systems for resize. */
+    static void registerResize(ResizeCoordinator& coord, RendererSystems& systems);
 };

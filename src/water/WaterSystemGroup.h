@@ -21,6 +21,7 @@ class ShadowSystem;
 class TerrainSystem;
 class PostProcessSystem;
 class RendererSystems;
+class ResizeCoordinator;
 
 /**
  * WaterSystemGroup - Groups water-related rendering systems
@@ -118,6 +119,10 @@ struct WaterSystemGroup {
     static std::optional<Bundle> createAll(const CreateDeps& deps);
 
     static bool createAndRegister(const CreateDeps& deps, RendererSystems& systems);
+
+    /** Register water systems for resize and temporal history. */
+    static void registerResize(ResizeCoordinator& coord, RendererSystems& systems);
+    static void registerTemporalSystems(RendererSystems& systems);
 
     // ========================================================================
     // Configuration methods (call after systems are in RendererSystems)

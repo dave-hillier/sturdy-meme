@@ -9,6 +9,7 @@
 #include "WaterTileCull.h"
 #include "WaterGBuffer.h"
 #include "RendererSystems.h"
+#include "ResizeCoordinator.h"
 #include "ShadowSystem.h"
 #include "TerrainSystem.h"
 #include "PostProcessSystem.h"
@@ -168,6 +169,24 @@ std::optional<WaterSystemGroup::Bundle> WaterSystemGroup::createAll(
 
     SDL_Log("WaterSystemGroup: All systems created successfully");
     return bundle;
+}
+
+void WaterSystemGroup::registerResize(ResizeCoordinator& coord, RendererSystems& systems) {
+    coord.registerWithSimpleResize(systems.ssr(), "SSRSystem", ResizePriority::Culling);
+    if (systems.hasWaterTileCull()) {
+        coord.registerWithSimpleResize(systems.waterTileCull(), "WaterTileCull", ResizePriority::Culling);
+    }
+    auto waterGroup = systems.waterGroup();
+    if (waterGroup.hasGBuffer()) {
+        coord.registerWithSimpleResize(*waterGroup.gBuffer(), "WaterGBuffer", ResizePriority::GBuffer);
+    }
+    coord.registerWithExtent(systems.water(), "WaterSystem");
+}
+
+void WaterSystemGroup::registerTemporalSystems(RendererSystems& systems) {
+    systems.registerTemporalSystem(&systems.ssr());
+    systems.registerTemporalSystem(&systems.foam());
+    systems.registerTemporalSystem(&systems.waterDisplacement());
 }
 
 bool WaterSystemGroup::configureSubsystems(

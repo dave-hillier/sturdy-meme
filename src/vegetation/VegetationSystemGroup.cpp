@@ -11,6 +11,7 @@
 #include "TreeLODSystem.h"
 #include "ImpostorCullSystem.h"
 #include "RendererSystems.h"
+#include "ResizeCoordinator.h"
 #include "core/InitInfoBuilder.h"
 #include <SDL3/SDL.h>
 
@@ -160,4 +161,14 @@ std::optional<VegetationSystemGroup::Bundle> VegetationSystemGroup::createAll(
 
     SDL_Log("VegetationSystemGroup: All systems created successfully");
     return bundle;
+}
+
+void VegetationSystemGroup::registerResize(ResizeCoordinator& coord, RendererSystems& systems) {
+    coord.registerWithExtent(systems.grass(), "GrassSystem");
+}
+
+void VegetationSystemGroup::registerTemporalSystems(RendererSystems& systems) {
+    if (systems.impostorCull()) {
+        systems.registerTemporalSystem(systems.impostorCull());
+    }
 }
