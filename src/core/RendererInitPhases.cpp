@@ -14,7 +14,6 @@
 #include "GlobalBufferManager.h"
 #include "ShadowSystem.h"
 #include "TerrainSystem.h"
-#include "SkySystem.h"
 #include "SnowMaskSystem.h"
 #include "HiZSystem.h"
 #include "GPUSceneBuffer.h"
@@ -539,9 +538,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
             }
 
             // Sky descriptor sets
-            if (!systems_->sky().createDescriptorSets(
-                    systems_->globalBuffers().uniformBuffers.buffers,
-                    sizeof(UniformBufferObject), systems_->atmosphereLUT())) return false;
+            if (!AtmosphereSystemGroup::createSkyDescriptorSets(*systems_, sizeof(UniformBufferObject))) return false;
 
             // Hi-Z occlusion culling (optional)
             auto hiZSystem = HiZSystem::create(*ctxPtr, vulkanContext_->getDepthFormat());
@@ -644,19 +641,7 @@ std::vector<Loading::SystemInitTask> Renderer::buildInitTasks(const InitContext&
             }
 
             // UBO builder
-            UBOBuilder::Systems uboSystems{};
-            uboSystems.timeSystem = &systems_->time();
-            uboSystems.celestialCalculator = &systems_->celestial();
-            uboSystems.shadowSystem = &systems_->shadow();
-            uboSystems.windSystem = &systems_->wind();
-            uboSystems.atmosphereLUTSystem = &systems_->atmosphereLUT();
-            uboSystems.froxelSystem = &systems_->froxel();
-            uboSystems.sceneManager = &systems_->scene();
-            uboSystems.snowMaskSystem = &systems_->snowMask();
-            uboSystems.volumetricSnowSystem = &systems_->volumetricSnow();
-            uboSystems.cloudShadowSystem = &systems_->cloudShadow();
-            uboSystems.environmentSettings = &systems_->environmentSettings();
-            systems_->uboBuilder().setSystems(uboSystems);
+            UBOBuilder::wire(*systems_);
 
             if (progressCallback_) progressCallback_(0.95f, "Systems ready");
             return true;

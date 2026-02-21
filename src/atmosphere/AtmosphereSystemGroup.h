@@ -111,6 +111,9 @@ struct AtmosphereSystemGroup {
     static void registerResize(ResizeCoordinator& coord, RendererSystems& systems);
     static void registerTemporalSystems(RendererSystems& systems);
 
+    /** Create sky descriptor sets (depends on atmosphere LUTs and uniform buffers). */
+    static bool createSkyDescriptorSets(RendererSystems& systems, size_t uboSize);
+
     /**
      * Wire atmosphere systems to dependent systems.
      * Call after createAll() and after systems are stored in RendererSystems.

@@ -1,4 +1,5 @@
 #include "UBOBuilder.h"
+#include "RendererSystems.h"
 
 #include "Camera.h"
 #include "TimeSystem.h"
@@ -23,6 +24,22 @@ UBOBuilder::UBOBuilder(const Systems& systems)
 
 void UBOBuilder::setSystems(const Systems& systems) {
     systems_ = systems;
+}
+
+void UBOBuilder::wire(RendererSystems& systems) {
+    Systems s{};
+    s.timeSystem = &systems.time();
+    s.celestialCalculator = &systems.celestial();
+    s.shadowSystem = &systems.shadow();
+    s.windSystem = &systems.wind();
+    s.atmosphereLUTSystem = &systems.atmosphereLUT();
+    s.froxelSystem = &systems.froxel();
+    s.sceneManager = &systems.scene();
+    s.snowMaskSystem = &systems.snowMask();
+    s.volumetricSnowSystem = &systems.volumetricSnow();
+    s.cloudShadowSystem = &systems.cloudShadow();
+    s.environmentSettings = &systems.environmentSettings();
+    systems.uboBuilder().setSystems(s);
 }
 
 UBOBuilder::LightingParams UBOBuilder::calculateLightingParams(float timeOfDay) const {

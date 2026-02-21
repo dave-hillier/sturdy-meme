@@ -5,6 +5,7 @@
 
 // Forward declarations
 class Camera;
+class RendererSystems;
 class TimeSystem;
 class CelestialCalculator;
 class ShadowSystem;
@@ -80,6 +81,10 @@ public:
 
     // Set systems references (alternative to constructor)
     void setSystems(const Systems& systems);
+
+    // Wire UBO builder to all relevant systems from RendererSystems.
+    // Centralizes knowledge of which systems feed into UBO building.
+    static void wire(RendererSystems& systems);
 
     // Calculate lighting parameters from celestial positions
     // Pure calculation - no state mutation

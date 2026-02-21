@@ -8,6 +8,7 @@
 #include "PostProcessSystem.h"
 #include "RendererSystems.h"
 #include "ResizeCoordinator.h"
+#include "GlobalBufferManager.h"
 #include "core/vulkan/CommandBufferUtils.h"
 #include <glm/glm.hpp>
 #include <SDL3/SDL.h>
@@ -110,6 +111,12 @@ void AtmosphereSystemGroup::registerTemporalSystems(RendererSystems& systems) {
     if (systems.hasFroxel()) {
         systems.registerTemporalSystem(&systems.froxel());
     }
+}
+
+bool AtmosphereSystemGroup::createSkyDescriptorSets(RendererSystems& systems, size_t uboSize) {
+    return systems.sky().createDescriptorSets(
+        systems.globalBuffers().uniformBuffers.buffers,
+        uboSize, systems.atmosphereLUT());
 }
 
 void AtmosphereSystemGroup::wireToPostProcess(
