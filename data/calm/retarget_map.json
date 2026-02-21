@@ -1,0 +1,20 @@
+{
+  "training_to_engine_joint_map": {
+    "pelvis": "Hips",
+    "torso": "Spine",
+    "head": "Head",
+    "right_upper_arm": "RightArm",
+    "right_lower_arm": "RightForeArm",
+    "right_hand": "RightHand",
+    "left_upper_arm": "LeftArm",
+    "left_lower_arm": "LeftForeArm",
+    "left_hand": "LeftHand",
+    "right_thigh": "RightUpLeg",
+    "right_shin": "RightLeg",
+    "right_foot": "RightFoot",
+    "left_thigh": "LeftUpLeg",
+    "left_shin": "LeftLeg",
+    "left_foot": "LeftFoot"
+  },
+  "scale_factor": 1.0
+}

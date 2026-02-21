@@ -155,9 +155,13 @@ public:
     // Debug
     int getActiveBodyCount() const;
 
-#ifdef JPH_DEBUG_RENDERER
-    // Access to physics system for debug rendering (non-const because DrawBodies is non-const)
+    // Access to the underlying Jolt physics system.
+    // Used by ragdoll instances and debug rendering.
     JPH::PhysicsSystem* getPhysicsSystem() { return physicsSystem_.get(); }
+
+#ifdef JPH_DEBUG_RENDERER
+    // Legacy alias for debug rendering
+    JPH::PhysicsSystem* getPhysicsSystemForDebug() { return physicsSystem_.get(); }
 #endif
 
 private:

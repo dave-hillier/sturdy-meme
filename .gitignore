@@ -1,6 +1,10 @@
 # Build directories
 build/
 
+# Python
+__pycache__/
+*.pyc
+
 # IDE
 .vscode/
 .idea/

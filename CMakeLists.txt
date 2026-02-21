@@ -188,6 +188,8 @@ set(SOURCES
     src/physics/ClothSimulation.cpp
     src/physics/PlayerCape.cpp
     src/physics/PhysicsDebugRenderer.cpp
+    src/physics/RagdollBuilder.cpp
+    src/physics/RagdollInstance.cpp
     # Terrain
     src/terrain/TerrainSystem.cpp
     src/terrain/TerrainDescriptorSets.cpp
@@ -287,6 +289,25 @@ set(SOURCES
     src/debug/CpuProfiler.cpp
     src/debug/DebugLineSystem.cpp
     src/debug/RoadRiverVisualization.cpp
+    # Machine Learning
+    src/ml/MLPNetwork.cpp
+    src/ml/ModelLoader.cpp
+    src/ml/CharacterConfig.cpp
+    src/ml/ObservationExtractor.cpp
+    src/ml/ActionApplier.cpp
+    src/ml/LatentSpace.cpp
+    src/ml/TaskController.cpp
+    src/ml/BehaviorFSM.cpp
+    src/ml/AnimationIntegration.cpp
+    src/ml/GPUInference.cpp
+    src/ml/calm/LowLevelController.cpp
+    src/ml/calm/Controller.cpp
+    src/ml/calm/ModelLoader.cpp
+    # Training
+    src/training/CharacterEnv.cpp
+    src/training/MotionLibrary.cpp
+    src/training/RewardComputer.cpp
+    src/training/VecEnv.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -307,6 +328,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ik
     ${CMAKE_CURRENT_SOURCE_DIR}/src/lighting
     ${CMAKE_CURRENT_SOURCE_DIR}/src/loaders
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ml
     ${CMAKE_CURRENT_SOURCE_DIR}/src/physics
     ${CMAKE_CURRENT_SOURCE_DIR}/src/postprocess
     ${CMAKE_CURRENT_SOURCE_DIR}/src/scene
@@ -314,6 +336,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/subdivision
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain
     ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/training
     ${CMAKE_CURRENT_SOURCE_DIR}/src/vegetation
     ${CMAKE_CURRENT_SOURCE_DIR}/src/water
     ${CMAKE_CURRENT_SOURCE_DIR}/generated
@@ -778,6 +801,7 @@ set(SHADER_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample_compute.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_spd.comp.spv
     ${CMAKE_CURRENT_SOURCE_DIR}/shaders/godrays_compute.comp.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/shaders/calm_inference.comp.spv
 )
 
 set(TERRAIN_SHADER_FILES
@@ -917,6 +941,7 @@ if(SHADER_COMPILE_CMD)
         volumetric_snow.comp
         cloudmap_lut.comp
         cloud_shadow.comp
+        calm_inference.comp
     )
 
     foreach(SHADER ${SPECIAL_COMPUTE_SHADERS})
@@ -1204,6 +1229,7 @@ if(SHADER_COMPILE_CMD)
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_upsample_compute.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/bloom_spd.comp.spv
         ${CMAKE_CURRENT_SOURCE_DIR}/shaders/godrays_compute.comp.spv
+        ${CMAKE_CURRENT_SOURCE_DIR}/shaders/calm_inference.comp.spv
     )
 
     # Source shaders used for UBO reflection (curated subset that defines complete UBO structures)
@@ -1297,6 +1323,11 @@ if(BUILD_TESTS)
         tests/test_flamegraph.cpp
         tests/test_player_state.cpp
         tests/test_motion_matching.cpp
+        tests/test_mlp.cpp
+        tests/test_calm_observation.cpp
+        tests/test_calm_controller.cpp
+        tests/test_calm_hlc_fsm.cpp
+        tests/test_calm_model_loader.cpp
         # Source files needed by tests
         src/atmosphere/CelestialCalculator.cpp
         src/animation/Animation.cpp
@@ -1313,16 +1344,34 @@ if(BUILD_TESTS)
         src/scene/Camera.cpp
         src/animation/AnimationBlend.cpp
         src/animation/MotionMatchingKDTree.cpp
+        src/ml/MLPNetwork.cpp
+        src/ml/ModelLoader.cpp
+        src/ml/CharacterConfig.cpp
+        src/ml/ObservationExtractor.cpp
+        src/ml/ActionApplier.cpp
+        src/ml/LatentSpace.cpp
+        src/ml/TaskController.cpp
+        src/ml/BehaviorFSM.cpp
+        src/ml/AnimationIntegration.cpp
+        src/ml/calm/LowLevelController.cpp
+        src/ml/calm/Controller.cpp
+        src/ml/calm/ModelLoader.cpp
+        src/physics/JoltLayerConfig.cpp
+        src/physics/RagdollBuilder.cpp
+        src/physics/RagdollInstance.cpp
     )
 
     target_include_directories(vulkan_game_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/src/loaders  # For GLTFLoader.h used by animation
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/animation # For AnimationBlend.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/core     # For Mesh.h used by loaders
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/physics  # For CharacterController.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain  # For TileGridLogic.h, ErosionDataLoader.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/terrain/virtual_texture  # For VirtualTextureTypes.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/water    # For WaterPlacementData.h
         ${CMAKE_CURRENT_SOURCE_DIR}/src/debug    # For Flamegraph.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/ml       # For MLP inference
     )
 
     target_link_libraries(vulkan_game_tests PRIVATE
@@ -1333,6 +1382,7 @@ if(BUILD_TESTS)
         nlohmann_json::nlohmann_json             # For GeoJSON parsing in terrain loaders
         SDL3::SDL3                               # For SDL_Log in terrain loaders
         lodepng                                  # For PNG loading in VirtualTextureTileLoader
+        Jolt::Jolt                               # For physics in RagdollBuilder/RagdollInstance
     )
 
     target_compile_features(vulkan_game_tests PRIVATE cxx_std_17)
