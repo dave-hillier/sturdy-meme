@@ -13,6 +13,7 @@
 
 #include "TreeSystem.h"
 #include "TreeLODSystem.h"
+#include "ecs/World.h"
 #include "TreeLeafCulling.h"
 #include "TreeBranchCulling.h"
 #include "DescriptorManager.h"
@@ -184,6 +185,10 @@ public:
     void setTwoPhaseLeafCulling(bool enabled);
     bool isTwoPhaseLeafCullingEnabled() const;
 
+    // ECS integration
+    void setECSWorld(ecs::World* world) { ecsWorld_ = world; }
+    ecs::World* getECSWorld() const { return ecsWorld_; }
+
     vk::Device getDevice() const { return device_; }
 
 
@@ -192,6 +197,9 @@ private:
     bool createPipelines(const InitInfo& info);
     bool createDescriptorSetLayout();
     bool allocateDescriptorSets(uint32_t maxFramesInFlight);
+
+    // ECS world reference (not owned)
+    ecs::World* ecsWorld_ = nullptr;
 
     const vk::raii::Device* raiiDevice_ = nullptr;
     vk::Device device_;

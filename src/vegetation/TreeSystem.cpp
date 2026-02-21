@@ -94,8 +94,8 @@ ecs::Entity TreeSystem::createTreeEntity(uint32_t treeIdx, const TreeInstanceDat
         opts.leaves.tint,
         opts.leaves.autumnHueShift
     });
-    world_->add<ecs::BarkType>(e, ecs::BarkType{0});
-    world_->add<ecs::LeafType>(e, ecs::LeafType{0});
+    world_->add<ecs::BarkType>(e, ecs::BarkType{0, opts.bark.type});
+    world_->add<ecs::LeafType>(e, ecs::LeafType{0, opts.leaves.type});
     world_->add<ecs::MeshRef>(e, &branchMeshes_[instance.meshIndex]);
     world_->add<ecs::CastsShadow>(e);
 
@@ -519,9 +519,29 @@ void TreeSystem::createSceneObjects() {
         // Build transform using quaternion rotation
         glm::mat4 transform = instance.getTransformMatrix();
 
-        // Get textures based on tree options (string-based lookup)
-        Texture* barkTex = getBarkTexture(opts.bark.type);
-        Texture* leafTex = getLeafTexture(opts.leaves.type);
+        // Read bark/leaf type from ECS when available, fall back to TreeOptions
+        std::string barkTypeName = opts.bark.type;
+        std::string leafTypeName = opts.leaves.type;
+        glm::vec3 leafTint = opts.leaves.tint;
+        float autumnHueShift = opts.leaves.autumnHueShift;
+
+        if (world_ && treeIdx < treeEntities_.size() && treeEntities_[treeIdx] != ecs::NullEntity) {
+            ecs::Entity e = treeEntities_[treeIdx];
+            if (auto* bark = world_->tryGet<ecs::BarkType>(e)) {
+                barkTypeName = bark->typeName;
+            }
+            if (auto* leaf = world_->tryGet<ecs::LeafType>(e)) {
+                leafTypeName = leaf->typeName;
+            }
+            if (auto* treeData = world_->tryGet<ecs::TreeData>(e)) {
+                leafTint = treeData->leafTint;
+                autumnHueShift = treeData->autumnHueShift;
+            }
+        }
+
+        // Get textures based on type name (string-based lookup)
+        Texture* barkTex = getBarkTexture(barkTypeName);
+        Texture* leafTex = getLeafTexture(leafTypeName);
 
         // Branch renderable
         Mesh* branchMesh = &branchMeshes_[instance.meshIndex];
@@ -532,7 +552,7 @@ void TreeSystem::createSceneObjects() {
                 .withTransform(transform)
                 .withRoughness(0.7f)
                 .withMetallic(0.0f)
-                .withBarkType(opts.bark.type)
+                .withBarkType(barkTypeName)
                 .withTreeInstanceIndex(static_cast<int>(treeIdx))
                 .build();
 
@@ -550,9 +570,9 @@ void TreeSystem::createSceneObjects() {
                 .withRoughness(0.8f)
                 .withMetallic(0.0f)
                 .withAlphaTest(opts.leaves.alphaTest)
-                .withLeafType(opts.leaves.type)
-                .withLeafTint(opts.leaves.tint)
-                .withAutumnHueShift(opts.leaves.autumnHueShift)
+                .withLeafType(leafTypeName)
+                .withLeafTint(leafTint)
+                .withAutumnHueShift(autumnHueShift)
                 .withTreeInstanceIndex(static_cast<int>(treeIdx))
                 .build();
 

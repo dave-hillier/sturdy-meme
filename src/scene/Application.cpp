@@ -15,6 +15,7 @@
 #include "TerrainTileCache.h"
 #include "ScatterSystem.h"
 #include "TreeSystem.h"
+#include "TreeRenderer.h"
 #include "TreeCollision.h"
 #include "DeferredTerrainObjects.h"
 #include "SceneManager.h"
@@ -1306,9 +1307,12 @@ void Application::initECS() {
     // Connect ECS world to renderer systems for direct entity queries
     renderer_->getSystems().setECSWorld(&ecsWorld_);
 
-    // Wire ECS world to tree system for entity creation
+    // Wire ECS world to tree systems for entity creation and rendering
     if (auto* treeSystem = renderer_->getSystems().tree()) {
         treeSystem->setECSWorld(&ecsWorld_);
+    }
+    if (auto* treeRenderer = renderer_->getSystems().treeRenderer()) {
+        treeRenderer->setECSWorld(&ecsWorld_);
     }
 
     // Link physics bodies to ECS entities

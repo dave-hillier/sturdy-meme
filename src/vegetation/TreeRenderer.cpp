@@ -7,9 +7,11 @@
 #include "QueueSubmitDiagnostics.h"
 #include "core/vulkan/PipelineLayoutBuilder.h"
 #include "core/vulkan/DescriptorWriter.h"
+#include "ecs/Components.h"
 #include <SDL3/SDL_log.h>
 #include <vulkan/vulkan.hpp>
 #include <algorithm>
+#include <cassert>
 
 std::unique_ptr<TreeRenderer> TreeRenderer::create(const InitInfo& info) {
     auto renderer = std::make_unique<TreeRenderer>(ConstructToken{});
@@ -659,6 +661,17 @@ void TreeRenderer::render(vk::CommandBuffer cmd, uint32_t frameIndex, float time
         if (lodSystem && !lodSystem->shouldRenderFullGeometry(lodIndex)) {
             continue;
         }
+
+#ifndef NDEBUG
+        // Verify ECS data matches Renderable (dual-read parity check)
+        if (ecsWorld_ && renderable.treeInstanceIndex >= 0) {
+            ecs::Entity e = treeSystem.getTreeEntity(static_cast<uint32_t>(renderable.treeInstanceIndex));
+            if (e != ecs::NullEntity) {
+                auto* bark = ecsWorld_->tryGet<ecs::BarkType>(e);
+                assert(!bark || bark->typeName == renderable.barkType);
+            }
+        }
+#endif
 
         if (renderable.barkType != lastBarkType) {
             vk::DescriptorSet descriptorSet = getBranchDescriptorSet(frameIndex, renderable.barkType);

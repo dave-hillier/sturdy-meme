@@ -294,11 +294,13 @@ struct TreeData {
 };
 
 struct BarkType {
-    uint32_t typeIndex = 0;  // Index into bark texture array
+    uint32_t typeIndex = 0;   // Index into bark texture array
+    std::string typeName;     // String key for texture lookup (e.g. "oak", "birch")
 };
 
 struct LeafType {
-    uint32_t typeIndex = 0;  // Index into leaf texture array
+    uint32_t typeIndex = 0;   // Index into leaf texture array
+    std::string typeName;     // String key for texture lookup (e.g. "oak", "pine")
 };
 
 // =============================================================================
